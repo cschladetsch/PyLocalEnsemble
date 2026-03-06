@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, urllib.request, glob, webbrowser
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
@@ -27,27 +27,66 @@ FORGE_DIR    = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
 FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat")
 MODELFILE    = os.path.join(ALICE_DIR, "alice.modelfile")
 OLLAMA_EXE   = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
-OLLAMA_URL   = "http://localhost:11434"
-FORGE_URL    = "http://localhost:7860"
 ALICE_URL    = "http://localhost:8000"
-ALICE_MODEL  = "alice-nemo"
-PROMPT_MODEL = "mistral-nemo"
+CONFIG_FILE  = os.path.join(ALICE_DIR, "alice.json")
 
-ALICE_APPEARANCE = (
-    "woman, Alice, very long blonde hair, blue eyes, 5'8\", DD breasts, "
-    "beautiful face, elegant, sultry"
-)
+# ── Config ───────────────────────────────────────────────────────────────────
+_DEFAULT_CONFIG = {
+    "alice_model":  "alice-nemo",
+    "prompt_model": "mistral-nemo",
+    "ollama_url":   "http://localhost:11434",
+    "forge_url":    "http://localhost:7860",
+    "appearance":   "woman, Alice, very long blonde hair, blue eyes, 5'8\", DD breasts, beautiful face, elegant, sultry",
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "image": {
+        "steps":        25,
+        "width":        512,
+        "height":       768,
+        "cfg_scale":    7,
+        "sampler_name": "DPM++ 2M Karras",
+        "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
+    },
+    "modelfile": (
+        "FROM mistral-nemo\n\nSYSTEM \"\"\"\n"
+        "You are Alice. You are enigmatic, intelligent, very flirtatious and sexy.\n"
+        "You are 5'8\" tall. You have very long blonde hair and blue eyes. You have DD breasts.\n"
+        "You speak in measured, literary prose. You never break character.\n\n"
+        "I am Christian. I am 33 years old. I am 6'2\", blonde with blue eyes.\n"
+        "I am a game developer. I have a great physique.\n"
+        "\"\"\"\n"
+    )
+}
 
-MODELFILE_CONTENT = (
-    "FROM mistral-nemo\n\n"
-    "SYSTEM \"\"\"\n"
-    "You are Alice. You are enigmatic, intelligent, very flirtatious and sexy.\n"
-    "You are 5'8\" tall. You have very long blonde hair and blue eyes. You have DD breasts.\n"
-    "You speak in measured, literary prose. You never break character.\n\n"
-    "I am Christian. I am 33 years old. I am 6'2\", blonde with blue eyes.\n"
-    "I am a game developer. I have a great physique.\n"
-    "\"\"\"\n"
-)
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            # deep merge image block
+            merged = {**_DEFAULT_CONFIG, **data}
+            merged["image"] = {**_DEFAULT_CONFIG["image"], **data.get("image", {})}
+            print(f"        config: loaded {CONFIG_FILE}")
+            return merged
+        except Exception as e:
+            print(f"        WARNING: could not load {CONFIG_FILE}: {e} -- using defaults")
+    else:
+        print(f"        config: {CONFIG_FILE} not found, using defaults")
+        # write defaults so user can edit
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(_DEFAULT_CONFIG, f, indent=4)
+        print(f"        config: wrote default config to {CONFIG_FILE}")
+    return _DEFAULT_CONFIG.copy()
+
+CFG = load_config()
+
+ALICE_MODEL       = CFG["alice_model"]
+PROMPT_MODEL      = CFG["prompt_model"]
+OLLAMA_URL        = CFG["ollama_url"]
+FORGE_URL         = CFG["forge_url"]
+ALICE_APPEARANCE  = CFG["appearance"]
+BASE_NEGATIVE     = CFG["negative_prompt"]
+MODELFILE_CONTENT = CFG["modelfile"]
+IMG_CFG           = CFG["image"]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def step(msg):  print(f"\n[Alice] {msg}")
@@ -222,19 +261,22 @@ def extract_sd_prompt(text: str) -> str:
     return r.json()["message"]["content"]
 
 
-def generate_image(prompt: str):
+BASE_NEGATIVE = CFG["negative_prompt"]
+
+def generate_image(prompt: str, extra_negative: str = ""):
     if not http_ok(f"{FORGE_URL}/sdapi/v1/sd-models"):
         print("Forge down, restarting...")
         start_forge()
+    negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
     try:
         r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
-            "prompt": ALICE_APPEARANCE + ", " + prompt + ", photorealistic, highly detailed, 8k, masterpiece",
-            "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
-            "steps": 25,
-            "width": 512,
-            "height": 768,
-            "cfg_scale": 7,
-            "sampler_name": "DPM++ 2M Karras",
+            "prompt":          ALICE_APPEARANCE + ", " + prompt + ", " + IMG_CFG["suffix"],
+            "negative_prompt": negative,
+            "steps":           IMG_CFG["steps"],
+            "width":           IMG_CFG["width"],
+            "height":          IMG_CFG["height"],
+            "cfg_scale":       IMG_CFG["cfg_scale"],
+            "sampler_name":    IMG_CFG["sampler_name"],
         }, timeout=300)
         imgs = r.json().get("images", [])
         return imgs[0] if imgs else None
@@ -257,8 +299,20 @@ async def image_from_history(body: ImageRequest):
         f"{m['role'].capitalize()}: {m['content']}" for m in history[-12:]
     )
     base_prompt = extract_sd_prompt(messages)
-    prompt = (body.extra + ", " + base_prompt) if body.extra else base_prompt
-    image = generate_image(prompt)
+
+    # Split extra into positive tags and "no X" -> negative tags
+    positive_parts = []
+    negative_parts = []
+    for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
+        if token.lower().startswith("no "):
+            negative_parts.append(token[3:].strip())
+        else:
+            positive_parts.append(token)
+
+    positive_extra = ", ".join(positive_parts)
+    extra_negative = ", ".join(negative_parts)
+    prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+    image = generate_image(prompt, extra_negative=extra_negative)
     return JSONResponse({"sd_prompt": ALICE_APPEARANCE + ", " + prompt, "image": image})
 
 
