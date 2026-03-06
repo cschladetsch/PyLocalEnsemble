@@ -12,7 +12,7 @@ Everything runs locally -- no cloud, no API keys, no subscriptions.
 python alice.py
 ```
 
-That's it. On first run it installs everything missing, then opens the browser at `http://localhost:8000`.
+On first run it installs everything missing, then opens the browser at `http://localhost:8000`.
 
 ---
 
@@ -27,7 +27,7 @@ Download from https://python.org
 > **Important:** During installation, tick **"Add Python to PATH"**. Without this, `python` won't be found from the terminal.
 
 Verify:
-```powershell
+```
 python --version
 ```
 
@@ -36,7 +36,7 @@ python --version
 Download from https://git-scm.com
 
 Verify:
-```powershell
+```
 git --version
 ```
 
@@ -44,20 +44,18 @@ git --version
 
 Stable Diffusion image generation is extremely slow on CPU. An NVIDIA GPU with 6GB+ VRAM is recommended. The RTX 2070 (8GB) works well.
 
-If you have an NVIDIA GPU, ensure you have up-to-date drivers from https://nvidia.com/drivers
+Ensure you have up-to-date drivers from https://nvidia.com/drivers
 
 ---
 
 ## First Run Walkthrough
 
-Run from a terminal (PowerShell or Command Prompt) in the folder containing `alice.py`:
-
-```powershell
-cd C:\path\to\alice
+```
+cd F:\alice
 python alice.py
 ```
 
-Alice will work through the following steps automatically:
+Alice works through the following steps automatically:
 
 | Step | What happens |
 |------|-------------|
@@ -65,8 +63,8 @@ Alice will work through the following steps automatically:
 | Ollama | Downloads and installs Ollama if not found |
 | Ollama service | Starts the Ollama background service |
 | mistral-nemo | Pulls the model (~7GB) if not present |
-| alice-nemo | Creates the Alice persona modelfile if not present |
-| Forge | Clones Stable Diffusion WebUI Forge (~46MB repo) if not present |
+| alice-nemo | Creates the Alice persona from `alice.json` if not present |
+| Forge | Clones Stable Diffusion WebUI Forge if not present |
 | webui.bat | Patches Forge with `--api --cuda-malloc` flags |
 | Checkpoint | Pauses if no `.safetensors` model file is found (see below) |
 | Forge service | Starts Forge (takes ~30-90 seconds on first load) |
@@ -83,30 +81,68 @@ Stable Diffusion needs a model file to generate images. Alice will pause and tel
 1. Download `dreamshaper_8.safetensors` from Civitai
 2. Place it in:
    ```
-   alice\stable-diffusion-webui-forge\models\Stable-diffusion\
+   stable-diffusion-webui-forge\models\Stable-diffusion\
    ```
 3. Re-run `python alice.py`
 
-Any other `.safetensors` checkpoint will also work.
+Any `.safetensors` checkpoint will work.
 
 ---
 
 ## Directory Structure
 
-After first run, your folder will look like this:
-
 ```
 alice\
-  alice.py                          <- the app (only file you need)
-  alice.modelfile                   <- Alice persona (auto-generated)
-  stable-diffusion-webui-forge\     <- Stable Diffusion (auto-cloned)
+  alice.py                          <- the entire app
+  alice.json                        <- your config (not committed)
+  stable-diffusion-webui-forge\     <- auto-cloned, not committed
     models\
       Stable-diffusion\
         dreamshaper_8.safetensors   <- you provide this
     webui.bat
     venv\
-    ...
 ```
+
+---
+
+## Configuration
+
+All user-facing settings live in `alice.json`. This file is not committed to git (it contains your persona text). On first run it is created automatically with defaults.
+
+```json
+{
+    "alice_model":  "alice-nemo",
+    "prompt_model": "mistral-nemo",
+    "ollama_url":   "http://localhost:11434",
+    "forge_url":    "http://localhost:7860",
+
+    "appearance": "woman, Alice, very long blonde hair, blue eyes, ...",
+
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, ...",
+
+    "image": {
+        "steps": 25,
+        "width": 512,
+        "height": 768,
+        "cfg_scale": 7,
+        "sampler_name": "DPM++ 2M Karras",
+        "suffix": "photorealistic, highly detailed, 8k, masterpiece"
+    },
+
+    "modelfile": "FROM mistral-nemo\n\nSYSTEM \"\"\"...\"\"\"\n"
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `alice_model` | Ollama model used for chat (the persona) |
+| `prompt_model` | Ollama model used to extract SD prompts from conversation |
+| `appearance` | Prepended to every image prompt for visual consistency |
+| `negative_prompt` | Always passed to Stable Diffusion as negative |
+| `image` | SD generation parameters (steps, size, sampler, etc.) |
+| `modelfile` | Full Ollama modelfile content for the alice-nemo persona |
+
+Edit `alice.json` to change Alice's personality, appearance, image quality settings, or swap models. Restart `alice.py` to apply changes.
 
 ---
 
@@ -114,21 +150,21 @@ alice\
 
 ### Chat
 
-Type a message and press **Enter** or click **Send**. Alice responds in character.
+Type a message and press **Enter** or **Send**. Alice responds in character.
 
 ### Image generation
 
-Type `/image` to generate an image based on the current conversation.
+Type `/image` to generate an image based on the current conversation history.
 
-You can add extra instructions after `/image` to override or extend the scene:
+Add instructions after `/image` to control the scene. Tokens starting with `no ` are routed to the **negative prompt**:
 
 ```
 /image
 /image holding a rose, candlelight, close up
-/image standing in a doorway, backlit, dramatic lighting
+/image standing in a doorway, backlit, no bra, no clothing
 ```
 
-The extra text is prepended to the generated prompt so Stable Diffusion weights it highest.
+The extra positive text is prepended to the SD prompt so Stable Diffusion weights it highest. `no X` tokens are added to the negative prompt alongside the base negatives from `alice.json`.
 
 ### Clear history
 
@@ -144,81 +180,130 @@ You
  ▼
 alice.py (FastAPI on port 8000)
  │
- ├─ /chat  ──► Ollama (alice-nemo / mistral-nemo)
+ ├─ /chat  ──► Ollama (alice-nemo)
  │              └─ maintains conversation history
  │
  └─ /image ──► Ollama (mistral-nemo)
-                └─ extracts SD prompt from history
+                └─ extracts SD prompt tags from conversation history
                     └─ Forge API (port 7860)
-                        └─ dreamshaper_8 on RTX 2070
+                        └─ dreamshaper_8 on GPU
 ```
 
-### Alice persona (alice-nemo)
-
-Alice is `mistral-nemo` with a custom system prompt stored in `alice.modelfile`. Edit this file and re-run `ollama create alice-nemo -f alice.modelfile` to change her personality, appearance, or backstory.
-
-### Image appearance
-
-Alice's physical appearance is hardcoded in `alice.py` as `ALICE_APPEARANCE` and prepended to every Stable Diffusion prompt to maintain visual consistency across images. Edit this string to change her look.
+The `/image` command passes the last 12 messages to `mistral-nemo` with instructions to extract Stable Diffusion prompt tags. Those tags are combined with `appearance` from `alice.json` and any extra instructions you typed.
 
 ---
 
-## Troubleshooting
+## Customising the Persona
+
+Alice's personality is defined by an Ollama modelfile. The `"modelfile"` field in `alice.json` is used to create the `alice-nemo` model on first run.
+
+### Modelfile structure
+
+```
+FROM <base-model>
+
+SYSTEM """
+<your system prompt here>
+"""
+```
+
+The `FROM` line sets the base model. Alice uses `mistral-nemo` by default. The `SYSTEM` block is the instruction injected at the start of every conversation -- this is where you define personality, appearance, backstory, and the user's details.
+
+### Applying changes
+
+After editing the `"modelfile"` field in `alice.json`, recreate the model:
+
+```
+ollama create alice-nemo -f alice.modelfile
+```
+
+Or delete the model and let `alice.py` recreate it on next run:
+
+```
+ollama rm alice-nemo
+python alice.py
+```
+
+### Tips
+
+- Be specific about physical appearance -- the system prompt feeds both the chat responses and (indirectly) the image prompts extracted from conversation
+- Keep the persona consistent with the `"appearance"` field in `alice.json` -- if the modelfile says blonde but appearance says brunette, the images and text will contradict each other
+- The base model can be changed to any model available in Ollama -- run `ollama list` to see what you have. Larger models give better prose but are slower
+- Ollama modelfiles support `PARAMETER` directives for temperature, context length etc -- see https://ollama.com/docs/modelfile
+
+### Example: tame companion (alice.modelfile.example)
+
+A safe-for-work example is included in the repo as `alice.modelfile.example`:
+
+```
+FROM mistral-nemo
+
+SYSTEM """
+You are Alice. You are intelligent, witty, and warm.
+You speak in measured, literary prose and have a dry sense of humour.
+You are curious about ideas and enjoy thoughtful conversation.
+You never break character.
+
+The user's name is Christian. He is a software engineer and game developer.
+"""
+```
+
+To use it, copy its contents into the `"modelfile"` field in `alice.json`, then recreate the model.
+
+---
+
+
 
 ### `python` not found
-Reinstall Python and ensure **"Add Python to PATH"** is ticked.
+Reinstall Python and tick **"Add Python to PATH"**.
 
 ### Ollama not found after install
-Ollama installs to `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`. If it installed elsewhere, edit `OLLAMA_EXE` at the top of `alice.py`.
+Ollama installs to `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`. If it went elsewhere, update `OLLAMA_EXE` near the top of `alice.py`.
 
-### `launch.py not found` error from Forge
-Do **not** run `webui.bat` directly. Let `alice.py` start Forge -- it sets the correct working directory automatically. If you ran it manually from the wrong directory, just run `python alice.py` instead.
+### `launch.py not found` from Forge
+Do **not** run `webui.bat` directly from the command line. Let `alice.py` launch it -- it sets the correct working directory. Just run `python alice.py`.
 
-### Images not generating / Forge 404
-Forge must be running with the `--api` flag. `alice.py` patches `webui.bat` automatically on first clone. If you installed Forge separately, add this line to your `webui.bat`:
+### Forge 404 on `/image`
+Forge must run with `--api`. `alice.py` patches `webui.bat` automatically on first clone. If you installed Forge manually, add to `webui.bat`:
 ```bat
 set COMMANDLINE_ARGS=--api --cuda-malloc
 ```
 
 ### Forge times out on startup
-First load can take 2-3 minutes while it installs its own venv and downloads PyTorch. Subsequent starts are faster (~30 seconds). Alice will wait up to 5 minutes automatically.
+First load takes 2-3 minutes (installs venv, downloads PyTorch). Subsequent starts are ~30 seconds. Alice waits up to 5 minutes automatically.
 
-### `No image generated`
-Check the terminal running `alice.py` for a `Forge error:` line. Common causes:
-- Forge crashed -- `alice.py` will attempt to restart it automatically on the next `/image`
-- No checkpoint in `models\Stable-diffusion\` -- Forge loads but can't generate without a model
+### No image generated
+Check the terminal for a `Forge error:` line. Common causes:
+- Forge crashed -- alice.py auto-restarts it on the next `/image`
+- No checkpoint in `models\Stable-diffusion\`
 
 ### Slow image generation
-Expected on first generation as the model loads into VRAM. Subsequent generations on the same session are faster. Make sure Forge is using your GPU -- the terminal should show `Device: cuda:0 NVIDIA GeForce ...`.
+Normal on first generation while the model loads into VRAM. Check the Forge terminal shows `Device: cuda:0 NVIDIA GeForce ...` to confirm GPU is being used.
 
-### `alice-nemo model not found`
-The persona wasn't created. Run manually:
-```powershell
-ollama create alice-nemo -f alice\alice.modelfile
+### alice-nemo model not found
+The persona wasn't created. Ensure `alice.json` has a valid `modelfile` field, then run:
+```
+ollama create alice-nemo -f alice.modelfile
 ```
 
 ---
 
-## Configuration
+## .gitignore
 
-All configuration is at the top of `alice.py`:
+The following are excluded from the repo:
 
-```python
-ALICE_DIR    = os.path.dirname(os.path.abspath(__file__))   # where alice.py lives
-FORGE_DIR    = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
-OLLAMA_EXE   = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
-ALICE_MODEL  = "alice-nemo"       # the chat model (persona)
-PROMPT_MODEL = "mistral-nemo"     # the model used to extract SD prompts
-
-ALICE_APPEARANCE = (              # prepended to every image prompt
-    "woman, Alice, very long blonde hair, blue eyes, 5'8\", DD breasts, "
-    "beautiful face, elegant, sultry"
-)
 ```
+/stable-diffusion-webui-forge
+/tmp
+/alice.modelfile
+alice.json
+```
+
+`alice.json` contains your personal persona text and must not be committed to a public repo.
 
 ---
 
-## Requirements Summary
+## Requirements
 
 | Requirement | Minimum | Notes |
 |-------------|---------|-------|
@@ -230,9 +315,7 @@ ALICE_APPEARANCE = (              # prepended to every image prompt
 | Disk | 30GB free | 7GB models + 15GB Forge venv + checkpoints |
 | GPU | NVIDIA | AMD untested with Forge |
 
----
-
-## Ports Used
+## Ports
 
 | Port | Service |
 |------|---------|
