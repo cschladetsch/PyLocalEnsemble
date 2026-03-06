@@ -168,24 +168,23 @@ def ensure_models():
         ok(f"{ALICE_MODEL} present.")
 
 
-def patch_webui_bat():
+def find_python310() -> str:
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python310\python.exe"),
+        r"C:\Python310\python.exe",
+        r"C:\Program Files\Python310\python.exe",
+    ]
     try:
-        src = open(FORGE_BAT, encoding="utf-8").read()
-        def patch(m):
-            args = m.group(1)
-            for flag in ("--api", "--cuda-malloc"):
-                if flag not in args:
-                    args = args.strip() + " " + flag
-            return "set COMMANDLINE_ARGS=" + args
-        if "COMMANDLINE_ARGS" in src:
-            src = re.sub(r"set COMMANDLINE_ARGS=([^\r\n]*)", lambda m: patch(m), src)
-        else:
-            src += "\nset COMMANDLINE_ARGS=--api --cuda-malloc\n"
-        open(FORGE_BAT, "w", encoding="utf-8").write(src)
-        ok("webui.bat patched with --api --cuda-malloc.")
-    except Exception as e:
-        warn(f"Could not patch webui.bat: {e}")
-        warn("Add manually to webui.bat: set COMMANDLINE_ARGS=--api --cuda-malloc")
+        r = subprocess.run(["py", "-3.10", "-c", "import sys; print(sys.executable)"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            candidates.insert(0, r.stdout.strip())
+    except FileNotFoundError:
+        pass
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return ""
 
 
 def ensure_forge():
@@ -198,9 +197,24 @@ def ensure_forge():
         if result.returncode != 0:
             fail("Failed to clone Forge. Ensure git is installed and you have internet access.")
         ok("Forge cloned.")
-        patch_webui_bat()
     else:
         ok("Forge present.")
+
+    # If venv was built with wrong Python, nuke it so Forge rebuilds with 3.10
+    venv_python = os.path.join(FORGE_DIR, "venv", "Scripts", "python.exe")
+    if os.path.exists(venv_python):
+        try:
+            r = subprocess.run([venv_python, "--version"], capture_output=True, text=True)
+            version = r.stdout.strip() + r.stderr.strip()
+            if "3.10" not in version:
+                warn(f"Forge venv is {version.strip()}, needs 3.10 -- deleting venv for rebuild...")
+                import shutil
+                shutil.rmtree(os.path.join(FORGE_DIR, "venv"))
+                ok("Venv deleted. Forge will rebuild with Python 3.10 on next start.")
+            else:
+                ok(f"Forge venv: {version.strip()}")
+        except Exception as e:
+            warn(f"Could not check venv Python version: {e}")
 
     checkpoints = glob.glob(os.path.join(FORGE_DIR, "models", "Stable-diffusion", "*.safetensors"))
     if not checkpoints:
@@ -218,7 +232,17 @@ def start_forge():
     if http_ok(f"{FORGE_URL}/sdapi/v1/sd-models"):
         ok("Forge already running.")
         return
-    subprocess.Popen(FORGE_BAT, cwd=FORGE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    env = os.environ.copy()
+    env["COMMANDLINE_ARGS"] = "--api --cuda-malloc"
+    py310 = find_python310()
+    if py310:
+        env["PYTHON"] = py310
+        ok(f"Forge: using Python 3.10 at {py310}")
+    else:
+        warn("Python 3.10 not found -- Forge may fail with Python 3.13")
+        warn("Install Python 3.10 from https://python.org/downloads/release/python-31011/")
+    subprocess.Popen(FORGE_BAT, cwd=FORGE_DIR, env=env,
+                     creationflags=subprocess.CREATE_NEW_CONSOLE)
     if not wait_for(f"{FORGE_URL}/sdapi/v1/sd-models", "Forge", retries=60, delay=5):
         warn("Forge did not start in time - images won't generate.")
 
@@ -252,9 +276,17 @@ def extract_sd_prompt(text: str) -> str:
     r = req.post(f"{OLLAMA_URL}/api/chat", json={
         "model": PROMPT_MODEL,
         "messages": [{"role": "user", "content":
-            f"Use these messages [{text}] to generate an image. "
-            f"Convert to Stable Diffusion prompt tags only, "
-            f"comma-separated, explicit physical detail, no sentences."
+            f"Read this conversation and extract a Stable Diffusion image prompt.\n\n"
+            f"{text}\n\n"
+            f"Rules:\n"
+            f"- Output comma-separated tags only. No sentences. No explanation.\n"
+            f"- Focus on: pose, action, expression, clothing (or lack of), location/setting, lighting, mood\n"
+            f"- Extract specific details mentioned or strongly implied in the conversation\n"
+            f"- If clothing is discussed as removed or absent, include 'topless', 'nude' etc as appropriate\n"
+            f"- Include emotional tone: sultry, playful, intense, tender, etc\n"
+            f"- Include setting details: indoor, outdoor, bedroom, candlelight, etc\n"
+            f"- Do not include character names or dialogue\n"
+            f"- Output only the tags, nothing else"
         }],
         "stream": False,
     }, timeout=30)
@@ -278,7 +310,10 @@ def generate_image(prompt: str, extra_negative: str = ""):
             "cfg_scale":       IMG_CFG["cfg_scale"],
             "sampler_name":    IMG_CFG["sampler_name"],
         }, timeout=300)
-        imgs = r.json().get("images", [])
+        data = r.json()
+        if "images" not in data:
+            print(f"Forge response (no images key): {str(data)[:300]}")
+        imgs = data.get("images", [])
         return imgs[0] if imgs else None
     except Exception as e:
         print(f"Forge error: {e}")
@@ -315,6 +350,66 @@ async def image_from_history(body: ImageRequest):
     image = generate_image(prompt, extra_negative=extra_negative)
     return JSONResponse({"sd_prompt": ALICE_APPEARANCE + ", " + prompt, "image": image})
 
+
+
+
+class VideoRequest(BaseModel):
+    extra: str = ""
+
+
+@app.post("/video")
+async def video_from_history(body: VideoRequest):
+    if not history:
+        return JSONResponse({"error": "No conversation history yet."}, status_code=400)
+    messages = "\n".join(
+        f"{m['role'].capitalize()}: {m['content']}" for m in history[-12:]
+    )
+    base_prompt = extract_sd_prompt(messages)
+
+    positive_parts = []
+    negative_parts = []
+    for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
+        if token.lower().startswith("no "):
+            negative_parts.append(token[3:].strip())
+        else:
+            positive_parts.append(token)
+
+    positive_extra = ", ".join(positive_parts)
+    extra_negative = ", ".join(negative_parts)
+    prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+    full_prompt = ALICE_APPEARANCE + ", " + prompt + ", " + IMG_CFG["suffix"]
+    negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
+
+    vid_cfg = CFG.get("video", {})
+    try:
+        r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
+            "prompt":          full_prompt,
+            "negative_prompt": negative,
+            "steps":           vid_cfg.get("steps", 20),
+            "width":           vid_cfg.get("width", 512),
+            "height":          vid_cfg.get("height", 512),
+            "cfg_scale":       vid_cfg.get("cfg_scale", 7),
+            "sampler_name":    vid_cfg.get("sampler_name", "DPM++ 2M Karras"),
+            "script_name":     "AnimateDiff",
+            "script_args":     [
+                vid_cfg.get("motion_module", "mm_sd_v15_v2.ckpt"),
+                vid_cfg.get("frames", 16),
+                vid_cfg.get("fps", 8),
+                True,
+                vid_cfg.get("format", "GIF"),
+                False,
+            ],
+        }, timeout=600)
+        data = r.json()
+        if "video" in data:
+            return JSONResponse({"video": data["video"], "sd_prompt": full_prompt})
+        imgs = data.get("images", [])
+        if imgs:
+            return JSONResponse({"video": imgs[0], "sd_prompt": full_prompt, "fallback": True})
+        return JSONResponse({"error": "No output from Forge. Is AnimateDiff installed?"}, status_code=500)
+    except Exception as e:
+        print(f"Forge video error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.delete("/history")
 async def clear():
@@ -361,7 +456,7 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .ip{width:420px;flex-shrink:0;display:flex;flex-direction:column;background:var(--panel)}
 .ih{padding:.8rem 1.2rem;border-bottom:1px solid var(--border);font-size:.65rem;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
 .ic{flex:1;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:hidden}
-.ic img{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}
+.ic img,.ic video{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}
 .ph{color:var(--muted);text-align:center;font-style:italic;font-family:'Cormorant Garamond',serif;font-size:1rem}
 .pd{padding:.8rem 1.2rem;border-top:1px solid var(--border);font-size:.68rem;color:var(--muted);line-height:1.5;max-height:80px;overflow-y:auto;scrollbar-width:thin}
 .pd strong{color:var(--accent2)}
@@ -377,18 +472,62 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
       <div class="msg alice"><div class="sndr">Alice</div>Hello, Christian. I&#39;ve been waiting for you...</div>
     </div>
     <div class="ir">
-      <input type="text" id="inp" placeholder="Say something... or /image" onkeydown="if(event.key==='Enter')send()">
-      <button id="btn" onclick="send()">Send</button>
+      <input type="text" id="inp" placeholder="Say something... or /image or /video" onkeydown="if(event.key==='Enter')send()">
+      <button id="vbtn" onclick="doVideo()">Video</button><button id="ibtn" onclick="doImage()">Image</button><button id="btn" onclick="send()">Send</button>
     </div>
   </div>
   <div class="ip">
-    <div class="ih">Generated Scene</div>
+    <div class="ih" id="ih">Generated Scene</div>
     <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
     <div class="pd" id="pd"></div>
   </div>
 </div>
 <script>
 let mid = 0;
+function disableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=true;}); }
+function enableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=false;}); }
+
+function doImage(){ triggerMedia('/image'); }
+function doVideo(){ triggerMedia('/video'); }
+
+async function triggerMedia(endpoint) {
+  const inp = document.getElementById('inp');
+  const extra = inp.value.trim();
+  inp.value = '';
+  disableAll();
+  const label = endpoint === '/video' ? 'Generating video...' : 'Generating scene...';
+  const header = endpoint === '/video' ? 'Generated Video' : 'Generated Scene';
+  document.getElementById('ih').textContent = header;
+  addMsg('user', 'You', endpoint.slice(1) + (extra ? ' ' + extra : ''));
+  document.getElementById('ic').innerHTML = `<div class="ph gen">${label}</div>`;
+  document.getElementById('pd').innerHTML = '';
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({extra: extra})
+    });
+    const d = await res.json();
+    if (d.error) {
+      document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
+    } else if (endpoint === '/video' && !d.fallback && d.video) {
+      document.getElementById('ic').innerHTML = `<video autoplay loop muted src="data:video/mp4;base64,${d.video}"></video>`;
+      document.getElementById('pd').innerHTML = `<strong>Prompt:</strong> ${d.sd_prompt}`;
+    } else if (d.image || d.video) {
+      const b64 = d.image || d.video;
+      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${b64}">`;
+      if (d.fallback) document.getElementById('pd').innerHTML = `<strong>Note:</strong> AnimateDiff not installed - showing still image. <strong>Prompt:</strong> ${d.sd_prompt}`;
+      else document.getElementById('pd').innerHTML = `<strong>Prompt:</strong> ${d.sd_prompt}`;
+    } else {
+      document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
+    }
+  } catch(e) {
+    document.getElementById('ic').innerHTML = '<div class="ph">Error contacting backend.</div>';
+  }
+  enableAll();
+  inp.focus();
+}
+
 async function send() {
   const inp = document.getElementById('inp'), msg = inp.value.trim();
   if (!msg) return;
@@ -396,29 +535,17 @@ async function send() {
   const btn = document.getElementById('btn');
   btn.disabled = true;
 
-  if (msg.startsWith('/image')) {
-    const extra = msg.slice(6).trim();
-    addMsg('user', 'You', msg);
-    document.getElementById('ic').innerHTML = '<div class="ph gen">Generating scene from history...</div>';
-    document.getElementById('pd').innerHTML = '';
-    try {
-      const res = await fetch('/image', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({extra: extra})
-      });
-      const d = await res.json();
-      if (d.image) {
-        document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
-        document.getElementById('pd').innerHTML = `<strong>Prompt:</strong> ${d.sd_prompt}`;
-      } else {
-        document.getElementById('ic').innerHTML = '<div class="ph">No image generated.</div>';
-      }
-    } catch(e) {
-      document.getElementById('ic').innerHTML = '<div class="ph">Error generating image.</div>';
-    }
+  if (msg.startsWith('/video')) {
+    inp.value = msg.slice(6).trim();
     btn.disabled = false;
-    inp.focus();
+    triggerMedia('/video');
+    return;
+  }
+
+  if (msg.startsWith('/image')) {
+    inp.value = msg.slice(6).trim();
+    btn.disabled = false;
+    triggerMedia('/image');
     return;
   }
 
