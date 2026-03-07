@@ -320,14 +320,33 @@ async function toggleMic() {
       stream.getTracks().forEach(t => t.stop());
       btn.textContent = 'Mic';
       btn.classList.remove('recording');
-      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      const webmBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
       btn.disabled = true;
       btn.textContent = '...';
       try {
+        // Decode WebM via Web Audio API then re-encode as WAV for Whisper
+        const arrayBuf = await webmBlob.arrayBuffer();
+        const audioCtx = new AudioContext({ sampleRate: 16000 });
+        const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+        await audioCtx.close();
+        const pcm = audioBuf.getChannelData(0);
+        const wav = new ArrayBuffer(44 + pcm.length * 2);
+        const v = new DataView(wav);
+        const s = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+        s(0,'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); s(8,'WAVE'); s(12,'fmt ');
+        v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+        v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+        s(36,'data'); v.setUint32(40, pcm.length * 2, true);
+        let off = 44;
+        for (let i = 0; i < pcm.length; i++) {
+          const x = Math.max(-1, Math.min(1, pcm[i]));
+          v.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7FFF, true); off += 2;
+        }
+        const wavBlob = new Blob([wav], { type: 'audio/wav' });
         const res = await fetch('/stt', {
           method: 'POST',
-          headers: { 'Content-Type': blob.type },
-          body: blob
+          headers: { 'Content-Type': 'audio/wav' },
+          body: wavBlob
         });
         const d = await res.json();
         if (d.text) {
