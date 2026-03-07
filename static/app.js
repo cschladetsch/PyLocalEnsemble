@@ -305,6 +305,7 @@ function updMsg(id, t) {
 
 async function _sttTranscribe(webmBlob, btn, tid) {
   try {
+    console.log('STT blob:', webmBlob.size, 'bytes,', webmBlob.type);
     const arrayBuf = await webmBlob.arrayBuffer();
     const audioCtx = new AudioContext({ sampleRate: 16000 });
     let audioBuf;
@@ -317,6 +318,8 @@ async function _sttTranscribe(webmBlob, btn, tid) {
     }
     await audioCtx.close();
     const pcm = audioBuf.getChannelData(0);
+    const maxAmp = pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    console.log('Decoded:', audioBuf.duration.toFixed(2), 's,', audioBuf.sampleRate, 'Hz, maxAmp:', maxAmp.toFixed(4));
     const wav = new ArrayBuffer(44 + pcm.length * 2);
     const v = new DataView(wav);
     const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
