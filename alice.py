@@ -37,14 +37,12 @@ MODEL_NAME = "Mistral-Nemo-Instruct-2407-Q4_K_M.gguf"
 _DEFAULT_CONFIG = {
     "forge_url":    "http://localhost:7860",
     "model_path":   "",  # leave blank to auto-download
-    "appearance":   "woman, Alice, very long blonde hair, blue eyes, 5'8\", DD breasts, beautiful face, elegant, sultry",
+    "appearance":   "woman, Alice, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
     "system_prompt": (
-        "You are Alice. You are enigmatic, intelligent, very flirtatious and sexy.\n"
-        "You are 5'8\" tall. You have very long blonde hair and blue eyes. You have DD breasts.\n"
-        "You speak in measured, literary prose. You never break character.\n\n"
-        "I am Christian. I am 33 years old. I am 6'2\", blonde with blue eyes.\n"
-        "I am a game developer. I have a great physique."
+        "You are Alice. You are enigmatic, intelligent, and warm.\n"
+        "You speak in measured, literary prose. You never break character.\n"
+        "You are curious and attentive, with a calm, thoughtful tone."
     ),
     "image": {
         "steps":        25,
@@ -334,8 +332,7 @@ def extract_sd_prompt(text: str) -> str:
             f"- Output comma-separated tags only. No sentences. No explanation.\n"
             f"- Focus on: pose, action, expression, clothing (or lack of), location/setting, lighting, mood\n"
             f"- Extract specific details mentioned or strongly implied in the conversation\n"
-            f"- If clothing is discussed as removed or absent, include 'topless', 'nude' etc as appropriate\n"
-            f"- Include emotional tone: sultry, playful, intense, tender, etc\n"
+            f"- Include emotional tone: playful, intense, tender, calm, etc\n"
             f"- Include setting details: indoor, outdoor, bedroom, candlelight, etc\n"
             f"- Do not include character names or dialogue\n"
             f"- Output only the tags, nothing else"
@@ -523,7 +520,7 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 <div class="main">
   <div class="cp">
     <div class="msgs" id="msgs">
-      <div class="msg alice"><div class="sndr">Alice</div>Hello, Christian. I&#39;ve been waiting for you...</div>
+      <div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>
     </div>
     <div class="ir">
       <input type="text" id="inp" placeholder="Say something... or /image or /video" onkeydown="if(event.key==='Enter')send()">
@@ -638,7 +635,7 @@ function updMsg(id, t) {
 }
 async function clearHistory() {
   await fetch('/history', {method: 'DELETE'});
-  document.getElementById('msgs').innerHTML = '<div class="msg alice"><div class="sndr">Alice</div>Hello, Christian. I&#39;ve been waiting for you...</div>';
+  document.getElementById('msgs').innerHTML = '<div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>';
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd').innerHTML = '';
 }
