@@ -43,8 +43,9 @@ except ImportError:
     from kokoro_onnx import Kokoro as _Kokoro
 
 
+import queue as _queue
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -63,6 +64,7 @@ PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 LLM = None
 TTS = None
 _llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
+_auto_image_counter = 0
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
@@ -90,7 +92,8 @@ _DEFAULT_CONFIG = {
         "height":       768,
         "cfg_scale":    7,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
+        "suffix":       "photorealistic, highly detailed, 8k, masterpiece",
+        "auto_every":   1
     },
 }
 
@@ -383,29 +386,6 @@ def _compress_history():
     _save_history()
 
 
-def chat_alice(message: str) -> str:
-    history.append({"role": "user", "content": message})
-    try:
-        sys_prompt = SYSTEM_PROMPT
-        if memory:
-            sys_prompt += f"\n\nMemory of earlier conversation:\n{memory}"
-        reply = _llm_chat([{"role": "system", "content": sys_prompt}] + history)
-    except Exception as e:
-        history.pop()
-        raise RuntimeError(f"LLM error: {e}")
-    reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
-    # Strip trailing disclaimer/meta-commentary paragraphs
-    reply = re.sub(
-        r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
-        r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
-        r'Here\'s a revised\b|Here is a revised\b).*',
-        '', reply, flags=re.DOTALL | re.IGNORECASE
-    ).strip()
-    history.append({"role": "assistant", "content": reply})
-    _compress_history()
-    _save_history()
-    return reply
-
 
 _VERBS = {
     "unbuttoning", "dancing", "whispering", "leaning", "looking", "slipping",
@@ -470,15 +450,16 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", 
 
         result = _llm_chat([
             {"role": "system", "content": (
-                "You extract Stable Diffusion image prompts from conversations. "
-                "Output ONLY comma-separated tags. Maximum 30 tags. "
-                "No sentences, no explanation, no lists, nothing else. "
-                "Focus on the MOST RECENT exchange — what is happening RIGHT NOW. "
-                "Describe the current visual state: pose, body position, clothing state, expression, setting, lighting, mood. "
-                "Use the character persona to infer appearance details (ethnicity, costume, setting) when not explicit in the conversation. "
-                "If the persona is Egyptian, include: dark skin, kohl eyes, Egyptian headdress, gold jewellery, linen, hieroglyphs, etc. as appropriate. "
-                "If clothing is being removed or adjusted, describe the resulting state not the action. "
-                "Never output verbs — only visual nouns and adjectives."
+                "You are a Stable Diffusion prompt engineer. "
+                "Extract visual scene tags from the conversation. "
+                "Output ONLY comma-separated tags. 20-30 tags. No sentences, no explanation. "
+                "Focus exclusively on the CURRENT moment — what is visible RIGHT NOW. "
+                "Include: body pose, body position, clothing state (be specific — 'topless', 'nude', 'panties only', 'fully clothed', etc.), "
+                "facial expression, eye contact, setting/environment, lighting, camera angle, mood. "
+                "If explicit content is present describe it directly with precise visual tags. "
+                "If clothing is being removed, describe the resulting exposed state, not the action. "
+                "Use the character persona and appearance to infer details not explicit in the text. "
+                "Never output verbs or actions. Only visual nouns and adjectives."
             )},
             {"role": "user", "content": (
                 f"{context}\n\nConversation:\n{text}\n\nExtract SD tags for the current scene:"
@@ -645,13 +626,73 @@ def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg
 
 @app.post("/chat")
 async def chat(body: ChatRequest):
-    try:
+    global _auto_image_counter
+    if LLM is None:
+        return JSONResponse({"error": "LLM not ready"}, status_code=503)
+
+    history.append({"role": "user", "content": body.message})
+    sys_prompt = SYSTEM_PROMPT
+    if memory:
+        sys_prompt += f"\n\nMemory of earlier conversation:\n{memory}"
+    messages = [{"role": "system", "content": sys_prompt}] + list(history)
+
+    async def generate():
+        global _auto_image_counter
+        q = _queue.Queue()
+        collected = []
+
+        def _run():
+            try:
+                with _llm_lock:
+                    stream = LLM.create_chat_completion(messages=messages, stream=True)
+                    for chunk in stream:
+                        delta = chunk["choices"][0]["delta"].get("content", "")
+                        if delta:
+                            collected.append(delta)
+                            q.put(delta)
+            except Exception as e:
+                q.put(e)
+            q.put(None)
+
         loop = asyncio.get_running_loop()
-        reply = await loop.run_in_executor(None, lambda: chat_alice(body.message))
-        return JSONResponse({"reply": reply})
-    except Exception as e:
-        print(f"Chat error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        fut = loop.run_in_executor(None, _run)
+
+        while True:
+            try:
+                item = q.get_nowait()
+            except _queue.Empty:
+                await asyncio.sleep(0.005)
+                continue
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                history.pop()
+                yield f"data: {json.dumps({'error': str(item)})}\n\n"
+                return
+            yield f"data: {json.dumps({'delta': item})}\n\n"
+
+        await fut
+
+        reply = "".join(collected)
+        reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
+        reply = re.sub(
+            r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
+            r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
+            r'Here\'s a revised\b|Here is a revised\b).*',
+            '', reply, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+
+        history.append({"role": "assistant", "content": reply})
+        _compress_history()
+        _save_history()
+
+        _auto_image_counter += 1
+        auto_every = CFG.get("image", {}).get("auto_every", 1)
+        auto_image = (_auto_image_counter % auto_every == 0)
+
+        yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_image})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/generate")
@@ -671,6 +712,14 @@ async def interrupt():
     except Exception as e:
         print(f"Interrupt error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/progress")
+async def get_progress():
+    try:
+        r = req.get(f"{FORGE_URL}/sdapi/v1/progress", timeout=3)
+        return JSONResponse(r.json())
+    except Exception:
+        return JSONResponse({"progress": 0, "state": {}})
 
 
 @app.post("/image")
@@ -758,6 +807,24 @@ async def switch_persona(name: str):
     memory = ""
     print(f"\n[Alice] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name})
+
+
+_KOKORO_VOICES = ["af_nicole", "af_bella", "af_sky", "bf_emma", "bf_isabella"]
+
+@app.get("/voices")
+async def list_voices():
+    current = CFG.get("tts", {}).get("voice", "af_nicole")
+    return JSONResponse({"voices": _KOKORO_VOICES, "current": current})
+
+class VoiceRequest(BaseModel):
+    voice: str
+
+@app.post("/voice")
+async def set_voice(body: VoiceRequest):
+    if body.voice not in _KOKORO_VOICES:
+        return JSONResponse({"error": "Unknown voice"}, status_code=400)
+    CFG.setdefault("tts", {})["voice"] = body.voice
+    return JSONResponse({"status": "ok", "voice": body.voice})
 
 
 class TtsRequest(BaseModel):
