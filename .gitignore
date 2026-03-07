@@ -5,3 +5,7 @@ alice.json.mine
 personas.json
 /.claude
 /backups
+/models
+history.json
+__pycache__/
+*.pyc

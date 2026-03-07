@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave
 
 # -- Windows CUDA DLL loading fix --
 if os.name == "nt":
@@ -35,6 +35,13 @@ except ImportError:
         "llama-cpp-python"])
     from llama_cpp import Llama
 
+try:
+    from kokoro_onnx import Kokoro as _Kokoro
+except ImportError:
+    print("Installing kokoro-onnx...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
+    from kokoro_onnx import Kokoro as _Kokoro
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,12 +53,14 @@ ALICE_DIR   = os.path.dirname(os.path.abspath(__file__))
 FORGE_DIR   = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
 FORGE_BAT   = os.path.join(FORGE_DIR, "webui.bat")
 MODEL_DIR   = os.path.join(ALICE_DIR, "models")
+TTS_DIR     = os.path.join(ALICE_DIR, "models", "tts")
 ALICE_URL   = "http://localhost:8000"
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 
 # llama-cpp global (loaded at startup)
 LLM = None
+TTS = None
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
@@ -65,6 +74,10 @@ _DEFAULT_CONFIG = {
         "You speak in measured, literary prose. You never break character.\n"
         "You are curious and attentive, with a calm, thoughtful tone."
     ),
+    "tts": {
+        "voice": "af_nicole",
+        "speed": 0.85
+    },
     "image": {
         "steps":        25,
         "width":        512,
@@ -147,6 +160,11 @@ def wait_for(url, label, retries=40, delay=3):
 
 # ── LLM (llama-cpp-python) ───────────────────────────────────────────────────
 history = []
+memory  = ""  # rolling summary of older exchanges
+
+HISTORY_FILE  = os.path.join(ALICE_DIR, "history.json")
+_MAX_HISTORY  = 16   # compress when history exceeds this many messages
+_KEEP_RECENT  = 8    # keep this many recent messages after compression
 
 
 def _find_gguf() -> str:
@@ -189,20 +207,102 @@ def _find_gguf() -> str:
     return ""
 
 
+_DEFAULT_GGUF_URL  = ("https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF"
+                      "/resolve/main/Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf")
+_DEFAULT_GGUF_NAME = "Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf"
+
+
+def _ensure_default_gguf() -> str:
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    dest = os.path.join(MODEL_DIR, _DEFAULT_GGUF_NAME)
+    if not os.path.exists(dest):
+        ok(f"Downloading {_DEFAULT_GGUF_NAME} (~2 GB)...")
+        _download_with_progress(_DEFAULT_GGUF_URL, dest)
+        ok("Model downloaded.")
+    return dest
+
+
+def _list_ggufs() -> list:
+    """Return list of (display_name, full_path) for all findable GGUFs."""
+    found = {}
+    # Local models/ dir
+    for p in glob.glob(os.path.join(MODEL_DIR, "*.gguf")):
+        found[os.path.basename(p)] = p
+    # Ollama blobs
+    ollama_blobs = os.path.join(os.path.expanduser("~"), ".ollama", "models", "blobs")
+    if os.path.exists(ollama_blobs):
+        for f in os.listdir(ollama_blobs):
+            if not f.endswith(".part"):
+                p = os.path.join(ollama_blobs, f)
+                if os.path.getsize(p) > 100_000_000:  # >100MB — likely a model
+                    found.setdefault(f, p)
+    return [(name, path) for name, path in sorted(found.items())]
+
+
 def load_llm():
     global LLM
     step("Loading LLM...")
     path = _find_gguf()
     if not path:
-        warn("No GGUF model found. Add a .gguf file to models/ or set 'model_path' in alice.json.")
-        return
+        ok("No GGUF found — downloading default model...")
+        path = _ensure_default_gguf()
     ok(f"Model: {os.path.basename(path)}")
+    kwargs = dict(model_path=path, n_gpu_layers=-1, n_ctx=2048, flash_attn=True, verbose=False)
     try:
-        LLM = Llama(model_path=path, n_gpu_layers=-1, n_ctx=4096, verbose=False)
+        LLM = Llama(**kwargs)
     except Exception as e:
         warn(f"GPU load failed ({e}), retrying CPU-only...")
-        LLM = Llama(model_path=path, n_gpu_layers=0, n_ctx=4096, verbose=False)
+        kwargs.update(n_gpu_layers=0, flash_attn=False)
+        LLM = Llama(**kwargs)
     ok("LLM ready.")
+
+
+_TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
+_TTS_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
+
+
+def load_tts():
+    global TTS
+    step("Loading TTS (Kokoro)...")
+    os.makedirs(TTS_DIR, exist_ok=True)
+    model_path  = os.path.join(TTS_DIR, "kokoro-v0_19.onnx")
+    voices_path = os.path.join(TTS_DIR, "voices.bin")
+    # Remove stale voices.json downloaded under wrong name
+    stale = os.path.join(TTS_DIR, "voices.json")
+    if os.path.exists(stale):
+        os.remove(stale)
+    try:
+        if not os.path.exists(model_path):
+            ok("Downloading Kokoro model (~80 MB)...")
+            _download_with_progress(_TTS_MODEL_URL, model_path)
+        if not os.path.exists(voices_path):
+            ok("Downloading Kokoro voices...")
+            _download_with_progress(_TTS_VOICES_URL, voices_path)
+        import numpy as np
+        _orig_load = np.load
+        np.load = lambda *a, **kw: _orig_load(*a, **{**kw, "allow_pickle": True})
+        try:
+            TTS = _Kokoro(model_path, voices_path)
+        finally:
+            np.load = _orig_load
+        ok("TTS ready.")
+    except Exception as e:
+        warn(f"TTS failed to load: {e} — audio will be disabled.")
+
+
+def _tts_wav_b64(text: str) -> str:
+    import numpy as np
+    tts_cfg = CFG.get("tts", {})
+    voice = tts_cfg.get("voice", "af_nicole")
+    speed = tts_cfg.get("speed", 0.85)
+    samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes((samples * 32767).astype(np.int16).tobytes())
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 def _llm_chat(messages: list) -> str:
@@ -219,16 +319,70 @@ def _llm_complete(prompt: str) -> str:
     return result["choices"][0]["text"]
 
 
+def _save_history():
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump({"history": history, "memory": memory}, f, ensure_ascii=False)
+    except Exception as e:
+        warn(f"Could not save history: {e}")
+
+
+def _load_history():
+    global memory
+    if not os.path.exists(HISTORY_FILE):
+        return
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        history.extend(data.get("history", []))
+        memory = data.get("memory", "")
+        ok(f"History loaded ({len(history)} messages, memory: {bool(memory)})")
+    except Exception as e:
+        warn(f"Could not load history: {e}")
+
+
+def _summarise(messages: list) -> str:
+    text = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
+    try:
+        return _llm_chat([
+            {"role": "system", "content": (
+                "Summarise the following conversation into a brief memory paragraph. "
+                "Capture key facts, what happened, preferences, and relationship dynamics. "
+                "Be concise — two to four sentences max."
+            )},
+            {"role": "user", "content": text},
+        ]).strip()
+    except Exception as e:
+        warn(f"Summary failed: {e}")
+        return ""
+
+
+def _compress_history():
+    global memory
+    if len(history) <= _MAX_HISTORY:
+        return
+    old = history[:len(history) - _KEEP_RECENT]
+    del history[:len(history) - _KEEP_RECENT]
+    summary = _summarise(old)
+    if summary:
+        memory = (memory + "\n" + summary).strip() if memory else summary
+    _save_history()
+
+
 def chat_alice(message: str) -> str:
     history.append({"role": "user", "content": message})
     try:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
-        reply = _llm_chat(messages)
+        sys = SYSTEM_PROMPT
+        if memory:
+            sys += f"\n\nMemory of earlier conversation:\n{memory}"
+        reply = _llm_chat([{"role": "system", "content": sys}] + history)
     except Exception as e:
         history.pop()
         raise RuntimeError(f"LLM error: {e}")
     reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('""\u201c\u201d')
     history.append({"role": "assistant", "content": reply})
+    _compress_history()
+    _save_history()
     return reply
 
 
@@ -411,7 +565,7 @@ def start_forge():
         ok("Forge already running.")
         return
     env = os.environ.copy()
-    env["COMMANDLINE_ARGS"] = "--api --cuda-malloc"
+    env["COMMANDLINE_ARGS"] = "--api --cuda-malloc --xformers"
     py310 = find_python310()
     if py310:
         env["PYTHON"] = py310
@@ -586,6 +740,41 @@ async def video_from_history(body: VideoRequest):
         print(f"Forge video error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/models")
+async def list_models():
+    models = [{"name": name, "path": path} for name, path in _list_ggufs()]
+    current = os.path.basename(LLM.model_path) if LLM and hasattr(LLM, 'model_path') else ""
+    return JSONResponse({"models": models, "current": current})
+
+
+class ModelSwitchRequest(BaseModel):
+    path: str
+
+
+@app.post("/model")
+async def switch_model(body: ModelSwitchRequest):
+    global LLM
+    if not os.path.exists(body.path):
+        return JSONResponse({"error": "Model file not found."}, status_code=404)
+    import asyncio
+    print(f"\n[Alice] Switching model to: {os.path.basename(body.path)}")
+    kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=2048, flash_attn=True, verbose=False)
+    try:
+        new_llm = await asyncio.get_event_loop().run_in_executor(None, lambda: Llama(**kwargs))
+    except Exception as e:
+        kwargs.update(n_gpu_layers=0, flash_attn=False)
+        try:
+            new_llm = await asyncio.get_event_loop().run_in_executor(None, lambda: Llama(**kwargs))
+        except Exception as e2:
+            return JSONResponse({"error": str(e2)}, status_code=500)
+    global memory
+    LLM = new_llm
+    history.clear()
+    memory = ""
+    print(f"[Alice] Model ready: {os.path.basename(body.path)}")
+    return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
+
+
 @app.get("/personas")
 async def list_personas():
     return JSONResponse({"personas": list(PERSONAS.keys())})
@@ -597,16 +786,41 @@ async def switch_persona(name: str):
     if name not in PERSONAS:
         return JSONResponse({"error": f"Persona '{name}' not found."}, status_code=404)
     p = PERSONAS[name]
+    global memory
     ALICE_APPEARANCE = p.get("appearance", ALICE_APPEARANCE)
     SYSTEM_PROMPT    = p.get("system_prompt", SYSTEM_PROMPT)
     history.clear()
+    memory = ""
     print(f"\n[Alice] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name})
 
 
+class TtsRequest(BaseModel):
+    text: str
+
+
+@app.post("/tts")
+async def speak(body: TtsRequest):
+    if TTS is None:
+        return JSONResponse({"error": "TTS not ready"}, status_code=503)
+    import asyncio
+    try:
+        audio = await asyncio.get_event_loop().run_in_executor(None, lambda: _tts_wav_b64(body.text))
+        return JSONResponse({"audio": audio})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.delete("/history")
 async def clear():
+    global memory
     history.clear()
+    memory = ""
+    try:
+        if os.path.exists(HISTORY_FILE):
+            os.remove(HISTORY_FILE)
+    except Exception:
+        pass
     return {"status": "cleared"}
 
 
@@ -661,6 +875,8 @@ def ensure_animatediff():
 def _startup():
     try:
         load_llm()
+        _load_history()
+        load_tts()
         ensure_forge()
         ensure_checkpoint()
         ensure_animatediff()
