@@ -862,21 +862,49 @@ async def stt(request: Request):
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)
         tmp = f.name
+    wav_tmp = tmp + ".wav"
     try:
+        def _webm_to_wav(src, dst):
+            import av as _av
+            container = _av.open(src)
+            audio = next((s for s in container.streams if s.type == 'audio'), None)
+            if audio is None:
+                raise RuntimeError("No audio stream found")
+            resampler = _av.audio.resampler.AudioResampler(format='s16', layout='mono', rate=16000)
+            buf = bytearray()
+            for frame in container.decode(audio):
+                rf = resampler.resample(frame)
+                if rf is not None:
+                    buf.extend(bytes(rf.planes[0]))
+            rf = resampler.resample(None)
+            if rf is not None:
+                buf.extend(bytes(rf.planes[0]))
+            container.close()
+            print(f"        PyAV decoded {len(buf)} bytes of PCM")
+            with wave.open(dst, 'wb') as wf:
+                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+                wf.writeframes(bytes(buf))
+
         def _transcribe():
-            segments, _ = _WHISPER.transcribe(tmp, language="en", beam_size=5, vad_filter=False)
+            try:
+                _webm_to_wav(tmp, wav_tmp)
+                src = wav_tmp
+            except Exception as e:
+                print(f"        Audio conversion failed: {e}, trying raw")
+                src = tmp
+            segments, _ = _WHISPER.transcribe(src, language="en", beam_size=5, vad_filter=False)
             text = " ".join(s.text for s in segments).strip()
             print(f"        STT: {repr(text)}")
             return text
+
         text = await loop.run_in_executor(None, _transcribe)
         return JSONResponse({"text": text})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     finally:
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
+        for f in (tmp, wav_tmp):
+            try: os.unlink(f)
+            except Exception: pass
 
 
 class TtsRequest(BaseModel):
