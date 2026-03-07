@@ -46,7 +46,8 @@ FORGE_DIR   = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
 FORGE_BAT   = os.path.join(FORGE_DIR, "webui.bat")
 MODEL_DIR   = os.path.join(ALICE_DIR, "models")
 ALICE_URL   = "http://localhost:8000"
-CONFIG_FILE = os.path.join(ALICE_DIR, "alice.json")
+CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
+PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 
 # llama-cpp global (loaded at startup)
 LLM = None
@@ -103,6 +104,24 @@ ALICE_APPEARANCE = CFG["appearance"]
 BASE_NEGATIVE    = CFG["negative_prompt"]
 SYSTEM_PROMPT    = CFG["system_prompt"]
 IMG_CFG          = CFG["image"]
+
+def _load_personas() -> dict:
+    defaults = {
+        "Default": {
+            "system_prompt": SYSTEM_PROMPT,
+            "appearance":    ALICE_APPEARANCE,
+        }
+    }
+    if os.path.exists(PERSONAS_FILE):
+        try:
+            with open(PERSONAS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            return {**defaults, **data}
+        except Exception as e:
+            print(f"WARNING: could not load personas.json: {e}")
+    return defaults
+
+PERSONAS = _load_personas()
 
 # Avoid interactive-only actions when stdout/stdin are not attached to a TTY.
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
@@ -563,6 +582,24 @@ async def video_from_history(body: VideoRequest):
         print(f"Forge video error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/personas")
+async def list_personas():
+    return JSONResponse({"personas": list(PERSONAS.keys())})
+
+
+@app.post("/persona/{name}")
+async def switch_persona(name: str):
+    global ALICE_APPEARANCE, SYSTEM_PROMPT
+    if name not in PERSONAS:
+        return JSONResponse({"error": f"Persona '{name}' not found."}, status_code=404)
+    p = PERSONAS[name]
+    ALICE_APPEARANCE = p.get("appearance", ALICE_APPEARANCE)
+    SYSTEM_PROMPT    = p.get("system_prompt", SYSTEM_PROMPT)
+    history.clear()
+    print(f"\n[Alice] Switched to persona: {name}")
+    return JSONResponse({"status": "ok", "persona": name})
+
+
 @app.delete("/history")
 async def clear():
     history.clear()
@@ -620,7 +657,7 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 </style>
 </head>
 <body>
-<header><h1>Alice</h1><button class="cb" onclick="clearHistory()">Clear</button></header>
+<header><h1>Alice</h1><div style="display:flex;gap:.6rem;align-items:center"><select id="persona-select" class="cb" onchange="switchPersona(this.value)" style="cursor:pointer"></select><button class="cb" onclick="clearHistory()">Clear</button></div></header>
 <div class="main">
   <div class="cp">
     <div class="msgs" id="msgs">
@@ -714,6 +751,22 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
   enableAll();
   document.getElementById('inp').focus();
 }
+
+async function loadPersonas() {
+  const res = await fetch('/personas');
+  const d = await res.json();
+  const sel = document.getElementById('persona-select');
+  sel.innerHTML = d.personas.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+async function switchPersona(name) {
+  await fetch(`/persona/${encodeURIComponent(name)}`, {method: 'POST'});
+  document.getElementById('msgs').innerHTML = '<div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>';
+  document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
+  document.getElementById('pd-wrap').style.display = 'none';
+}
+
+loadPersonas();
 
 function setPrompt(text) {
   if (!text) return;
