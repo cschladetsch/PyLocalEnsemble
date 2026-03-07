@@ -262,11 +262,13 @@ def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     return prompt, negative
 
 
-def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "") -> str:
+def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", persona: str = "") -> str:
     try:
         context_parts = []
+        if persona:
+            context_parts.append(f"Character persona: {persona}")
         if appearance:
-            context_parts.append(f"The subject's appearance: {appearance}")
+            context_parts.append(f"Default appearance: {appearance}")
         if last_user_msg:
             context_parts.append(f"Most recent user request: \"{last_user_msg}\"")
         context = "\n".join(context_parts)
@@ -278,9 +280,10 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "") 
                 "No sentences, no explanation, no lists, nothing else. "
                 "Focus on the MOST RECENT exchange — what is happening RIGHT NOW. "
                 "Describe the current visual state: pose, body position, clothing state, expression, setting, lighting, mood. "
-                "If clothing is being removed or adjusted, describe the resulting state (e.g. not 'removing dress' but 'dress around waist'). "
-                "Use the subject's known appearance to fill in details not explicitly stated. "
-                "Never output verbs or actions — only visual nouns and adjectives."
+                "Use the character persona to infer appearance details (ethnicity, costume, setting) when not explicit in the conversation. "
+                "If the persona is Egyptian, include: dark skin, kohl eyes, Egyptian headdress, gold jewellery, linen, hieroglyphs, etc. as appropriate. "
+                "If clothing is being removed or adjusted, describe the resulting state not the action. "
+                "Never output verbs — only visual nouns and adjectives."
             )},
             {"role": "user", "content": (
                 f"{context}\n\nConversation:\n{text}\n\nExtract SD tags for the current scene:"
@@ -477,7 +480,7 @@ async def image_from_history(body: ImageRequest):
     recent = history[-6:]
     messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
     last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user)
+    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user, persona=SYSTEM_PROMPT)
 
     # Split extra into positive tags and "no X" -> negative tags
     positive_parts = []
@@ -510,7 +513,7 @@ async def video_from_history(body: VideoRequest):
     recent = history[-6:]
     messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
     last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user)
+    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user, persona=SYSTEM_PROMPT)
 
     positive_parts = []
     negative_parts = []
