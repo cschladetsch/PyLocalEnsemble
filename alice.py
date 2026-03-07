@@ -217,6 +217,22 @@ def chat_alice(message: str) -> str:
     return reply
 
 
+def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
+    """Detect partial-exposure language and inject precise SD tags."""
+    t = text.lower()
+
+    one_breast = any(p in t for p in [
+        "one breast", "just one", "single breast", "one side", "one strap"
+    ])
+    topless = any(p in t for p in ["both breasts", "topless", "bare chest", "bare breasts"])
+
+    if one_breast and not topless:
+        prompt  = "one breast exposed, other breast covered, partially dressed, " + prompt
+        negative = "both breasts exposed, topless, fully nude, " + negative
+
+    return prompt, negative
+
+
 def extract_sd_prompt(text: str) -> str:
     try:
         raw_tags = _llm_complete(
@@ -436,6 +452,7 @@ async def image_from_history(body: ImageRequest):
     positive_extra = ", ".join(positive_parts)
     extra_negative = ", ".join(negative_parts)
     prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+    prompt, extra_negative = _apply_exposure_rules(messages, prompt, extra_negative)
     image = generate_image(prompt, extra_negative=extra_negative)
     return JSONResponse({"sd_prompt": ALICE_APPEARANCE + ", " + prompt, "image": image})
 
