@@ -86,12 +86,11 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
     const d = await res.json();
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
-    } else if (endpoint === '/video' && !d.fallback && d.video) {
-      document.getElementById('ic').innerHTML = `<video autoplay loop muted src="data:video/mp4;base64,${d.video}"></video>`;
+    } else if (d.gif) {
+      document.getElementById('ic').innerHTML = `<img src="data:image/gif;base64,${d.gif}">`;
       setPrompt(d.sd_prompt);
-    } else if (d.image || d.video) {
-      const b64 = d.image || d.video;
-      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${b64}">`;
+    } else if (d.image) {
+      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
       setPrompt(d.sd_prompt);
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
