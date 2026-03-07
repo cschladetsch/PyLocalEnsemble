@@ -391,6 +391,9 @@ class ChatRequest(BaseModel):
 class ImageRequest(BaseModel):
     extra: str = ""
 
+class GenerateRequest(BaseModel):
+    prompt: str
+
 
 def generate_image(prompt: str, extra_negative: str = ""):
     if not http_ok(f"{FORGE_URL}/sdapi/v1/sd-models"):
@@ -425,6 +428,14 @@ async def chat(body: ChatRequest):
     except Exception as e:
         print(f"Chat error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/generate")
+async def generate_raw(body: GenerateRequest):
+    image = generate_image(body.prompt)
+    if image:
+        return JSONResponse({"image": image})
+    return JSONResponse({"error": "No image generated."}, status_code=500)
 
 
 @app.post("/interrupt")
@@ -574,8 +585,11 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .ic{flex:1;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:hidden}
 .ic img,.ic video{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}
 .ph{color:var(--muted);text-align:center;font-style:italic;font-family:'Cormorant Garamond',serif;font-size:1rem}
-.pd{padding:.8rem 1.2rem;border-top:1px solid var(--border);font-size:.68rem;color:var(--muted);line-height:1.5;max-height:80px;overflow-y:auto;scrollbar-width:thin}
-.pd strong{color:var(--accent2)}
+.pd{padding:.6rem 1.2rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.4rem}
+.pd textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.68rem;font-family:'Montserrat',sans-serif;line-height:1.5;resize:vertical;min-height:60px;padding:.4rem;outline:none}
+.pd textarea:focus{border-color:var(--accent2)}
+.pd button{background:var(--accent2);border:none;color:var(--text);padding:.4rem .8rem;cursor:pointer;font-family:'Montserrat',sans-serif;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;align-self:flex-end}
+.pd button:hover{background:var(--accent)}
 .gen{color:var(--accent);font-style:italic;animation:pulse 1.2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 </style>
@@ -595,7 +609,10 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
   <div class="ip">
     <div class="ih" id="ih">Generated Scene</div>
     <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
-    <div class="pd" id="pd"></div>
+    <div class="pd" id="pd-wrap" style="display:none">
+      <textarea id="pd" rows="3"></textarea>
+      <button onclick="regenFromPrompt()">Regenerate</button>
+    </div>
   </div>
 </div>
 <script>
@@ -638,7 +655,8 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
   }
   
   document.getElementById('ic').innerHTML = `<div class="ph gen">${label}</div>`;
-  document.getElementById('pd').innerHTML = '';
+  document.getElementById('pd-wrap').style.display = 'none';
+  document.getElementById('pd').value = '';
   
   try {
     const res = await fetch(endpoint, {
@@ -652,12 +670,11 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (endpoint === '/video' && !d.fallback && d.video) {
       document.getElementById('ic').innerHTML = `<video autoplay loop muted src="data:video/mp4;base64,${d.video}"></video>`;
-      document.getElementById('pd').innerHTML = `<strong>Prompt:</strong> ${d.sd_prompt}`;
+      setPrompt(d.sd_prompt);
     } else if (d.image || d.video) {
       const b64 = d.image || d.video;
       document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${b64}">`;
-      if (d.fallback) document.getElementById('pd').innerHTML = `<strong>Note:</strong> AnimateDiff not installed - showing still image. <strong>Prompt:</strong> ${d.sd_prompt}`;
-      else document.getElementById('pd').innerHTML = `<strong>Prompt:</strong> ${d.sd_prompt}`;
+      setPrompt(d.sd_prompt);
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
     }
@@ -671,6 +688,40 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
   imgAbort = null;
   enableAll();
   document.getElementById('inp').focus();
+}
+
+function setPrompt(text) {
+  if (!text) return;
+  document.getElementById('pd').value = text;
+  document.getElementById('pd-wrap').style.display = 'flex';
+}
+
+async function regenFromPrompt() {
+  const prompt = document.getElementById('pd').value.trim();
+  if (!prompt) return;
+  await interrupt('regenerating');
+  imgAbort = new AbortController();
+  disableAll();
+  document.getElementById('ic').innerHTML = '<div class="ph gen">Regenerating...</div>';
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt}),
+      signal: imgAbort.signal
+    });
+    const d = await res.json();
+    if (d.image) {
+      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
+    } else {
+      document.getElementById('ic').innerHTML = `<div class="ph">${d.error || 'No image generated.'}</div>`;
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError')
+      document.getElementById('ic').innerHTML = '<div class="ph">Error.</div>';
+  }
+  imgAbort = null;
+  enableAll();
 }
 
 async function send() {
