@@ -30,5 +30,9 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .pd textarea:focus{border-color:var(--accent2)}
 .pd button{background:var(--accent2);border:none;color:var(--text);padding:.4rem .8rem;cursor:pointer;font-family:'Montserrat',sans-serif;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;align-self:flex-end}
 .pd button:hover{background:var(--accent)}
+.sliders{display:flex;flex-direction:column;gap:.3rem}
+.sliders label{display:flex;align-items:center;gap:.5rem;font-size:.68rem;color:var(--muted);letter-spacing:.05em}
+.sliders span{min-width:2rem;text-align:right;color:var(--accent)}
+.sliders input[type=range]{flex:1;accent-color:var(--accent2);height:3px}
 .gen{color:var(--accent);font-style:italic;animation:pulse 1.2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
