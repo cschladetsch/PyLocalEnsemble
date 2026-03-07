@@ -309,7 +309,13 @@ async function _sttTranscribe(webmBlob, btn) {
   try {
     const arrayBuf = await webmBlob.arrayBuffer();
     const audioCtx = new AudioContext({ sampleRate: 16000 });
-    const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+    let audioBuf;
+    try {
+      audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+    } catch (e) {
+      console.warn('Audio decode failed:', e);
+      btn.textContent = 'Mic'; btn.disabled = false; await audioCtx.close(); return;
+    }
     await audioCtx.close();
     const pcm = audioBuf.getChannelData(0);
     const wav = new ArrayBuffer(44 + pcm.length * 2);
@@ -330,19 +336,15 @@ async function _sttTranscribe(webmBlob, btn) {
       body: new Blob([wav], { type: 'audio/wav' })
     });
     const d = await res.json();
+    btn.textContent = 'Mic'; btn.disabled = false;
     if (d.text) {
       document.getElementById('inp').value = d.text;
-      document.getElementById('inp').focus();
-      btn.textContent = 'Mic';
-    } else {
-      btn.textContent = '?';
-      setTimeout(() => { btn.textContent = 'Mic'; }, 1500);
+      send(); // auto-send into chat
     }
   } catch (e) {
     console.warn('STT error:', e);
-    btn.textContent = 'Mic';
+    btn.textContent = 'Mic'; btn.disabled = false;
   }
-  btn.disabled = false;
 }
 
 async function toggleMic() {
