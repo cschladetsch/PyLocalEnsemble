@@ -57,7 +57,7 @@ _DEFAULT_CONFIG = {
     "model_path":   "",
     "ollama_model": "mistral-nemo",
     "appearance":   "woman, Alice, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality, clothed, dressed, covered",
     "system_prompt": (
         "You are Alice. You are enigmatic, intelligent, and warm.\n"
         "You speak in measured, literary prose. You never break character.\n"
@@ -69,7 +69,7 @@ _DEFAULT_CONFIG = {
         "height":       768,
         "cfg_scale":    7,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
+        "suffix":       "nsfw, photorealistic, highly detailed, 8k, masterpiece"
     },
 }
 
@@ -217,6 +217,20 @@ def chat_alice(message: str) -> str:
     return reply
 
 
+_VERBS = {
+    "unbuttoning", "dancing", "whispering", "leaning", "looking", "slipping",
+    "revealing", "kissing", "inviting", "stifling", "ventilate", "smiling",
+    "reaching", "pulling", "pushing", "holding", "touching", "moving",
+    "sitting", "standing", "walking", "running", "turning", "waiting",
+}
+
+def _clean_tags(prompt: str) -> str:
+    """Remove verb/action tags that SD can't render as visual states."""
+    tags = [t.strip() for t in prompt.split(",")]
+    tags = [t for t in tags if t and t.lower() not in _VERBS]
+    return ", ".join(tags)
+
+
 def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     """Detect partial-exposure language and inject precise SD tags."""
     t = text.lower()
@@ -227,8 +241,11 @@ def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     topless = any(p in t for p in ["both breasts", "topless", "bare chest", "bare breasts"])
 
     if one_breast and not topless:
-        prompt  = "one breast exposed, other breast covered, partially dressed, " + prompt
-        negative = "both breasts exposed, topless, fully nude, " + negative
+        prompt   = "one breast exposed, nipple, other breast covered, partially undressed, " + prompt
+        negative = "fully clothed, dressed, covered up, " + negative
+    elif topless:
+        prompt   = "topless, bare breasts, nipples, " + prompt
+        negative = "fully clothed, dressed, covered, " + negative
 
     return prompt, negative
 
@@ -440,6 +457,7 @@ async def image_from_history(body: ImageRequest):
 
     positive_extra = ", ".join(positive_parts)
     extra_negative = ", ".join(negative_parts)
+    base_prompt = _clean_tags(base_prompt)
     prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
     prompt, extra_negative = _apply_exposure_rules(messages, prompt, extra_negative)
     image = generate_image(prompt, extra_negative=extra_negative)
