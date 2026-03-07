@@ -1,4 +1,4 @@
-let mid = 0, imgAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
+let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
 
 function resay() {
   if (!lastAudioSrc) return;
@@ -46,6 +46,11 @@ document.addEventListener('keydown', e => {
 });
 
 async function interrupt(reason) {
+  if (chatAbort) {
+    console.log('Aborting chat:', reason);
+    chatAbort.abort();
+    chatAbort = null;
+  }
   if (imgAbort) {
     console.log('Aborting media generation:', reason);
     imgAbort.abort();
@@ -215,19 +220,25 @@ async function send() {
   const tid = addMsg('alice', 'Alice', '<span class="gen">thinking...</span>');
   document.getElementById('pd').value = '';
 
+  chatAbort = new AbortController();
+  disableAll();
   let success = false, reply = '';
   try {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg })
+      body: JSON.stringify({ message: msg }),
+      signal: chatAbort.signal
     });
     const d = await res.json();
     if (d.error) { updMsg(tid, '<em style="color:#c08080">' + d.error + '</em>'); }
     else { reply = d.reply; updMsg(tid, reply); success = true; }
   } catch (e) {
-    updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>');
+    if (e.name === 'AbortError') { updMsg(tid, '<em style="color:#888">Interrupted.</em>'); }
+    else { updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>'); }
   }
+  chatAbort = null;
+  enableAll();
   inp.focus();
 
   if (success) {
