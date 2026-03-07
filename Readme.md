@@ -153,7 +153,7 @@ Add instructions after `/image` to control the scene. Tokens starting with `no `
 ```
 /image
 /image holding a rose, candlelight, close up
-/image standing in a doorway, backlit, no bra, no clothing
+/image standing in a doorway, backlit, flowing dress, soft glow
 ```
 
 The extra positive text is prepended to the SD prompt so Stable Diffusion weights it highest. `no X` tokens are added to the negative prompt alongside the base negatives from `alice.json`.
