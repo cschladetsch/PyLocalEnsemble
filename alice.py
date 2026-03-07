@@ -227,6 +227,7 @@ def chat_alice(message: str) -> str:
     except Exception as e:
         history.pop()
         raise RuntimeError(f"LLM error: {e}")
+    reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('""\u201c\u201d')
     history.append({"role": "assistant", "content": reply})
     return reply
 
@@ -433,9 +434,11 @@ class ImageRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    steps: int = None
+    cfg_scale: float = None
 
 
-def generate_image(prompt: str, extra_negative: str = ""):
+def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg_scale: float = None):
     if not http_ok(f"{FORGE_URL}/sdapi/v1/sd-models"):
         print("Forge down, restarting...")
         start_forge()
@@ -444,10 +447,10 @@ def generate_image(prompt: str, extra_negative: str = ""):
         r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
             "prompt":          prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"],
             "negative_prompt": negative,
-            "steps":           IMG_CFG["steps"],
+            "steps":           steps if steps is not None else IMG_CFG["steps"],
             "width":           IMG_CFG["width"],
             "height":          IMG_CFG["height"],
-            "cfg_scale":       IMG_CFG["cfg_scale"],
+            "cfg_scale":       cfg_scale if cfg_scale is not None else IMG_CFG["cfg_scale"],
             "sampler_name":    IMG_CFG["sampler_name"],
         }, timeout=300)
         data = r.json()
@@ -472,7 +475,7 @@ async def chat(body: ChatRequest):
 
 @app.post("/generate")
 async def generate_raw(body: GenerateRequest):
-    image = generate_image(body.prompt)
+    image = generate_image(body.prompt, steps=body.steps, cfg_scale=body.cfg_scale)
     if image:
         return JSONResponse({"image": image})
     return JSONResponse({"error": "No image generated."}, status_code=500)

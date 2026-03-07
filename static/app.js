@@ -105,11 +105,13 @@ async function regenFromPrompt() {
   imgAbort = new AbortController();
   disableAll();
   document.getElementById('ic').innerHTML = '<div class="ph gen">Regenerating...</div>';
+  const steps = parseInt(document.getElementById('steps').value);
+  const cfg_scale = parseFloat(document.getElementById('cfg').value);
   try {
     const res = await fetch('/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, steps, cfg_scale }),
       signal: imgAbort.signal
     });
     const d = await res.json();

@@ -32,6 +32,14 @@
     <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
     <div class="pd" id="pd-wrap" style="display:none">
       <textarea id="pd" rows="3"></textarea>
+      <div class="sliders">
+        <label>Steps <span id="steps-val">25</span>
+          <input type="range" id="steps" min="10" max="60" value="25" oninput="document.getElementById('steps-val').textContent=this.value">
+        </label>
+        <label>CFG <span id="cfg-val">7</span>
+          <input type="range" id="cfg" min="1" max="20" value="7" step="0.5" oninput="document.getElementById('cfg-val').textContent=this.value">
+        </label>
+      </div>
       <button onclick="regenFromPrompt()">Regenerate</button>
     </div>
   </div>
