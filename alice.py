@@ -229,6 +229,8 @@ def extract_sd_prompt(text: str) -> str:
             f"- Extract only specific details explicitly mentioned\n"
             f"- Keep it literal; avoid embellishment or inference\n"
             f"- Do not include character names or dialogue\n"
+            f"- For partial exposure: be explicit, e.g. 'one breast exposed, one breast covered', 'topless', 'dress pulled down one side'\n"
+            f"- If only one breast is shown, include BOTH 'one breast exposed' AND 'one breast covered' as separate tags\n"
             f"Tags:"
         )
         refined = _llm_complete(
