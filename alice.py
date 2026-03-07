@@ -125,6 +125,38 @@ def _download_with_progress(url: str, dest: str):
     print()
 
 
+def _valid_gguf(path: str) -> bool:
+    """Return True if file exists and starts with the GGUF magic bytes."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"GGUF"
+    except Exception:
+        return False
+
+
+def _find_ollama_blob() -> str:
+    """Return path to mistral-nemo blob in Ollama's cache, or empty string."""
+    manifest = os.path.join(os.path.expanduser("~"), ".ollama", "models",
+        "manifests", "registry.ollama.ai", "library", "mistral-nemo", "latest")
+    if not os.path.exists(manifest):
+        return ""
+    try:
+        import json as _json
+        with open(manifest, encoding="utf-8") as f:
+            data = _json.load(f)
+        for layer in data.get("layers", []):
+            digest = layer.get("digest", "")
+            # The model layer is the large one (>1 GB)
+            if layer.get("size", 0) > 1_000_000_000 and digest.startswith("sha256:"):
+                blob = os.path.join(os.path.expanduser("~"), ".ollama", "models",
+                    "blobs", digest.replace(":", "-"))
+                if _valid_gguf(blob):
+                    return blob
+    except Exception:
+        pass
+    return ""
+
+
 def ensure_model():
     global llm
     step("Setting up language model...")
@@ -132,19 +164,32 @@ def ensure_model():
 
     # 1. Explicit path in config
     model_path = CFG.get("model_path", "").strip()
+    if model_path and not _valid_gguf(model_path):
+        warn(f"model_path '{model_path}' is not a valid GGUF — ignoring.")
+        model_path = ""
 
-    # 2. Any .gguf already in models/
-    if not model_path or not os.path.exists(model_path):
-        existing = glob.glob(os.path.join(MODEL_DIR, "*.gguf"))
-        if existing:
-            model_path = existing[0]
-            ok(f"Found model: {os.path.basename(model_path)}")
+    # 2. Any valid .gguf in models/
+    if not model_path:
+        for candidate in glob.glob(os.path.join(MODEL_DIR, "*.gguf")):
+            if _valid_gguf(candidate):
+                model_path = candidate
+                ok(f"Found model: {os.path.basename(model_path)}")
+                break
+            else:
+                warn(f"Removing incomplete/corrupt file: {os.path.basename(candidate)}")
+                os.remove(candidate)
 
-    # 3. Download default model
-    if not model_path or not os.path.exists(model_path):
+    # 3. Reuse Ollama's already-downloaded blob (saves re-downloading)
+    if not model_path:
+        blob = _find_ollama_blob()
+        if blob:
+            ok(f"Reusing Ollama's cached mistral-nemo model.")
+            model_path = blob
+
+    # 4. Download
+    if not model_path:
         model_path = os.path.join(MODEL_DIR, MODEL_NAME)
-        ok(f"Downloading {MODEL_NAME} (~7.7 GB) ...")
-        ok("This is a one-time download. Go grab a coffee.")
+        ok(f"Downloading {MODEL_NAME} (~7 GB) — one-time download...")
         try:
             _download_with_progress(MODEL_URL, model_path)
         except Exception as e:
