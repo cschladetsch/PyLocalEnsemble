@@ -306,37 +306,10 @@ function updMsg(id, t) {
 async function _sttTranscribe(webmBlob, btn, tid) {
   try {
     console.log('STT blob:', webmBlob.size, 'bytes,', webmBlob.type);
-    const arrayBuf = await webmBlob.arrayBuffer();
-    const audioCtx = new AudioContext();
-    let audioBuf;
-    try {
-      audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-    } catch (e) {
-      console.warn('Audio decode failed:', e);
-      updMsg(tid, '<em style="color:#888">Could not decode audio.</em>');
-      btn.textContent = 'Mic'; btn.disabled = false; await audioCtx.close(); return;
-    }
-    await audioCtx.close();
-    const pcm = audioBuf.getChannelData(0);
-    const maxAmp = pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-    console.log('Decoded:', audioBuf.duration.toFixed(2), 's,', audioBuf.sampleRate, 'Hz, maxAmp:', maxAmp.toFixed(4));
-    const wav = new ArrayBuffer(44 + pcm.length * 2);
-    const v = new DataView(wav);
-    const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
-    ws(0,'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); ws(8,'WAVE'); ws(12,'fmt ');
-    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-    const sr = audioBuf.sampleRate;
-    v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
-    ws(36,'data'); v.setUint32(40, pcm.length * 2, true);
-    let off = 44;
-    for (let i = 0; i < pcm.length; i++) {
-      const x = Math.max(-1, Math.min(1, pcm[i]));
-      v.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7FFF, true); off += 2;
-    }
     const res = await fetch('/stt', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/wav' },
-      body: new Blob([wav], { type: 'audio/wav' })
+      headers: { 'Content-Type': webmBlob.type || 'audio/webm' },
+      body: webmBlob
     });
     const d = await res.json();
     btn.textContent = 'Mic'; btn.disabled = false;
