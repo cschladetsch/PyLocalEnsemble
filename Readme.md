@@ -2,7 +2,7 @@
 
 > **⚠️ NSFW / 18+ — This project generates adult content. You must be 18 or older to use it.**
 
-A local AI companion with chat, voice, memory, and contextual image generation. Everything runs on your machine — no cloud, no API keys, no subscriptions.
+A local AI companion with streaming chat, voice, persistent memory, and contextual image generation. Everything runs on your machine — no cloud, no API keys, no subscriptions.
 
 Powered by:
 - [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) — local LLM inference (GGUF, GPU-accelerated)
@@ -98,20 +98,20 @@ Alice uses a GGUF model loaded in-process via `llama-cpp-python`. No Ollama serv
 
 **Switching models at runtime:**
 
-Use the model dropdown in the top-left of the UI. All `.gguf` files in `models/` appear as options. Switching clears conversation history.
+Use the model dropdown in the header. All `.gguf` files in `models/` appear as options. Switching reloads the model without restarting and clears conversation history.
 
 **Recommended models:**
 
 | Model | VRAM | Size | Notes |
 |-------|------|------|-------|
-| `Llama-3.2-3B-Instruct-uncensored-Q4_K_M` | 4 GB | 2.1 GB | Default. Fast. Usable but limited NSFW. |
+| `Llama-3.2-3B-Instruct-uncensored-Q4_K_M` | 4 GB | 2.1 GB | Default. Fast. Limited NSFW compliance. |
 | `Mistral-7B-Instruct-v0.3-uncensored-Q4_K_M` | 6 GB | 4.4 GB | Noticeably better quality and compliance. |
 | `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Best quality for NSFW on consumer GPUs. |
 | `Midnight-Rose-70B-Q2_K` | 24 GB+ | ~25 GB | Near-GPT-4 quality. High-end only. |
 
 > The model handles both conversation **and** image prompt extraction. A better model gives better responses and more accurate scene descriptions.
 >
-> To use a different model: drop its `.gguf` file into `models/` and select it from the dropdown — no restart needed.
+> Drop any `.gguf` into `models/` and select it from the dropdown — no restart needed.
 
 ---
 
@@ -121,7 +121,7 @@ Use the model dropdown in the top-left of the UI. All `.gguf` files in `models/`
 alice/
 ├── alice.py                         ← entire app, single file
 ├── alice.json                       ← SFW default config (committed)
-├── alice.json.mine                  ← your personal config (git-ignored, copy over alice.json)
+├── alice.json.mine                  ← your personal config (git-ignored)
 ├── personas.json                    ← your personas (git-ignored)
 ├── personas.example.json            ← example personas file
 ├── history.json                     ← conversation memory (auto-created, git-ignored)
@@ -154,12 +154,13 @@ alice/
     },
 
     "image": {
-        "steps":        25,
-        "width":        512,
-        "height":       768,
-        "cfg_scale":    7,
+        "steps":      25,
+        "width":      512,
+        "height":     768,
+        "cfg_scale":  7,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
+        "suffix":     "photorealistic, highly detailed, 8k, masterpiece",
+        "auto_every": 1
     }
 }
 ```
@@ -171,11 +172,12 @@ alice/
 | `appearance` | SD tags prepended to every image prompt. Defines Alice's consistent look. |
 | `negative_prompt` | Passed to every SD generation as the negative prompt. |
 | `system_prompt` | Alice's personality and persona. Injected at the start of every conversation. |
-| `tts.voice` | Kokoro voice. Options: `af_nicole` (breathy), `af_bella`, `bf_emma` (British), `bf_isabella`. |
-| `tts.speed` | Speech rate. `0.85` is slightly slower/sultrier. `1.0` is normal. |
+| `tts.voice` | Kokoro voice. Options: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (British), `bf_isabella`. |
+| `tts.speed` | Speech rate. `0.85` is slightly slower. `1.0` is normal. |
 | `image.steps` | SD denoising steps. Higher = better quality, slower. 20–30 is typical. |
 | `image.cfg_scale` | How strictly SD follows the prompt. 7–12 is typical. |
 | `image.suffix` | Tags always appended to the positive prompt. |
+| `image.auto_every` | Generate an image every N chat messages. `1` = every message, `2` = every other, `0` = never. |
 
 **Restart `alice.py` after editing `alice.json`.**
 
@@ -217,7 +219,9 @@ Alice maintains persistent memory across sessions:
 
 ### Chat
 
-Type a message and press **Enter** or **Send**. Alice responds in character, speaks the reply aloud, then generates a contextual image.
+Type a message and press **Enter**. Alice streams her reply word-by-word, speaks it aloud, then generates a contextual image.
+
+Press **ESC** or click **Stop** at any time to interrupt generation.
 
 ### Voice
 
@@ -225,30 +229,39 @@ Alice speaks every reply using Kokoro neural TTS.
 
 | Control | Action |
 |---------|--------|
+| **Voice dropdown** | Switch TTS voice instantly (no restart needed) |
 | **Mute** | Toggle voice on/off |
 | **Re-say** | Replay the last spoken reply |
 
+Available voices: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (British), `bf_isabella`.
+
 ### Image panel
 
-The right panel shows the generated scene. Press **+** (top-right of image panel) to open the prompt editor:
+The right panel shows the generated scene with a live progress percentage during generation. Press **+** (top-right of image panel) to open the prompt editor:
 
 - **Textarea** — editable SD prompt extracted from the conversation
 - **Steps slider** — denoising steps for this generation (10–60)
 - **CFG slider** — prompt adherence for this generation (1–20)
 - **Regenerate** — re-run Forge with your edited prompt and slider values
 
-### Manual generation
+### Manual image generation
 
-Use the **Image** and **Video** buttons, or type commands:
+Use the **Image** button or type a command:
 
 ```
 /image
 /image candlelight, close up, warm glow
 /image outdoor, golden hour, no background clutter
-/video
 ```
 
 Tags prefixed with `no ` go to the negative prompt.
+
+### Interrupting generation
+
+- Press **ESC** anywhere on the page, or
+- Click the **Stop** button (top-left of header, active only during generation)
+
+Both cancel in-flight chat, TTS, and image generation.
 
 ### Model switcher
 
@@ -267,19 +280,22 @@ flowchart TD
     User([You]) -->|message| Chat
 
     subgraph Alice ["alice.py — port 8000"]
-        Chat["/chat"]
+        Chat["/chat (SSE stream)"]
         Image["/image"]
         Generate["/generate"]
         TTS["/tts"]
+        Progress["/progress"]
         Memory[(history + memory)]
     end
 
+    Chat -->|tokens| User
     Chat --> LLM
     Chat <--> Memory
     Image --> Extractor["LLM — extract\nSD tags from\nlast 6 messages"]
     Memory --> Extractor
     Generate -->|raw prompt| Forge
     Chat --> TTS
+    Progress -->|poll| Forge
 
     subgraph GPU ["GPU (CUDA)"]
         LLM["llama-cpp-python\nGGUF model"]
@@ -292,7 +308,6 @@ flowchart TD
 
     TTS --> KokoroTTS
     Extractor --> Forge
-    LLM -->|reply| User
     Forge -->|image| User
     KokoroTTS -->|audio| User
 ```
@@ -319,12 +334,12 @@ flowchart LR
 When an image is triggered (automatically after chat, or manually):
 
 1. The last **6 messages** of conversation are passed to the LLM
-2. The LLM extracts visual state tags — pose, clothing, expression, setting, lighting, mood
+2. The LLM extracts visual state tags — pose, clothing/nudity state, expression, setting, lighting, mood
 3. Non-visual tags (verbs, scents, sounds) are filtered out
 4. Duplicate tags are removed
 5. `appearance` from `alice.json` is appended for visual consistency
 6. `suffix` from `alice.json` is appended (quality tags)
-7. The final prompt is sent to Forge
+7. The final prompt is sent to Forge, with live progress shown in the UI
 
 You can see and edit the prompt by clicking **+** below the image, then click **Regenerate**.
 
@@ -343,7 +358,7 @@ This package compiles a C extension. If it fails:
 ### LLM responses are slow
 - Use a smaller model (3B Q4 is the sweet spot for low-end GPUs)
 - Ensure the model is loading on GPU — look for `n_gpu_layers` in the startup output
-- `flash_attn=True` is enabled by default; if your GPU doesn't support it, alice falls back to CPU attention automatically
+- `flash_attn=True` is enabled by default; if your GPU doesn't support it, alice falls back automatically
 
 ### Images not generating
 - Check the terminal for `Forge error:` lines
@@ -354,11 +369,15 @@ This package compiles a C extension. If it fails:
 Both the LLM and Forge share GPU memory. On 4–6 GB cards:
 - Use a Q4 GGUF (smallest quantisation that still works well)
 - Reduce `width`/`height` in `alice.json` to 512×512
-- Restart Forge between LLM loads if needed
+- Use `"auto_every": 2` or higher to reduce how often images generate
 
 ### Images don't match the conversation
 - Raise `cfg_scale` in `alice.json` (try 9–12)
 - Edit the prompt in the textarea and click Regenerate
+- Use a larger LLM — the 3B model extracts poor scene tags compared to 7B+
+
+### Model still refuses explicit content
+The default 3B model has residual refusals. Alice strips trailing disclaimers automatically, but for best results use a 7B+ uncensored model (see Recommended Models table above).
 
 ---
 
