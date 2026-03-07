@@ -267,7 +267,7 @@ def load_llm():
         ok("No GGUF found — downloading default model...")
         path = _ensure_default_gguf()
     ok(f"Model: {os.path.basename(path)}")
-    kwargs = dict(model_path=path, n_gpu_layers=-1, n_ctx=8192, flash_attn=True, verbose=False)
+    kwargs = dict(model_path=path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
     try:
         LLM = Llama(**kwargs)
     except Exception as e:
@@ -771,7 +771,7 @@ async def switch_model(body: ModelSwitchRequest):
         return JSONResponse({"error": "Model file not found."}, status_code=404)
     import asyncio
     print(f"\n[Alice] Switching model to: {os.path.basename(body.path)}")
-    kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=8192, flash_attn=True, verbose=False)
+    kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
     try:
         new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
     except Exception as e:
