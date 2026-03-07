@@ -322,6 +322,7 @@ def ensure_checkpoint():
 def _set_forge_model(name: str):
     """Tell a running Forge instance to switch to the named checkpoint."""
     try:
+        req.post(f"{FORGE_URL}/sdapi/v1/refresh-checkpoints", timeout=30)
         r = req.get(f"{FORGE_URL}/sdapi/v1/sd-models", timeout=5)
         models = [m["title"] for m in r.json()]
         match = next((m for m in models if name in m), None)
