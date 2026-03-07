@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, socket
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
@@ -82,6 +82,7 @@ CFG = load_config()
 ALICE_MODEL       = CFG["alice_model"]
 PROMPT_MODEL      = CFG["prompt_model"]
 OLLAMA_URL        = CFG["ollama_url"]
+OLLAMA_HOST       = CFG["ollama_url"].removeprefix("http://")
 FORGE_URL         = CFG["forge_url"]
 ALICE_APPEARANCE  = CFG["appearance"]
 BASE_NEGATIVE     = CFG["negative_prompt"]
@@ -130,26 +131,72 @@ def ensure_ollama():
 
 
 def ensure_ollama_running():
+    global OLLAMA_URL, OLLAMA_HOST
     step("Starting Ollama service...")
     if http_ok(f"{OLLAMA_URL}/api/tags"):
         ok("Already running.")
         return
-    subprocess.Popen(
+
+    def port_bindable(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return True
+            except OSError:
+                return False
+
+    def kill_ollama_processes():
+        subprocess.run(["taskkill", "/F", "/IM", "ollama app.exe"], capture_output=True)
+        subprocess.run(["taskkill", "/F", "/IM", "ollama.exe"], capture_output=True)
+
+    kill_ollama_processes()
+    time.sleep(2)
+
+    # Find a bindable port — try default first, then fallback
+    default_port = int(OLLAMA_URL.rsplit(":", 1)[-1])
+    ollama_port = default_port
+    if not port_bindable(ollama_port):
+        for candidate in range(default_port + 1, default_port + 10):
+            if port_bindable(candidate):
+                warn(f"Port {default_port} is blocked. Using port {candidate} instead.")
+                warn("To fix permanently, reinstall Ollama.")
+                ollama_port = candidate
+                break
+        else:
+            fail(f"Ports {default_port}-{default_port+9} are all blocked.\nTry reinstalling Ollama.")
+
+    ollama_host = f"127.0.0.1:{ollama_port}"
+    OLLAMA_URL = f"http://{ollama_host}"
+    OLLAMA_HOST = ollama_host
+
+    env = os.environ.copy()
+    env["OLLAMA_HOST"] = ollama_host
+    proc = subprocess.Popen(
         [OLLAMA_EXE, "serve"],
-        creationflags=subprocess.CREATE_NO_WINDOW
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
     )
+    time.sleep(2)
+    if proc.poll() is not None:
+        _, err = proc.communicate()
+        err_text = err.decode(errors='replace').strip()
+        fail(f"Ollama exited immediately (code {proc.returncode}).\n        stderr: {err_text}\n        Try running 'ollama serve' in a terminal to see the full error.")
+
     if not wait_for(f"{OLLAMA_URL}/api/tags", "Ollama"):
-        fail("Ollama did not start.")
+        fail("Ollama did not start in time. Try running 'ollama serve' in a terminal to diagnose.")
 
 
 def ensure_models():
     step("Checking models...")
-    result = subprocess.run([OLLAMA_EXE, "list"], capture_output=True, text=True)
+    ollama_env = {**os.environ, "OLLAMA_HOST": OLLAMA_HOST}
+    result = subprocess.run([OLLAMA_EXE, "list"], capture_output=True, text=True, env=ollama_env)
     models = result.stdout
 
     if PROMPT_MODEL not in models:
         ok(f"Pulling {PROMPT_MODEL} (~7GB, this will take a while)...")
-        subprocess.run([OLLAMA_EXE, "pull", PROMPT_MODEL], check=True)
+        subprocess.run([OLLAMA_EXE, "pull", PROMPT_MODEL], check=True, env=ollama_env)
     else:
         ok(f"{PROMPT_MODEL} present.")
 
@@ -158,7 +205,7 @@ def ensure_models():
         with open(MODELFILE, "w", encoding="utf-8") as f:
             f.write(MODELFILE_CONTENT)
         ok(f"Creating {ALICE_MODEL}...")
-        result = subprocess.run([OLLAMA_EXE, "create", ALICE_MODEL, "-f", MODELFILE])
+        result = subprocess.run([OLLAMA_EXE, "create", ALICE_MODEL, "-f", MODELFILE], env=ollama_env)
         if result.returncode != 0:
             warn(f"Could not create {ALICE_MODEL}.")
             warn(f"Run manually: ollama create alice-nemo -f \"{MODELFILE}\"")
@@ -262,12 +309,23 @@ class ImageRequest(BaseModel):
 
 def chat_alice(message: str) -> str:
     history.append({"role": "user", "content": message})
-    r = req.post(f"{OLLAMA_URL}/api/chat", json={
-        "model": ALICE_MODEL,
-        "messages": history,
-        "stream": False,
-    }, timeout=60)
-    reply = r.json()["message"]["content"]
+    try:
+        r = req.post(f"{OLLAMA_URL}/api/chat", json={
+            "model": ALICE_MODEL,
+            "messages": history,
+            "stream": False,
+        }, timeout=60)
+        r.raise_for_status()
+        reply = r.json()["message"]["content"]
+    except req.exceptions.ConnectionError:
+        history.pop()
+        raise RuntimeError(f"Ollama is not running. Start it with: ollama serve")
+    except req.exceptions.HTTPError as e:
+        history.pop()
+        raise RuntimeError(f"Ollama error {e.response.status_code}: {e.response.text[:200]}")
+    except (KeyError, ValueError) as e:
+        history.pop()
+        raise RuntimeError(f"Unexpected Ollama response: {e}")
     history.append({"role": "assistant", "content": reply})
     return reply
 
@@ -322,8 +380,12 @@ def generate_image(prompt: str, extra_negative: str = ""):
 
 @app.post("/chat")
 async def chat(body: ChatRequest):
-    reply = chat_alice(body.message)
-    return JSONResponse({"reply": reply})
+    try:
+        reply = chat_alice(body.message)
+        return JSONResponse({"reply": reply})
+    except Exception as e:
+        print(f"Chat error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/image")
@@ -559,9 +621,10 @@ async function send() {
       body: JSON.stringify({message: msg})
     });
     const d = await res.json();
-    updMsg(tid, d.reply);
+    if (d.error) { updMsg(tid, '<em style="color:#c08080">' + d.error + '</em>'); }
+    else { updMsg(tid, d.reply); }
   } catch(e) {
-    updMsg(tid, 'Error connecting to backend.');
+    updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>');
   }
   btn.disabled = false;
   inp.focus();
