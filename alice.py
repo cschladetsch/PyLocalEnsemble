@@ -67,7 +67,7 @@ _DEFAULT_CONFIG = {
         "steps":        25,
         "width":        512,
         "height":       768,
-        "cfg_scale":    7,
+        "cfg_scale":    9,
         "sampler_name": "DPM++ 2M Karras",
         "suffix":       "nsfw, photorealistic, highly detailed, 8k, masterpiece"
     },
@@ -241,10 +241,10 @@ def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     topless = any(p in t for p in ["both breasts", "topless", "bare chest", "bare breasts"])
 
     if one_breast and not topless:
-        prompt   = "one breast exposed, nipple, other breast covered, partially undressed, " + prompt
-        negative = "fully clothed, dressed, covered up, " + negative
+        prompt   = "(one breast exposed:1.4), (other breast covered:1.6), (asymmetric exposure:1.3), partially undressed, " + prompt
+        negative = "both breasts exposed, symmetric nudity, fully clothed, " + negative
     elif topless:
-        prompt   = "topless, bare breasts, nipples, " + prompt
+        prompt   = "(topless:1.4), (both breasts exposed:1.3), bare chest, " + prompt
         negative = "fully clothed, dressed, covered, " + negative
 
     return prompt, negative
