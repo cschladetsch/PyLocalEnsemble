@@ -1,4 +1,36 @@
-let mid = 0, imgAbort = null;
+let mid = 0, imgAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
+
+function resay() {
+  if (!lastAudioSrc) return;
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  ttsAudio = new Audio(lastAudioSrc);
+  ttsAudio.play();
+}
+
+function toggleMute() {
+  muted = !muted;
+  if (muted && ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  document.getElementById('mute-btn').textContent = muted ? 'Unmute' : 'Mute';
+}
+
+async function speak(text) {
+  if (muted) return;
+  try {
+    const res = await fetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const d = await res.json();
+    if (d.audio) {
+      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+      lastAudioSrc = 'data:audio/wav;base64,' + d.audio;
+      ttsAudio = new Audio(lastAudioSrc);
+      ttsAudio.play(); // fire and forget — image gen starts while audio plays
+      document.getElementById('resay-btn').disabled = false;
+    }
+  } catch (e) { console.warn('TTS error:', e); }
+}
 
 function disableAll() {
   ['btn', 'ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
@@ -76,6 +108,36 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
   document.getElementById('inp').focus();
 }
 
+async function loadModels() {
+  try {
+    const res = await fetch('/models');
+    const d = await res.json();
+    const sel = document.getElementById('model-select');
+    sel.innerHTML = d.models.map(m =>
+      `<option value="${m.path}" ${m.name === d.current ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+  } catch (e) { console.warn('Could not load models:', e); }
+}
+
+async function switchModel(sel) {
+  const path = sel.value;
+  const name = sel.options[sel.selectedIndex].text;
+  sel.disabled = true;
+  disableAll();
+  const tid = addMsg('alice', 'Alice', `<span class="gen">Loading ${name}...</span>`);
+  const res = await fetch('/model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  });
+  const d = await res.json();
+  updMsg(tid, d.error ? `<em style="color:#c08080">${d.error}</em>` : `Switched to ${name}.`);
+  sel.disabled = false;
+  enableAll();
+}
+
+loadModels();
+
 async function loadPersonas() {
   const res = await fetch('/personas');
   const d = await res.json();
@@ -95,7 +157,14 @@ loadPersonas();
 function setPrompt(text) {
   if (!text) return;
   document.getElementById('pd').value = text;
-  document.getElementById('pd-wrap').style.display = 'flex';
+}
+
+function togglePromptPanel() {
+  const wrap = document.getElementById('pd-wrap');
+  const btn  = document.getElementById('pd-toggle');
+  const open = wrap.style.display !== 'none';
+  wrap.style.display = open ? 'none' : 'flex';
+  btn.textContent = open ? '+' : '−';
 }
 
 async function regenFromPrompt() {
@@ -144,7 +213,7 @@ async function send() {
   const tid = addMsg('alice', 'Alice', '<span class="gen">thinking...</span>');
   document.getElementById('pd').value = '';
 
-  let success = false;
+  let success = false, reply = '';
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -153,14 +222,17 @@ async function send() {
     });
     const d = await res.json();
     if (d.error) { updMsg(tid, '<em style="color:#c08080">' + d.error + '</em>'); }
-    else { updMsg(tid, d.reply); success = true; }
+    else { reply = d.reply; updMsg(tid, reply); success = true; }
   } catch (e) {
     updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>');
   }
   btn.disabled = false;
   inp.focus();
 
-  if (success) triggerMedia('/image', '', true);
+  if (success) {
+    await speak(reply);
+    triggerMedia('/image', '', true);
+  }
 }
 
 function addMsg(cls, sndr, html) {
