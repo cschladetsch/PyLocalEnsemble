@@ -338,8 +338,11 @@ def extract_sd_prompt(text: str) -> str:
             f"{text}\n\n"
             f"Rules:\n"
             f"- Output comma-separated tags only. No sentences. No explanation.\n"
-            f"- Focus on: pose, action, expression, clothing (or lack of), location/setting, lighting, mood\n"
-            f"- Extract specific details mentioned or strongly implied in the conversation\n"
+            f"- Prioritize concrete pose/action details above all else\n"
+            f"- If a pose is described, include explicit pose tags (e.g., 'lying on bed', 'legs raised', 'feet above head', 'arch back')\n"
+            f"- Focus on: pose, action, expression, clothing, location/setting, lighting, mood\n"
+            f"- Extract only specific details explicitly mentioned\n"
+            f"- Keep it literal; avoid embellishment or inference\n"
             f"- Include emotional tone: playful, intense, tender, calm, etc\n"
             f"- Include setting details: indoor, outdoor, bedroom, candlelight, etc\n"
             f"- Do not include character names or dialogue\n"
@@ -347,7 +350,23 @@ def extract_sd_prompt(text: str) -> str:
         }],
         max_tokens=200,
     )
-    return response["choices"][0]["message"]["content"]
+    raw_tags = response["choices"][0]["message"]["content"]
+
+    # Second pass: condense and normalize tags, with hard emphasis on pose.
+    refine = llm.create_chat_completion(
+        messages=[{"role": "user", "content":
+            f"Condense and normalize these Stable Diffusion tags.\n\n"
+            f"{raw_tags}\n\n"
+            f"Rules:\n"
+            f"- Output comma-separated tags only. No sentences. No explanation.\n"
+            f"- Keep 15-30 tags max; remove redundancy\n"
+            f"- Ensure pose/action tags are present and explicit if mentioned (e.g., 'lying on bed', 'legs raised', 'feet above head', 'arch back')\n"
+            f"- Keep clothing, setting, lighting, and mood if present\n"
+            f"- Do not add new facts not present in the original tags"
+        }],
+        max_tokens=160,
+    )
+    return refine["choices"][0]["message"]["content"]
 
 
 def generate_image(prompt: str, extra_negative: str = ""):
