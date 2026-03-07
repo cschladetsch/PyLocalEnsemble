@@ -19,13 +19,21 @@ if os.name == "nt":
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
-    import fastapi, uvicorn, pydantic, llama_cpp
+    import fastapi, uvicorn, pydantic
     import requests as req
 except ImportError:
     print("Installing Python dependencies...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "fastapi", "uvicorn", "requests", "pydantic", "llama-cpp-python"])
+        "fastapi", "uvicorn", "requests", "pydantic"])
     import requests as req
+
+try:
+    from llama_cpp import Llama
+except ImportError:
+    print("Installing llama-cpp-python...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
+        "llama-cpp-python"])
+    from llama_cpp import Llama
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -40,14 +48,14 @@ MODEL_DIR   = os.path.join(ALICE_DIR, "models")
 ALICE_URL   = "http://localhost:8000"
 CONFIG_FILE = os.path.join(ALICE_DIR, "alice.json")
 
-# Default GGUF model to download (Mistral-Nemo Q4_K_M, ~7.7 GB)
-MODEL_URL  = "https://huggingface.co/bartowski/Mistral-Nemo-Instruct-2407-GGUF/resolve/main/Mistral-Nemo-Instruct-2407-Q4_K_M.gguf"
-MODEL_NAME = "Mistral-Nemo-Instruct-2407-Q4_K_M.gguf"
+# llama-cpp global (loaded at startup)
+LLM = None
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
     "forge_url":    "http://localhost:7860",
-    "model_path":   "",  # leave blank to auto-download
+    "model_path":   "",
+    "ollama_model": "mistral-nemo",
     "appearance":   "woman, Alice, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
     "system_prompt": (
@@ -123,109 +131,120 @@ def wait_for(url, label, retries=40, delay=3):
     print(" timed out.")
     return False
 
-# ── Install / start steps ────────────────────────────────────────────────────
-
-llm = None  # loaded by ensure_model() in background thread
-
-
-def _download_with_progress(url: str, dest: str):
-    def reporthook(count, block_size, total_size):
-        if total_size > 0:
-            pct = min(count * block_size / total_size * 100, 100)
-            print(f"\r        {pct:5.1f}%", end="", flush=True)
-    urllib.request.urlretrieve(url, dest, reporthook=reporthook)
-    print()
+# ── LLM (llama-cpp-python) ───────────────────────────────────────────────────
+history = []
 
 
-def _valid_gguf(path: str) -> bool:
-    """Return True if file exists and starts with the GGUF magic bytes."""
-    try:
-        with open(path, "rb") as f:
-            return f.read(4) == b"GGUF"
-    except Exception:
-        return False
+def _find_gguf() -> str:
+    """Auto-detect a GGUF model: check config, local models/, then Ollama cache."""
+    configured = CFG.get("model_path", "")
+    if configured and os.path.exists(configured):
+        return configured
 
+    # Local models/ dir
+    local = glob.glob(os.path.join(ALICE_DIR, "models", "*.gguf"))
+    if local:
+        return local[0]
 
-def _find_ollama_blob() -> str:
-    """Return path to mistral-nemo blob in Ollama's cache, or empty string."""
-    manifest = os.path.join(os.path.expanduser("~"), ".ollama", "models",
-        "manifests", "registry.ollama.ai", "library", "mistral-nemo", "latest")
-    if not os.path.exists(manifest):
-        return ""
-    try:
-        import json as _json
-        with open(manifest, encoding="utf-8") as f:
-            data = _json.load(f)
-        for layer in data.get("layers", []):
-            digest = layer.get("digest", "")
-            # The model layer is the large one (>1 GB)
-            if layer.get("size", 0) > 1_000_000_000 and digest.startswith("sha256:"):
-                blob = os.path.join(os.path.expanduser("~"), ".ollama", "models",
-                    "blobs", digest.replace(":", "-"))
-                if _valid_gguf(blob):
-                    return blob
-    except Exception:
-        pass
+    # Ollama blob cache — find blob via manifest for configured model
+    ollama_root = os.path.join(os.path.expanduser("~"), ".ollama", "models")
+    ollama_blobs = os.path.join(ollama_root, "blobs")
+    model_name = CFG.get("ollama_model", "mistral-nemo").split(":")[0]
+    manifest_path = os.path.join(ollama_root, "manifests", "registry.ollama.ai",
+                                 "library", model_name, "latest")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            for layer in manifest.get("layers", []):
+                if layer.get("mediaType") == "application/vnd.ollama.image.model":
+                    digest = layer["digest"].replace(":", "-")
+                    blob_path = os.path.join(ollama_blobs, digest)
+                    if os.path.exists(blob_path):
+                        return blob_path
+        except Exception:
+            pass
+
+    # Fallback: largest blob
+    if os.path.exists(ollama_blobs):
+        blobs = [os.path.join(ollama_blobs, f) for f in os.listdir(ollama_blobs)
+                 if not f.endswith(".part")]
+        if blobs:
+            return max(blobs, key=os.path.getsize)
+
     return ""
 
 
-def ensure_model():
-    global llm
-    step("Setting up language model...")
-    os.makedirs(MODEL_DIR, exist_ok=True)
-
-    # 1. Explicit path in config
-    model_path = CFG.get("model_path", "").strip()
-    if model_path and not _valid_gguf(model_path):
-        warn(f"model_path '{model_path}' is not a valid GGUF — ignoring.")
-        model_path = ""
-
-    # 2. Any valid .gguf in models/
-    if not model_path:
-        for candidate in glob.glob(os.path.join(MODEL_DIR, "*.gguf")):
-            if _valid_gguf(candidate):
-                model_path = candidate
-                ok(f"Found model: {os.path.basename(model_path)}")
-                break
-            else:
-                warn(f"Removing incomplete/corrupt file: {os.path.basename(candidate)}")
-                os.remove(candidate)
-
-    # 3. Reuse Ollama's already-downloaded blob (saves re-downloading)
-    if not model_path:
-        blob = _find_ollama_blob()
-        if blob:
-            ok(f"Reusing Ollama's cached mistral-nemo model.")
-            model_path = blob
-
-    # 4. Download
-    if not model_path:
-        model_path = os.path.join(MODEL_DIR, MODEL_NAME)
-        ok(f"Downloading {MODEL_NAME} (~7 GB) — one-time download...")
-        try:
-            _download_with_progress(MODEL_URL, model_path)
-        except Exception as e:
-            if os.path.exists(model_path):
-                os.remove(model_path)
-            fail(f"Download failed: {e}\nPlace a GGUF file in {MODEL_DIR} and restart.")
-
-    ok(f"Loading {os.path.basename(model_path)} ...")
-    from llama_cpp import Llama, llama_cpp as _llama_cpp
+def load_llm():
+    global LLM
+    step("Loading LLM...")
+    path = _find_gguf()
+    if not path:
+        warn("No GGUF model found. Add a .gguf file to models/ or set 'model_path' in alice.json.")
+        return
+    ok(f"Model: {os.path.basename(path)}")
     try:
-        supports_gpu = bool(_llama_cpp.llama_supports_gpu_offload())
-    except Exception:
-        supports_gpu = False
-    llm = Llama(
-        model_path=model_path,
-        n_ctx=4096,
-        n_gpu_layers=-1,  # use GPU if available; falls back to CPU silently
-        verbose=False,
-    )
-    if supports_gpu:
-        ok("llama.cpp GPU offload supported; LLM will use GPU if available.")
-    else:
-        warn("llama.cpp GPU offload not supported; LLM will run on CPU.")
-    ok("Model ready.")
+        LLM = Llama(model_path=path, n_gpu_layers=-1, n_ctx=4096, verbose=False)
+    except Exception as e:
+        warn(f"GPU load failed ({e}), retrying CPU-only...")
+        LLM = Llama(model_path=path, n_gpu_layers=0, n_ctx=4096, verbose=False)
+    ok("LLM ready.")
+
+
+def _llm_chat(messages: list) -> str:
+    if LLM is None:
+        raise RuntimeError("LLM not loaded")
+    result = LLM.create_chat_completion(messages=messages)
+    return result["choices"][0]["message"]["content"]
+
+
+def _llm_complete(prompt: str) -> str:
+    if LLM is None:
+        raise RuntimeError("LLM not loaded")
+    result = LLM(prompt, max_tokens=512, stop=["\n\n"])
+    return result["choices"][0]["text"]
+
+
+def chat_alice(message: str) -> str:
+    history.append({"role": "user", "content": message})
+    try:
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+        reply = _llm_chat(messages)
+    except Exception as e:
+        history.pop()
+        raise RuntimeError(f"LLM error: {e}")
+    history.append({"role": "assistant", "content": reply})
+    return reply
+
+
+def extract_sd_prompt(text: str) -> str:
+    try:
+        raw_tags = _llm_complete(
+            f"Read this conversation and extract a Stable Diffusion image prompt.\n\n"
+            f"{text}\n\n"
+            f"Rules:\n"
+            f"- Output comma-separated tags only. No sentences. No explanation.\n"
+            f"- Prioritize concrete pose/action details above all else\n"
+            f"- Focus on: pose, action, expression, clothing, location/setting, lighting, mood\n"
+            f"- Extract only specific details explicitly mentioned\n"
+            f"- Keep it literal; avoid embellishment or inference\n"
+            f"- Do not include character names or dialogue\n"
+            f"Tags:"
+        )
+        refined = _llm_complete(
+            f"Condense and normalize these Stable Diffusion tags.\n\n"
+            f"{raw_tags}\n\n"
+            f"Rules:\n"
+            f"- Output comma-separated tags only. No sentences. No explanation.\n"
+            f"- Keep 15-30 tags max; remove redundancy\n"
+            f"- Ensure pose/action tags are present\n"
+            f"- Do not add new facts not present in the original tags\n"
+            f"Tags:"
+        )
+        return refined
+    except Exception as e:
+        print(f"LLM prompt extraction error: {e}")
+        return ""
 
 
 def find_python310() -> str:
@@ -312,7 +331,6 @@ def start_forge():
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 app = FastAPI()
-history = []
 
 
 class ChatRequest(BaseModel):
@@ -321,63 +339,6 @@ class ChatRequest(BaseModel):
 
 class ImageRequest(BaseModel):
     extra: str = ""
-
-
-def chat_alice(message: str) -> str:
-    if llm is None:
-        raise RuntimeError("Model is still loading — please wait a moment and try again.")
-    history.append({"role": "user", "content": message})
-    try:
-        response = llm.create_chat_completion(
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
-            max_tokens=1024,
-        )
-        reply = response["choices"][0]["message"]["content"]
-    except Exception as e:
-        history.pop()
-        raise RuntimeError(f"Model error: {e}")
-    history.append({"role": "assistant", "content": reply})
-    return reply
-
-
-def extract_sd_prompt(text: str) -> str:
-    if llm is None:
-        return ""
-    response = llm.create_chat_completion(
-        messages=[{"role": "user", "content":
-            f"Read this conversation and extract a Stable Diffusion image prompt.\n\n"
-            f"{text}\n\n"
-            f"Rules:\n"
-            f"- Output comma-separated tags only. No sentences. No explanation.\n"
-            f"- Prioritize concrete pose/action details above all else\n"
-            f"- If a pose is described, include explicit pose tags (e.g., 'lying on bed', 'legs raised', 'feet above head', 'arch back')\n"
-            f"- Focus on: pose, action, expression, clothing, location/setting, lighting, mood\n"
-            f"- Extract only specific details explicitly mentioned\n"
-            f"- Keep it literal; avoid embellishment or inference\n"
-            f"- Include emotional tone: playful, intense, tender, calm, etc\n"
-            f"- Include setting details: indoor, outdoor, bedroom, candlelight, etc\n"
-            f"- Do not include character names or dialogue\n"
-            f"- Output only the tags, nothing else"
-        }],
-        max_tokens=200,
-    )
-    raw_tags = response["choices"][0]["message"]["content"]
-
-    # Second pass: condense and normalize tags, with hard emphasis on pose.
-    refine = llm.create_chat_completion(
-        messages=[{"role": "user", "content":
-            f"Condense and normalize these Stable Diffusion tags.\n\n"
-            f"{raw_tags}\n\n"
-            f"Rules:\n"
-            f"- Output comma-separated tags only. No sentences. No explanation.\n"
-            f"- Keep 15-30 tags max; remove redundancy\n"
-            f"- Ensure pose/action tags are present and explicit if mentioned (e.g., 'lying on bed', 'legs raised', 'feet above head', 'arch back')\n"
-            f"- Keep clothing, setting, lighting, and mood if present\n"
-            f"- Do not add new facts not present in the original tags"
-        }],
-        max_tokens=160,
-    )
-    return refine["choices"][0]["message"]["content"]
 
 
 def generate_image(prompt: str, extra_negative: str = ""):
@@ -731,6 +692,15 @@ async function clearHistory() {
 </html>"""
 
 
+def _download_with_progress(url: str, dest: str):
+    def reporthook(count, block_size, total_size):
+        if total_size > 0:
+            pct = min(count * block_size / total_size * 100, 100)
+            print(f"\r        {pct:5.1f}%", end="", flush=True)
+    urllib.request.urlretrieve(url, dest, reporthook=reporthook)
+    print()
+
+
 def ensure_animatediff():
     step("Checking AnimateDiff extension...")
     ext_dir = os.path.join(FORGE_DIR, "extensions", "sd-webui-animatediff")
@@ -766,7 +736,7 @@ def ensure_animatediff():
 # ── Entry point ──────────────────────────────────────────────────────────────
 def _startup():
     try:
-        ensure_model()
+        load_llm()
         ensure_forge()
         ensure_animatediff()
         start_forge()
