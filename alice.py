@@ -68,6 +68,7 @@ PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 # llama-cpp global (loaded at startup)
 LLM = None
 TTS = None
+_llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
@@ -330,7 +331,8 @@ def _tts_wav_b64(text: str) -> str:
 def _llm_chat(messages: list) -> str:
     if LLM is None:
         raise RuntimeError("LLM not loaded")
-    result = LLM.create_chat_completion(messages=messages)
+    with _llm_lock:
+        result = LLM.create_chat_completion(messages=messages)
     return result["choices"][0]["message"]["content"]
 
 
@@ -807,10 +809,11 @@ async def switch_model(body: ModelSwitchRequest):
             new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
         except Exception as e2:
             return JSONResponse({"error": str(e2)}, status_code=500)
-    global memory
-    LLM = new_llm
-    history.clear()
-    memory = ""
+    with _llm_lock:
+        global memory
+        LLM = new_llm
+        history.clear()
+        memory = ""
     print(f"[Alice] Model ready: {os.path.basename(body.path)}")
     return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
 
