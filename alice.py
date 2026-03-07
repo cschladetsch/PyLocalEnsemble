@@ -314,12 +314,15 @@ def chat_alice(message: str) -> str:
             "model": ALICE_MODEL,
             "messages": history,
             "stream": False,
-        }, timeout=60)
+        }, timeout=180)
         r.raise_for_status()
         reply = r.json()["message"]["content"]
     except req.exceptions.ConnectionError:
         history.pop()
         raise RuntimeError(f"Ollama is not running. Start it with: ollama serve")
+    except req.exceptions.Timeout:
+        history.pop()
+        raise RuntimeError("Ollama timed out — model may still be loading. Try again in a moment.")
     except req.exceptions.HTTPError as e:
         history.pop()
         raise RuntimeError(f"Ollama error {e.response.status_code}: {e.response.text[:200]}")
