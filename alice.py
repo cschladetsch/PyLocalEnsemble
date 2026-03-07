@@ -224,10 +224,22 @@ _VERBS = {
     "sitting", "standing", "walking", "running", "turning", "waiting",
 }
 
+_NON_VISUAL = {
+    # scent
+    "honeysuckle scent", "perfume", "fragrance", "scent", "aroma", "smell",
+    "cologne", "incense",
+    # sound
+    "whisper", "music", "sound", "silence", "noise", "echo", "melody",
+    # touch/feel (abstract)
+    "warmth", "tingling", "sensation", "feeling",
+}
+
 def _clean_tags(prompt: str) -> str:
-    """Remove verb/action tags that SD can't render as visual states."""
+    """Remove verb/action tags and non-visual sensory tags SD can't render."""
     tags = [t.strip() for t in prompt.split(",")]
-    tags = [t for t in tags if t and t.lower() not in _VERBS]
+    tags = [t for t in tags if t
+            and t.lower() not in _VERBS
+            and t.lower() not in _NON_VISUAL]
     return ", ".join(tags)
 
 
