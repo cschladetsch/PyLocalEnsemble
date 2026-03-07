@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio, tempfile
 
 # -- Windows CUDA DLL loading fix --
 if os.name == "nt":
@@ -42,9 +42,16 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
     from kokoro_onnx import Kokoro as _Kokoro
 
+try:
+    import faster_whisper as _faster_whisper_pkg  # noqa: F401 — ensure installed
+except ImportError:
+    print("Installing faster-whisper...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "faster-whisper"])
+    import faster_whisper as _faster_whisper_pkg  # noqa: F401
+
 
 import queue as _queue
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -63,6 +70,8 @@ PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 # llama-cpp global (loaded at startup)
 LLM = None
 TTS = None
+_WHISPER = None
+_whisper_lock = threading.Lock()
 _llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
 _auto_image_counter = 0
 
@@ -825,6 +834,47 @@ async def set_voice(body: VoiceRequest):
         return JSONResponse({"error": "Unknown voice"}, status_code=400)
     CFG.setdefault("tts", {})["voice"] = body.voice
     return JSONResponse({"status": "ok", "voice": body.voice})
+
+
+def _ensure_whisper():
+    global _WHISPER
+    with _whisper_lock:
+        if _WHISPER is None:
+            from faster_whisper import WhisperModel
+            ok("Loading Whisper STT (base, CPU)...")
+            _WHISPER = WhisperModel("base", device="cpu", compute_type="int8")
+            ok("Whisper STT ready.")
+
+
+@app.post("/stt")
+async def stt(request: Request):
+    data = await request.body()
+    if not data:
+        return JSONResponse({"error": "No audio data"}, status_code=400)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _ensure_whisper)
+    suffix = ".webm"
+    ct = request.headers.get("content-type", "")
+    if "ogg" in ct:
+        suffix = ".ogg"
+    elif "wav" in ct:
+        suffix = ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(data)
+        tmp = f.name
+    try:
+        def _transcribe():
+            segments, _ = _WHISPER.transcribe(tmp, language="en", beam_size=5)
+            return " ".join(s.text for s in segments).strip()
+        text = await loop.run_in_executor(None, _transcribe)
+        return JSONResponse({"text": text})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
 
 
 class TtsRequest(BaseModel):
