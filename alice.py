@@ -743,24 +743,42 @@ async def video_from_history(body: VideoRequest):
         full_prompt = prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"]
         negative    = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
 
+        denoise   = vid_cfg.get("denoise", 0.45)
+        sampler   = IMG_CFG.get("sampler_name", "DPM++ 2M Karras")
+        common    = dict(prompt=full_prompt, negative_prompt=negative,
+                         steps=steps, width=width, height=height,
+                         cfg_scale=cfg_scale, sampler_name=sampler)
+
         frames = []
-        for _ in range(n_frames):
+        # Frame 0: txt2img with fixed seed for a stable base
+        try:
+            r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img",
+                         json={**common, "seed": -1}, timeout=120)
+            imgs = r.json().get("images", [])
+            if imgs:
+                frames.append(_PILImage.open(io.BytesIO(base64.b64decode(imgs[0]))))
+        except Exception as e:
+            print(f"[Alice] Frame 0 error: {e}")
+
+        # Remaining frames: img2img from previous frame with low denoising
+        for i in range(1, n_frames):
+            if not frames:
+                break
+            buf = io.BytesIO()
+            frames[-1].save(buf, format="PNG")
+            prev_b64 = base64.b64encode(buf.getvalue()).decode()
             try:
-                r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
-                    "prompt":          full_prompt,
-                    "negative_prompt": negative,
-                    "steps":           steps,
-                    "width":           width,
-                    "height":          height,
-                    "cfg_scale":       cfg_scale,
-                    "sampler_name":    IMG_CFG.get("sampler_name", "DPM++ 2M Karras"),
-                    "seed":            -1,
+                r = req.post(f"{FORGE_URL}/sdapi/v1/img2img", json={
+                    **common,
+                    "init_images":        [prev_b64],
+                    "denoising_strength": denoise,
+                    "seed":               -1,
                 }, timeout=120)
                 imgs = r.json().get("images", [])
                 if imgs:
                     frames.append(_PILImage.open(io.BytesIO(base64.b64decode(imgs[0]))))
             except Exception as e:
-                print(f"[Alice] Frame error: {e}")
+                print(f"[Alice] Frame {i} error: {e}")
 
         if not frames:
             return None, full_prompt
