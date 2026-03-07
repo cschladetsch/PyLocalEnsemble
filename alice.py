@@ -404,6 +404,16 @@ async def chat(body: ChatRequest):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/interrupt")
+async def interrupt():
+    try:
+        req.post(f"{FORGE_URL}/sdapi/v1/interrupt", timeout=5)
+        return {"status": "interrupted"}
+    except Exception as e:
+        print(f"Interrupt error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/image")
 async def image_from_history(body: ImageRequest):
     if not history:
@@ -561,31 +571,49 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
   </div>
 </div>
 <script>
-let mid = 0;
+let mid = 0, imgAbort = null;
 function disableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=true;}); }
 function enableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=false;}); }
 
-function doImage(){ triggerMedia('/image'); }
-function doVideo(){ triggerMedia('/video'); }
+async function interrupt() {
+  if (imgAbort) { imgAbort.abort(); imgAbort = null; }
+  await fetch('/interrupt', {method: 'POST'}).catch(() => {});
+}
 
-async function triggerMedia(endpoint) {
-  const inp = document.getElementById('inp');
-  const extra = inp.value.trim();
-  inp.value = '';
+function doImage(){ 
+  const extra = document.getElementById('inp').value.trim();
+  document.getElementById('inp').value = '';
+  triggerMedia('/image', extra); 
+}
+function doVideo(){ 
+  const extra = document.getElementById('inp').value.trim();
+  document.getElementById('inp').value = '';
+  triggerMedia('/video', extra); 
+}
+
+async function triggerMedia(endpoint, extra = '', auto = false) {
+  await interrupt();
+  imgAbort = new AbortController();
+  const { signal } = imgAbort;
+
   disableAll();
   const label = endpoint === '/video' ? 'Generating video...' : 'Generating scene...';
   const header = endpoint === '/video' ? 'Generated Video' : 'Generated Scene';
   document.getElementById('ih').textContent = header;
-  if (extra) {
+  
+  if (extra && !auto) {
     addMsg('user', 'You', extra);
   }
+  
   document.getElementById('ic').innerHTML = `<div class="ph gen">${label}</div>`;
   document.getElementById('pd').innerHTML = '';
+  
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({extra: extra})
+      body: JSON.stringify({extra: extra}),
+      signal
     });
     const d = await res.json();
     if (d.error) {
@@ -602,10 +630,15 @@ async function triggerMedia(endpoint) {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
     }
   } catch(e) {
-    document.getElementById('ic').innerHTML = '<div class="ph">Error contacting backend.</div>';
+    if (e.name === 'AbortError') {
+      document.getElementById('ic').innerHTML = '<div class="ph">Interrupted.</div>';
+    } else {
+      document.getElementById('ic').innerHTML = '<div class="ph">Error contacting backend.</div>';
+    }
   }
+  imgAbort = null;
   enableAll();
-  inp.focus();
+  document.getElementById('inp').focus();
 }
 
 async function send() {
@@ -615,23 +648,22 @@ async function send() {
   const btn = document.getElementById('btn');
   btn.disabled = true;
 
+  await interrupt();
+
   if (msg.startsWith('/video')) {
-    inp.value = msg.slice(6).trim();
-    btn.disabled = false;
-    triggerMedia('/video');
+    triggerMedia('/video', msg.slice(6).trim());
     return;
   }
 
   if (msg.startsWith('/image')) {
-    inp.value = msg.slice(6).trim();
-    btn.disabled = false;
-    triggerMedia('/image');
+    triggerMedia('/image', msg.slice(6).trim());
     return;
   }
 
   addMsg('user', 'You', msg);
   const tid = addMsg('alice', 'Alice', '<span class="gen">thinking...</span>');
   document.getElementById('pd').innerHTML = '';
+  let success = false;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -640,13 +672,27 @@ async function send() {
     });
     const d = await res.json();
     if (d.error) { updMsg(tid, '<em style="color:#c08080">' + d.error + '</em>'); }
-    else { updMsg(tid, d.reply); }
+    else { 
+      updMsg(tid, d.reply); 
+      success = true;
+    }
   } catch(e) {
     updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>');
   }
   btn.disabled = false;
   inp.focus();
+
+  if (success) {
+    triggerMedia('/image', '', true);
+  }
 }
+
+document.getElementById('inp').addEventListener('input', () => {
+  if (imgAbort) {
+    interrupt();
+  }
+});
+
 function addMsg(cls, sndr, html) {
   const id = 'm' + (mid++), d = document.createElement('div');
   d.className = 'msg ' + cls;
