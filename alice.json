@@ -16,11 +16,5 @@
         "cfg_scale": 7,
         "sampler_name": "DPM++ 2M Karras",
         "suffix": "photorealistic, highly detailed, 8k, masterpiece"
-    },
-    "video": {
-        "frames": 6,
-        "steps": 15,
-        "frame_ms": 200,
-        "denoise": 0.45
     }
 }

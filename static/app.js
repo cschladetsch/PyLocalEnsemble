@@ -33,11 +33,11 @@ async function speak(text) {
 }
 
 function disableAll() {
-  ['ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
+  const e = document.getElementById('ibtn'); if (e) e.disabled = true;
   const s = document.getElementById('stop-btn'); if (s) s.disabled = false;
 }
 function enableAll() {
-  ['ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = false; });
+  const e = document.getElementById('ibtn'); if (e) e.disabled = false;
   const s = document.getElementById('stop-btn'); if (s) s.disabled = true;
 }
 
@@ -62,33 +62,25 @@ async function interrupt(reason) {
 function doImage() {
   const extra = document.getElementById('inp').value.trim();
   document.getElementById('inp').value = '';
-  triggerMedia('/image', extra);
+  triggerMedia(extra);
 }
 
-function doVideo() {
-  const extra = document.getElementById('inp').value.trim();
-  document.getElementById('inp').value = '';
-  triggerMedia('/video', extra);
-}
-
-async function triggerMedia(endpoint, extra = '', auto = false) {
+async function triggerMedia(extra = '', auto = false) {
   await interrupt('new media request');
   imgAbort = new AbortController();
   const { signal } = imgAbort;
 
   disableAll();
-  const label = endpoint === '/video' ? 'Generating video...' : 'Generating scene...';
-  const header = endpoint === '/video' ? 'Generated Video' : 'Generated Scene';
-  document.getElementById('ih').textContent = header;
+  document.getElementById('ih').textContent = 'Generated Scene';
 
   if (extra && !auto) addMsg('user', 'You', extra);
 
-  document.getElementById('ic').innerHTML = `<div class="ph gen">${label}</div>`;
+  document.getElementById('ic').innerHTML = '<div class="ph gen">Generating scene...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
 
   try {
-    const res = await fetch(endpoint, {
+    const res = await fetch('/image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ extra }),
@@ -97,9 +89,6 @@ async function triggerMedia(endpoint, extra = '', auto = false) {
     const d = await res.json();
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
-    } else if (d.gif) {
-      document.getElementById('ic').innerHTML = `<img src="data:image/gif;base64,${d.gif}">`;
-      setPrompt(d.sd_prompt);
     } else if (d.image) {
       document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
       setPrompt(d.sd_prompt);
@@ -213,8 +202,7 @@ async function send() {
   inp.value = '';
   await interrupt('new message sent');
 
-  if (msg.startsWith('/video')) { triggerMedia('/video', msg.slice(6).trim()); return; }
-  if (msg.startsWith('/image')) { triggerMedia('/image', msg.slice(6).trim()); return; }
+  if (msg.startsWith('/image')) { triggerMedia(msg.slice(6).trim()); return; }
 
   addMsg('user', 'You', msg);
   const tid = addMsg('alice', 'Alice', '<span class="gen">thinking...</span>');
@@ -243,7 +231,7 @@ async function send() {
 
   if (success) {
     await speak(reply);
-    triggerMedia('/image', '', true);
+    triggerMedia('', true);
   }
 }
 
