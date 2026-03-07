@@ -238,8 +238,9 @@ async function send() {
   if (msg.startsWith('/image')) { triggerMedia(msg.slice(6).trim()); return; }
 
   addMsg('user', 'You', msg);
-  const tid = addMsg('alice', 'Alice', '<span class="gen">thinking...</span>');
+  const tid = addMsg('alice', 'Alice', '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
+  document.getElementById('thinking-bar').style.display = 'block';
 
   chatAbort = new AbortController();
   disableAll();
@@ -263,16 +264,18 @@ async function send() {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = JSON.parse(line.slice(6));
-        if (data.error) { updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
-        if (data.delta) { reply += data.delta; updMsg(tid, reply); }
+        if (data.error) { document.getElementById('thinking-bar').style.display='none'; updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
+        if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
         if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
       }
     }
   } catch (e) {
+    document.getElementById('thinking-bar').style.display = 'none';
     if (e.name === 'AbortError') { updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); }
     else { updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>'); }
     chatAbort = null; enableAll(); inp.focus(); return;
   }
+  document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
   inp.focus();
