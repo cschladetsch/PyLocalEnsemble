@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, socket
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, socket, threading
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
@@ -656,17 +656,20 @@ async function clearHistory() {
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
+def _startup():
+    ensure_ollama()
+    ensure_ollama_running()
+    ensure_models()
+    ensure_forge()
+    start_forge()
+
 if __name__ == "__main__":
     print()
     print("=" * 60)
     print("  Alice")
     print("=" * 60)
 
-    ensure_ollama()
-    ensure_ollama_running()
-    ensure_models()
-    ensure_forge()
-    start_forge()
+    threading.Thread(target=_startup, daemon=True).start()
 
     print()
     print(f"[Alice] Starting at {ALICE_URL}")
