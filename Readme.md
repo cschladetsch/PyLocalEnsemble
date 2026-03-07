@@ -1,5 +1,7 @@
 # Alice
 
+> **⚠️ NSFW / 18+ — This project generates adult content. You must be 18 or older to use it.**
+
 A single-file local AI companion with chat and image generation.
 Powered by [llama.cpp](https://github.com/ggerganov/llama.cpp) (LLM via `llama-cpp-python`) and [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) (images).
 Everything runs locally -- no cloud, no API keys, no subscriptions.
@@ -71,18 +73,9 @@ Alice works through the following steps automatically:
 
 ## Checkpoint (Required for Image Generation)
 
-Stable Diffusion needs a model file to generate images. Alice will pause and tell you if one is missing.
+Alice automatically downloads **Realistic Vision V5.1** (2.1 GB) on first run — no manual steps needed.
 
-**Recommended:** [DreamShaper 8](https://civitai.com/models/4384/dreamshaper)
-
-1. Download `dreamshaper_8.safetensors` from Civitai
-2. Place it in:
-   ```
-   stable-diffusion-webui-forge\models\Stable-diffusion\
-   ```
-3. Re-run `python alice.py`
-
-Any `.safetensors` checkpoint will work.
+Any `.safetensors` checkpoint placed in `stable-diffusion-webui-forge\models\Stable-diffusion\` will be detected automatically.
 
 ---
 
