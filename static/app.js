@@ -307,7 +307,7 @@ async function _sttTranscribe(webmBlob, btn, tid) {
   try {
     console.log('STT blob:', webmBlob.size, 'bytes,', webmBlob.type);
     const arrayBuf = await webmBlob.arrayBuffer();
-    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const audioCtx = new AudioContext();
     let audioBuf;
     try {
       audioBuf = await audioCtx.decodeAudioData(arrayBuf);
@@ -325,7 +325,8 @@ async function _sttTranscribe(webmBlob, btn, tid) {
     const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
     ws(0,'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); ws(8,'WAVE'); ws(12,'fmt ');
     v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-    v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+    const sr = audioBuf.sampleRate;
+    v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
     ws(36,'data'); v.setUint32(40, pcm.length * 2, true);
     let off = 44;
     for (let i = 0; i < pcm.length; i++) {
