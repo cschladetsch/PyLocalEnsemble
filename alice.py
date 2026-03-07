@@ -250,12 +250,17 @@ _NON_VISUAL = {
 }
 
 def _clean_tags(prompt: str) -> str:
-    """Remove verb/action tags and non-visual sensory tags SD can't render."""
+    """Remove verb/action tags, non-visual sensory tags, and duplicates."""
     tags = [t.strip() for t in prompt.split(",")]
-    tags = [t for t in tags if t
-            and t.lower() not in _VERBS
-            and t.lower() not in _NON_VISUAL]
-    return ", ".join(tags)
+    seen, out = set(), []
+    for t in tags:
+        key = re.sub(r'[^a-z0-9 ]', '', t.lower()).strip()
+        if not t or t.lower() in _VERBS or t.lower() in _NON_VISUAL:
+            continue
+        if key and key not in seen:
+            seen.add(key)
+            out.append(t)
+    return ", ".join(out)
 
 
 def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
