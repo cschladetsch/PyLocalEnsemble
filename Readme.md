@@ -102,12 +102,16 @@ Use the model dropdown in the top-left of the UI. All `.gguf` files in `models/`
 
 **Recommended models:**
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `Llama-3.2-3B-Instruct-uncensored-Q4_K_M` | 2.1 GB | Default. Fast, uncensored. |
-| Any Llama 3 / Mistral / Qwen2 GGUF | varies | Larger = better quality, slower |
+| Model | VRAM | Size | Notes |
+|-------|------|------|-------|
+| `Llama-3.2-3B-Instruct-uncensored-Q4_K_M` | 4 GB | 2.1 GB | Default. Fast. Usable but limited NSFW. |
+| `Mistral-7B-Instruct-v0.3-uncensored-Q4_K_M` | 6 GB | 4.4 GB | Noticeably better quality and compliance. |
+| `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Best quality for NSFW on consumer GPUs. |
+| `Midnight-Rose-70B-Q2_K` | 24 GB+ | ~25 GB | Near-GPT-4 quality. High-end only. |
 
-> The model handles both conversation **and** image prompt extraction. A better model gives better image prompts.
+> The model handles both conversation **and** image prompt extraction. A better model gives better responses and more accurate scene descriptions.
+>
+> To use a different model: drop its `.gguf` file into `models/` and select it from the dropdown — no restart needed.
 
 ---
 
