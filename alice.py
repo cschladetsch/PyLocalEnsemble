@@ -262,22 +262,30 @@ def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     return prompt, negative
 
 
-def extract_sd_prompt(text: str) -> str:
+def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "") -> str:
     try:
+        context_parts = []
+        if appearance:
+            context_parts.append(f"The subject's appearance: {appearance}")
+        if last_user_msg:
+            context_parts.append(f"Most recent user request: \"{last_user_msg}\"")
+        context = "\n".join(context_parts)
+
         result = _llm_chat([
             {"role": "system", "content": (
                 "You extract Stable Diffusion image prompts from conversations. "
-                "Output ONLY comma-separated tags. Maximum 25 tags. "
+                "Output ONLY comma-separated tags. Maximum 30 tags. "
                 "No sentences, no explanation, no lists, nothing else. "
-                "IMPORTANT: Focus entirely on the MOST RECENT exchange — what is happening RIGHT NOW in the scene. "
+                "Focus on the MOST RECENT exchange — what is happening RIGHT NOW. "
                 "Describe the current visual state: pose, body position, clothing state, expression, setting, lighting, mood. "
-                "If clothing is being removed or adjusted, describe the resulting state, not the action. "
-                "Never invent content not present in the conversation. "
-                "Never output verbs or actions — only visual states (e.g. not 'removing dress' but 'dress around waist')."
+                "If clothing is being removed or adjusted, describe the resulting state (e.g. not 'removing dress' but 'dress around waist'). "
+                "Use the subject's known appearance to fill in details not explicitly stated. "
+                "Never output verbs or actions — only visual nouns and adjectives."
             )},
-            {"role": "user", "content": f"Extract SD tags describing the current scene:\n\n{text}"},
+            {"role": "user", "content": (
+                f"{context}\n\nConversation:\n{text}\n\nExtract SD tags for the current scene:"
+            )},
         ])
-        # Strip any preamble the model adds before the actual tags
         tags = result.strip().split("\n")[-1]
         return tags
     except Exception as e:
@@ -466,10 +474,10 @@ async def interrupt():
 async def image_from_history(body: ImageRequest):
     if not history:
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
-    messages = "\n".join(
-        f"{m['role'].capitalize()}: {m['content']}" for m in history[-4:]
-    )
-    base_prompt = extract_sd_prompt(messages)
+    recent = history[-6:]
+    messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
+    last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user)
 
     # Split extra into positive tags and "no X" -> negative tags
     positive_parts = []
@@ -499,10 +507,10 @@ class VideoRequest(BaseModel):
 async def video_from_history(body: VideoRequest):
     if not history:
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
-    messages = "\n".join(
-        f"{m['role'].capitalize()}: {m['content']}" for m in history[-4:]
-    )
-    base_prompt = extract_sd_prompt(messages)
+    recent = history[-6:]
+    messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
+    last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+    base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user)
 
     positive_parts = []
     negative_parts = []
