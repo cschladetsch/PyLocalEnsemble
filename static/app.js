@@ -67,6 +67,7 @@ function doImage() {
 
 let progressTimer = null;
 function startProgress() {
+  stopProgress(); // clear any existing timer before starting a new one
   progressTimer = setInterval(async () => {
     try {
       const r = await fetch('/progress');
