@@ -15,6 +15,7 @@
         "height": 768,
         "cfg_scale": 7,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix": "photorealistic, highly detailed, 8k, masterpiece"
+        "suffix": "photorealistic, highly detailed, 8k, masterpiece",
+        "auto_every": 1
     }
 }

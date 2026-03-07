@@ -65,6 +65,22 @@ function doImage() {
   triggerMedia(extra);
 }
 
+let progressTimer = null;
+function startProgress() {
+  progressTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/progress');
+      const d = await r.json();
+      const pct = Math.round((d.progress || 0) * 100);
+      const el = document.querySelector('#ic .gen');
+      if (el && pct > 0) el.textContent = `Generating scene... ${pct}%`;
+    } catch {}
+  }, 800);
+}
+function stopProgress() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+}
+
 async function triggerMedia(extra = '', auto = false) {
   await interrupt('new media request');
   imgAbort = new AbortController();
@@ -79,6 +95,7 @@ async function triggerMedia(extra = '', auto = false) {
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
 
+  startProgress();
   try {
     const res = await fetch('/image', {
       method: 'POST',
@@ -102,6 +119,7 @@ async function triggerMedia(extra = '', auto = false) {
       document.getElementById('ic').innerHTML = '<div class="ph">Error contacting backend.</div>';
     }
   }
+  stopProgress();
   imgAbort = null;
   enableAll();
   document.getElementById('inp').focus();
@@ -152,6 +170,21 @@ async function switchPersona(name) {
 }
 
 loadPersonas();
+
+async function loadVoices() {
+  try {
+    const r = await fetch('/voices');
+    const d = await r.json();
+    const sel = document.getElementById('voice-select');
+    sel.innerHTML = d.voices.map(v => `<option value="${v}" ${v === d.current ? 'selected' : ''}>${v}</option>`).join('');
+  } catch (e) { console.warn('Could not load voices:', e); }
+}
+
+async function switchVoice(voice) {
+  await fetch('/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice }) });
+}
+
+loadVoices();
 
 function setPrompt(text) {
   if (!text) return;
@@ -210,7 +243,7 @@ async function send() {
 
   chatAbort = new AbortController();
   disableAll();
-  let success = false, reply = '';
+  let reply = '', autoImage = true;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -218,20 +251,35 @@ async function send() {
       body: JSON.stringify({ message: msg }),
       signal: chatAbort.signal
     });
-    const d = await res.json();
-    if (d.error) { updMsg(tid, '<em style="color:#c08080">' + d.error + '</em>'); }
-    else { reply = d.reply; updMsg(tid, reply); success = true; }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+        if (data.error) { updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
+        if (data.delta) { reply += data.delta; updMsg(tid, reply); }
+        if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
+      }
+    }
   } catch (e) {
-    if (e.name === 'AbortError') { updMsg(tid, '<em style="color:#888">Interrupted.</em>'); }
+    if (e.name === 'AbortError') { updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); }
     else { updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>'); }
+    chatAbort = null; enableAll(); inp.focus(); return;
   }
   chatAbort = null;
   enableAll();
   inp.focus();
 
-  if (success) {
+  if (reply) {
     await speak(reply);
-    triggerMedia('', true);
+    if (autoImage) triggerMedia('', true);
   }
 }
 

@@ -14,6 +14,7 @@
   <div style="display:flex;gap:.6rem;align-items:center">
     <select id="model-select" class="cb" onchange="switchModel(this)" style="cursor:pointer;max-width:16rem"></select>
     <select id="persona-select" class="cb" onchange="switchPersona(this.value)" style="cursor:pointer"></select>
+    <select id="voice-select" class="cb" onchange="switchVoice(this.value)" style="cursor:pointer" title="TTS voice"></select>
     <button class="cb" id="resay-btn" onclick="resay()" disabled>Re-say</button>
     <button class="cb" id="mute-btn" onclick="toggleMute()">Mute</button>
     <button class="cb" onclick="clearHistory()">Clear</button>
