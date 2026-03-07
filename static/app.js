@@ -1,4 +1,5 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
+let mediaRecorder = null, audioChunks = [];
 
 function resay() {
   if (!lastAudioSrc) return;
@@ -234,11 +235,11 @@ async function send() {
   const inp = document.getElementById('inp'), msg = inp.value.trim();
   if (!msg) return;
   inp.value = '';
-  await interrupt('new message sent');
 
-  if (msg.startsWith('/image')) { triggerMedia(msg.slice(6).trim()); return; }
+  if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
 
   addMsg('user', 'You', msg);
+  await interrupt('new message sent');
   const tid = addMsg('alice', 'Alice', '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
@@ -302,6 +303,48 @@ function updMsg(id, t) {
   const e = document.getElementById(id);
   if (!e) return;
   e.innerHTML = e.querySelector('.sndr').outerHTML + t;
+}
+
+async function toggleMic() {
+  const btn = document.getElementById('mic-btn');
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      btn.textContent = 'Mic';
+      btn.classList.remove('recording');
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const res = await fetch('/stt', {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type },
+          body: blob
+        });
+        const d = await res.json();
+        if (d.text) {
+          document.getElementById('inp').value = d.text;
+          document.getElementById('inp').focus();
+        }
+      } catch (e) { console.warn('STT error:', e); }
+      btn.disabled = false;
+      btn.textContent = 'Mic';
+    };
+    mediaRecorder.start();
+    btn.textContent = 'Stop';
+    btn.classList.add('recording');
+  } catch (e) {
+    console.warn('Mic error:', e);
+    alert('Microphone access denied or unavailable.');
+  }
 }
 
 async function clearHistory() {
