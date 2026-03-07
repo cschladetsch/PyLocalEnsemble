@@ -42,12 +42,6 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
     from kokoro_onnx import Kokoro as _Kokoro
 
-try:
-    from PIL import Image as _PILImage
-except ImportError:
-    print("Installing Pillow...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "Pillow"])
-    from PIL import Image as _PILImage
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -710,96 +704,6 @@ async def image_from_history(body: ImageRequest):
 
 
 
-class VideoRequest(BaseModel):
-    extra: str = ""
-
-
-@app.post("/video")
-async def video_from_history(body: VideoRequest):
-    if not history:
-        return JSONResponse({"error": "No conversation history yet."}, status_code=400)
-
-    def _run():
-        recent = history[-6:]
-        messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
-        last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-        base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user, persona=SYSTEM_PROMPT)
-        positive_parts, negative_parts = [], []
-        for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
-            if token.lower().startswith("no "):
-                negative_parts.append(token[3:].strip())
-            else:
-                positive_parts.append(token)
-        positive_extra = ", ".join(positive_parts)
-        extra_negative = ", ".join(negative_parts)
-        prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-        vid_cfg = CFG.get("video", {})
-        n_frames  = vid_cfg.get("frames", 6)
-        steps     = vid_cfg.get("steps", 15)
-        width     = vid_cfg.get("width",  IMG_CFG.get("width",  512))
-        height    = vid_cfg.get("height", IMG_CFG.get("height", 512))
-        cfg_scale = vid_cfg.get("cfg_scale", IMG_CFG.get("cfg_scale", 7))
-        duration  = vid_cfg.get("frame_ms", 200)
-        full_prompt = prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"]
-        negative    = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
-
-        denoise   = vid_cfg.get("denoise", 0.45)
-        sampler   = IMG_CFG.get("sampler_name", "DPM++ 2M Karras")
-        common    = dict(prompt=full_prompt, negative_prompt=negative,
-                         steps=steps, width=width, height=height,
-                         cfg_scale=cfg_scale, sampler_name=sampler)
-
-        frames = []
-        # Frame 0: txt2img with fixed seed for a stable base
-        try:
-            r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img",
-                         json={**common, "seed": -1}, timeout=120)
-            imgs = r.json().get("images", [])
-            if imgs:
-                frames.append(_PILImage.open(io.BytesIO(base64.b64decode(imgs[0]))))
-        except Exception as e:
-            print(f"[Alice] Frame 0 error: {e}")
-
-        # Remaining frames: img2img from previous frame with low denoising
-        for i in range(1, n_frames):
-            if not frames:
-                break
-            buf = io.BytesIO()
-            frames[-1].save(buf, format="PNG")
-            prev_b64 = base64.b64encode(buf.getvalue()).decode()
-            try:
-                r = req.post(f"{FORGE_URL}/sdapi/v1/img2img", json={
-                    **common,
-                    "init_images":        [prev_b64],
-                    "denoising_strength": denoise,
-                    "seed":               -1,
-                }, timeout=120)
-                imgs = r.json().get("images", [])
-                if imgs:
-                    frames.append(_PILImage.open(io.BytesIO(base64.b64decode(imgs[0]))))
-            except Exception as e:
-                print(f"[Alice] Frame {i} error: {e}")
-
-        if not frames:
-            return None, full_prompt
-
-        gif_buf = io.BytesIO()
-        frames[0].save(
-            gif_buf, format="GIF", save_all=True,
-            append_images=frames[1:], loop=0, duration=duration, optimize=False
-        )
-        return base64.b64encode(gif_buf.getvalue()).decode(), full_prompt
-
-    loop = asyncio.get_running_loop()
-    try:
-        gif_b64, full_prompt = await loop.run_in_executor(None, _run)
-        if gif_b64:
-            return JSONResponse({"gif": gif_b64, "sd_prompt": full_prompt})
-        return JSONResponse({"error": "No frames generated — is Forge running?"}, status_code=500)
-    except Exception as e:
-        print(f"Forge video error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 @app.get("/models")
 async def list_models():
     models = [{"name": name, "path": path} for name, path in _list_ggufs()]
@@ -891,36 +795,6 @@ async def index():
         return f.read()
 
 
-def ensure_animatediff():
-    step("Checking AnimateDiff extension...")
-    ext_dir = os.path.join(FORGE_DIR, "extensions", "sd-webui-animatediff")
-    if not os.path.exists(ext_dir):
-        ok("Cloning AnimateDiff extension...")
-        try:
-            subprocess.run(["git", "clone", "https://github.com/continue-revolution/sd-webui-animatediff", ext_dir], check=True)
-            ok("AnimateDiff extension cloned.")
-        except Exception as e:
-            warn(f"Failed to clone AnimateDiff extension: {e}")
-            return
-
-    model_dir = os.path.join(ext_dir, "model")
-    os.makedirs(model_dir, exist_ok=True)
-    
-    motion_module = "mm_sd_v15_v2.ckpt"
-    module_path = os.path.join(model_dir, motion_module)
-    
-    if not os.path.exists(module_path):
-        url = f"https://huggingface.co/guoyww/AnimateDiff/resolve/main/{motion_module}"
-        ok(f"Downloading {motion_module} (~1.6 GB)...")
-        try:
-            _download_with_progress(url, module_path)
-            ok("Motion module downloaded.")
-        except Exception as e:
-            if os.path.exists(module_path):
-                os.remove(module_path)
-            warn(f"Failed to download motion module: {e}")
-    else:
-        ok("Motion module present.")
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
