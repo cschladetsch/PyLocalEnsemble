@@ -33,11 +33,11 @@ async function speak(text) {
 }
 
 function disableAll() {
-  ['btn', 'ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
+  ['ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
   const s = document.getElementById('stop-btn'); if (s) s.disabled = false;
 }
 function enableAll() {
-  ['btn', 'ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = false; });
+  ['ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = false; });
   const s = document.getElementById('stop-btn'); if (s) s.disabled = true;
 }
 
@@ -206,9 +206,6 @@ async function send() {
   const inp = document.getElementById('inp'), msg = inp.value.trim();
   if (!msg) return;
   inp.value = '';
-  const btn = document.getElementById('btn');
-  btn.disabled = true;
-
   await interrupt('new message sent');
 
   if (msg.startsWith('/video')) { triggerMedia('/video', msg.slice(6).trim()); return; }
@@ -231,7 +228,6 @@ async function send() {
   } catch (e) {
     updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>');
   }
-  btn.disabled = false;
   inp.focus();
 
   if (success) {
