@@ -231,19 +231,11 @@ async function regenFromPrompt() {
   enableAll();
 }
 
-async function send() {
-  const inp = document.getElementById('inp'), msg = inp.value.trim();
-  if (!msg) return;
-  inp.value = '';
-
-  if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
-
-  addMsg('user', 'You', msg);
+async function _chatWith(msg) {
   await interrupt('new message sent');
   const tid = addMsg('alice', 'Alice', '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
-
   chatAbort = new AbortController();
   disableAll();
   let reply = '', autoImage = true;
@@ -275,17 +267,23 @@ async function send() {
     document.getElementById('thinking-bar').style.display = 'none';
     if (e.name === 'AbortError') { updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); }
     else { updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>'); }
-    chatAbort = null; enableAll(); inp.focus(); return;
+    chatAbort = null; enableAll(); return;
   }
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  inp.focus();
+  if (reply) { await speak(reply); if (autoImage) triggerMedia('', true); }
+}
 
-  if (reply) {
-    await speak(reply);
-    if (autoImage) triggerMedia('', true);
-  }
+async function send() {
+  const inp = document.getElementById('inp'), msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
+  addMsg('user', 'You', msg);
+  inp.focus();
+  await _chatWith(msg);
+  inp.focus();
 }
 
 function addMsg(cls, sndr, html) {
@@ -305,7 +303,7 @@ function updMsg(id, t) {
   e.innerHTML = e.querySelector('.sndr').outerHTML + t;
 }
 
-async function _sttTranscribe(webmBlob, btn) {
+async function _sttTranscribe(webmBlob, btn, tid) {
   try {
     const arrayBuf = await webmBlob.arrayBuffer();
     const audioCtx = new AudioContext({ sampleRate: 16000 });
@@ -314,6 +312,7 @@ async function _sttTranscribe(webmBlob, btn) {
       audioBuf = await audioCtx.decodeAudioData(arrayBuf);
     } catch (e) {
       console.warn('Audio decode failed:', e);
+      updMsg(tid, '<em style="color:#888">Could not decode audio.</em>');
       btn.textContent = 'Mic'; btn.disabled = false; await audioCtx.close(); return;
     }
     await audioCtx.close();
@@ -338,11 +337,14 @@ async function _sttTranscribe(webmBlob, btn) {
     const d = await res.json();
     btn.textContent = 'Mic'; btn.disabled = false;
     if (d.text) {
-      document.getElementById('inp').value = d.text;
-      send(); // auto-send into chat
+      updMsg(tid, d.text); // show transcription immediately
+      await _chatWith(d.text);
+    } else {
+      updMsg(tid, '<em style="color:#888">Could not hear anything.</em>');
     }
   } catch (e) {
     console.warn('STT error:', e);
+    updMsg(tid, '<em style="color:#888">Transcription failed.</em>');
     btn.textContent = 'Mic'; btn.disabled = false;
   }
 }
@@ -383,11 +385,11 @@ async function toggleMic() {
     mediaRecorder.onstop = async () => {
       clearTimeout(silenceTimer);
       stream.getTracks().forEach(t => t.stop());
-      btn.textContent = 'Mic';
       btn.classList.remove('recording');
       btn.disabled = true;
       btn.textContent = '...';
-      await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn);
+      const tid = addMsg('user', 'You', '<span class="gen dots">transcribing</span>');
+      await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn, tid);
     };
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
