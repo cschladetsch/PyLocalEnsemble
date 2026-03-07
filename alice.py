@@ -6,6 +6,17 @@ Installs everything missing, starts all services, opens the browser.
 """
 import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading
 
+# -- Windows CUDA DLL loading fix --
+if os.name == "nt":
+    cuda_path = os.environ.get("CUDA_PATH")
+    if cuda_path:
+        bin_path = os.path.join(cuda_path, "bin")
+        if os.path.exists(bin_path):
+            try:
+                os.add_dll_directory(bin_path)
+            except AttributeError:
+                pass # Python < 3.8
+
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
     import fastapi, uvicorn, pydantic, llama_cpp
@@ -494,6 +505,9 @@ async def video_from_history(body: VideoRequest):
         imgs = data.get("images", [])
         if imgs:
             return JSONResponse({"video": imgs[0], "sd_prompt": full_prompt, "fallback": True})
+        
+        # Log the full response to the console to see what's wrong
+        print(f"\n[Alice] Forge Video Response: {str(data)[:1000]}")
         return JSONResponse({"error": "No output from Forge. Is AnimateDiff installed?"}, status_code=500)
     except Exception as e:
         print(f"Forge video error: {e}")
@@ -575,8 +589,12 @@ let mid = 0, imgAbort = null;
 function disableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=true;}); }
 function enableAll(){ ['btn','ibtn','vbtn'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=false;}); }
 
-async function interrupt() {
-  if (imgAbort) { imgAbort.abort(); imgAbort = null; }
+async function interrupt(reason) {
+  if (imgAbort) { 
+    console.log('Aborting media generation:', reason);
+    imgAbort.abort(); 
+    imgAbort = null; 
+  }
   await fetch('/interrupt', {method: 'POST'}).catch(() => {});
 }
 
@@ -592,7 +610,7 @@ function doVideo(){
 }
 
 async function triggerMedia(endpoint, extra = '', auto = false) {
-  await interrupt();
+  await interrupt('new media request');
   imgAbort = new AbortController();
   const { signal } = imgAbort;
 
@@ -648,7 +666,7 @@ async function send() {
   const btn = document.getElementById('btn');
   btn.disabled = true;
 
-  await interrupt();
+  await interrupt('new message sent');
 
   if (msg.startsWith('/video')) {
     triggerMedia('/video', msg.slice(6).trim());
@@ -687,12 +705,6 @@ async function send() {
   }
 }
 
-document.getElementById('inp').addEventListener('input', () => {
-  if (imgAbort) {
-    interrupt();
-  }
-});
-
 function addMsg(cls, sndr, html) {
   const id = 'm' + (mid++), d = document.createElement('div');
   d.className = 'msg ' + cls;
@@ -719,11 +731,49 @@ async function clearHistory() {
 </html>"""
 
 
+def ensure_animatediff():
+    step("Checking AnimateDiff extension...")
+    ext_dir = os.path.join(FORGE_DIR, "extensions", "sd-webui-animatediff")
+    if not os.path.exists(ext_dir):
+        ok("Cloning AnimateDiff extension...")
+        try:
+            subprocess.run(["git", "clone", "https://github.com/continue-revolution/sd-webui-animatediff", ext_dir], check=True)
+            ok("AnimateDiff extension cloned.")
+        except Exception as e:
+            warn(f"Failed to clone AnimateDiff extension: {e}")
+            return
+
+    model_dir = os.path.join(ext_dir, "model")
+    os.makedirs(model_dir, exist_ok=True)
+    
+    motion_module = "mm_sd_v15_v2.ckpt"
+    module_path = os.path.join(model_dir, motion_module)
+    
+    if not os.path.exists(module_path):
+        url = f"https://huggingface.co/guoyww/AnimateDiff/resolve/main/{motion_module}"
+        ok(f"Downloading {motion_module} (~1.6 GB)...")
+        try:
+            _download_with_progress(url, module_path)
+            ok("Motion module downloaded.")
+        except Exception as e:
+            if os.path.exists(module_path):
+                os.remove(module_path)
+            warn(f"Failed to download motion module: {e}")
+    else:
+        ok("Motion module present.")
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 def _startup():
-    ensure_model()
-    ensure_forge()
-    start_forge()
+    try:
+        ensure_model()
+        ensure_forge()
+        ensure_animatediff()
+        start_forge()
+    except Exception as e:
+        print(f"\n[Alice] FATAL ERROR IN STARTUP THREAD: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     print()
@@ -731,12 +781,23 @@ if __name__ == "__main__":
     print("  Alice")
     print("=" * 60)
 
-    threading.Thread(target=_startup, daemon=True).start()
-
     print()
-    print(f"[Alice] Starting at {ALICE_URL}")
+    print(f"[Alice] Starting server at {ALICE_URL}")
+    
+    # Start background tasks
+    t = threading.Thread(target=_startup, daemon=True)
+    t.start()
+
     if INTERACTIVE:
-        webbrowser.open(ALICE_URL)
+        # Give the server a moment to start before opening browser
+        def open_browser():
+            time.sleep(2)
+            webbrowser.open(ALICE_URL)
+        threading.Thread(target=open_browser, daemon=True).start()
     else:
         print("        NOTE: Non-interactive session detected; not opening browser.")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    except Exception as e:
+        print(f"\n[Alice] Server failed: {e}")
