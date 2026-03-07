@@ -87,6 +87,9 @@ BASE_NEGATIVE    = CFG["negative_prompt"]
 SYSTEM_PROMPT    = CFG["system_prompt"]
 IMG_CFG          = CFG["image"]
 
+# Avoid interactive-only actions when stdout/stdin are not attached to a TTY.
+INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def step(msg):  print(f"\n[Alice] {msg}")
 def ok(msg):    print(f"        ok: {msg}")
@@ -262,7 +265,10 @@ def ensure_forge():
         print("  !! No .safetensors checkpoint found.")
         print(f"     Add one to: {FORGE_DIR}\\models\\Stable-diffusion\\")
         print("     Recommended: https://civitai.com/models/4384 (dreamshaper_8)")
-        input("\n     Press Enter after adding a checkpoint, then re-run alice.py...")
+        if INTERACTIVE:
+            input("\n     Press Enter after adding a checkpoint, then re-run alice.py...")
+        else:
+            print("\n     Non-interactive session detected; exiting.")
         sys.exit(0)
     ok(f"Checkpoint: {os.path.basename(checkpoints[0])}")
 
@@ -657,5 +663,8 @@ if __name__ == "__main__":
 
     print()
     print(f"[Alice] Starting at {ALICE_URL}")
-    webbrowser.open(ALICE_URL)
+    if INTERACTIVE:
+        webbrowser.open(ALICE_URL)
+    else:
+        print("        NOTE: Non-interactive session detected; not opening browser.")
     uvicorn.run(app, host="0.0.0.0", port=8000)
