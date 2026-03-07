@@ -362,21 +362,27 @@ async function toggleMic() {
     // Silence detection: auto-stop after 1.5s of quiet
     const actx = new AudioContext();
     const analyser = actx.createAnalyser();
+    analyser.fftSize = 1024;
     actx.createMediaStreamSource(stream).connect(analyser);
-    analyser.fftSize = 512;
-    const buf = new Uint8Array(analyser.frequencyBinCount);
+    const buf = new Uint8Array(analyser.fftSize);
     let silenceStart = null, hasSpeech = false, silenceTimer = null;
-    const SILENCE_THRESHOLD = 15, SILENCE_DELAY = 1500;
+
+    function stopRecording() {
+      clearTimeout(silenceTimer);
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      actx.close();
+    }
+
     function checkSilence() {
-      if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-      analyser.getByteFrequencyData(buf);
-      const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
-      if (avg > SILENCE_THRESHOLD) { hasSpeech = true; silenceStart = null; }
+      analyser.getByteTimeDomainData(buf);
+      // RMS deviation from 128 (silence = 0, speech = 20+)
+      const rms = Math.sqrt(buf.reduce((s, v) => s + (v - 128) ** 2, 0) / buf.length);
+      if (rms > 8) { hasSpeech = true; silenceStart = null; }
       else if (hasSpeech) {
         if (!silenceStart) silenceStart = Date.now();
-        if (Date.now() - silenceStart > SILENCE_DELAY) { mediaRecorder.stop(); actx.close(); return; }
+        if (Date.now() - silenceStart > 1500) { stopRecording(); return; }
       }
-      silenceTimer = setTimeout(checkSilence, 100);
+      silenceTimer = setTimeout(checkSilence, 80);
     }
 
     mediaRecorder = new MediaRecorder(stream);
@@ -393,7 +399,8 @@ async function toggleMic() {
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
     btn.classList.add('recording');
-    checkSilence(); // start AFTER mediaRecorder is assigned and recording
+    checkSilence();
+    setTimeout(stopRecording, 10000); // hard max 10s
   } catch (e) {
     console.warn('Mic error:', e);
     alert('Microphone access denied or unavailable.');
