@@ -366,19 +366,18 @@ async function toggleMic() {
     analyser.fftSize = 512;
     const buf = new Uint8Array(analyser.frequencyBinCount);
     let silenceStart = null, hasSpeech = false, silenceTimer = null;
-    const SILENCE_THRESHOLD = 10, SILENCE_DELAY = 1500;
+    const SILENCE_THRESHOLD = 15, SILENCE_DELAY = 1500;
     function checkSilence() {
       if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
       analyser.getByteFrequencyData(buf);
-      const rms = buf.reduce((a, b) => a + b, 0) / buf.length;
-      if (rms > SILENCE_THRESHOLD) { hasSpeech = true; silenceStart = null; }
+      const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+      if (avg > SILENCE_THRESHOLD) { hasSpeech = true; silenceStart = null; }
       else if (hasSpeech) {
         if (!silenceStart) silenceStart = Date.now();
         if (Date.now() - silenceStart > SILENCE_DELAY) { mediaRecorder.stop(); actx.close(); return; }
       }
       silenceTimer = setTimeout(checkSilence, 100);
     }
-    checkSilence();
 
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
@@ -394,6 +393,7 @@ async function toggleMic() {
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
     btn.classList.add('recording');
+    checkSilence(); // start AFTER mediaRecorder is assigned and recording
   } catch (e) {
     console.warn('Mic error:', e);
     alert('Microphone access denied or unavailable.');
