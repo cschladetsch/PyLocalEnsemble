@@ -3,37 +3,39 @@
 > **⚠️ NSFW / 18+ — This project generates adult content. You must be 18 or older to use it.**
 
 A single-file local AI companion with chat and image generation.
-Powered by [llama.cpp](https://github.com/ggerganov/llama.cpp) (LLM via `llama-cpp-python`) and [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) (images).
-Everything runs locally -- no cloud, no API keys, no subscriptions.
+Powered by [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) (LLM) and [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) (images).
+Everything runs locally — no cloud, no API keys, no subscriptions.
 
 ---
 
-## Quick Start
+## Requirements
 
-```
-python alice.py
-```
-
-On first run it installs everything missing, then opens the browser at `http://localhost:8000`.
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| OS | Windows 10/11 | Windows 11 |
+| Python | 3.10+ | 3.13 |
+| Git | Any | Latest |
+| RAM | 16 GB | 32 GB |
+| VRAM | 6 GB | 8 GB+ |
+| Disk | 30 GB free | 50 GB |
+| GPU | NVIDIA (CUDA) | RTX 2070+ |
 
 ---
 
-## Prerequisites
+## Installation
 
-These must be installed before running `alice.py`. Everything else is handled automatically.
+### Step 1 — Install Python
 
-### 1. Python 3.10 or later
+Download from https://python.org/downloads
 
-Download from https://python.org
-
-> **Important:** During installation, tick **"Add Python to PATH"**. Without this, `python` won't be found from the terminal.
+> During installation, tick **"Add Python to PATH"**. Without this, `python` won't be found from the terminal.
 
 Verify:
 ```
 python --version
 ```
 
-### 2. Git
+### Step 2 — Install Git
 
 Download from https://git-scm.com
 
@@ -42,92 +44,105 @@ Verify:
 git --version
 ```
 
-### 3. A GPU (strongly recommended)
+### Step 3 — Install NVIDIA drivers
 
-Stable Diffusion image generation is extremely slow on CPU. An NVIDIA GPU with 6GB+ VRAM is recommended. The RTX 2070 (8GB) works well.
+Download the latest driver for your GPU from https://nvidia.com/drivers
 
-Ensure you have up-to-date drivers from https://nvidia.com/drivers
-
----
-
-## First Run Walkthrough
+### Step 4 — Clone this repo
 
 ```
-cd F:\alice
+git clone https://github.com/cschladetsch/PyAliceLlmImage alice
+cd alice
+```
+
+### Step 5 — Run Alice
+
+```
 python alice.py
 ```
 
-Alice works through the following steps automatically:
+That's it. On first run Alice will:
 
-| Step | What happens |
-|------|-------------|
-| Python deps | Installs `fastapi`, `uvicorn`, `requests`, `pydantic`, `llama-cpp-python` via pip |
-| LLM model | Finds or downloads a GGUF model (~7GB) if not present |
-| Forge | Clones Stable Diffusion WebUI Forge if not present |
-| webui.bat | Patches Forge with `--api --cuda-malloc` flags |
-| Checkpoint | Pauses if no `.safetensors` model file is found (see below) |
-| Forge service | Starts Forge (takes ~30-90 seconds on first load) |
-| Browser | Opens `http://localhost:8000` |
+1. Install Python dependencies (`fastapi`, `uvicorn`, `llama-cpp-python`, etc.)
+2. Find your LLM — auto-detects a GGUF model from `models/`, or from your Ollama cache if present
+3. Clone Stable Diffusion WebUI Forge
+4. Download **Realistic Vision V5.1** (2.1 GB) — an NSFW-capable image model
+5. Start Forge and switch it to Realistic Vision
+6. Open your browser at `http://localhost:8000`
+
+First run takes 5–15 minutes depending on your connection. Subsequent starts take ~30 seconds.
 
 ---
 
-## Checkpoint (Required for Image Generation)
+## LLM Model
 
-Alice automatically downloads **Realistic Vision V5.1** (2.1 GB) on first run — no manual steps needed.
+Alice uses a GGUF model loaded directly via `llama-cpp-python` — no Ollama server required.
 
-Any `.safetensors` checkpoint placed in `stable-diffusion-webui-forge\models\Stable-diffusion\` will be detected automatically.
+**Auto-detection order:**
+
+1. `model_path` in `alice.json` (explicit path)
+2. Any `.gguf` file in the `models/` folder
+3. Your Ollama model cache (`~/.ollama/models/blobs/`) — the model named in `ollama_model` is used
+
+To use a specific model, either:
+- Drop a `.gguf` file into the `models/` folder, or
+- Set `"model_path"` in `alice.json` to the full path
+
+**Recommended models** (GGUF format, ~4–8 GB):
+- `mistral-nemo` (default, from Ollama cache)
+- Any Mistral, LLaMA, or Qwen GGUF
 
 ---
 
 ## Directory Structure
 
 ```
-alice\
-  alice.py                          <- the entire app
-  alice.json                        <- your config (not committed)
-  stable-diffusion-webui-forge\     <- auto-cloned, not committed
-    models\
-      Stable-diffusion\
-        dreamshaper_8.safetensors   <- you provide this
-    webui.bat
-    venv\
+alice/
+  alice.py                              ← the entire app (single file)
+  alice.json                            ← your config (git-ignored)
+  models/                               ← place .gguf files here
+  stable-diffusion-webui-forge/         ← auto-cloned (git-ignored)
+    models/
+      Stable-diffusion/
+        Realistic_Vision_V5.1_fp16-no-ema.safetensors   ← auto-downloaded
 ```
 
 ---
 
 ## Configuration
 
-All user-facing settings live in `alice.json`. This file is not committed to git (it contains your persona text). On first run it is created automatically with defaults.
+`alice.json` is created automatically on first run. Edit it to customise Alice's personality, appearance, and image settings. It is git-ignored so your personal content stays private.
 
 ```json
 {
-    "forge_url":    "http://localhost:7860",
-    "model_path":   "",
-    "appearance":   "woman, Alice, very long blonde hair, blue eyes, ...",
-    "negative_prompt": "ugly, deformed, extra limbs, blurry, ...",
-    "system_prompt": "You are Alice. You are enigmatic, intelligent, ...",
+    "forge_url":      "http://localhost:7860",
+    "model_path":     "",
+    "ollama_model":   "mistral-nemo",
+    "appearance":     "woman, Alice, long blonde hair, blue eyes, elegant, sultry",
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "system_prompt":  "You are Alice. You are enigmatic, intelligent, and warm...",
 
     "image": {
-        "steps": 25,
-        "width": 512,
-        "height": 768,
-        "cfg_scale": 7,
+        "steps":        25,
+        "width":        512,
+        "height":       768,
+        "cfg_scale":    9,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix": "photorealistic, highly detailed, 8k, masterpiece"
+        "suffix":       "nsfw, photorealistic, highly detailed, 8k, masterpiece"
     }
 }
 ```
 
 | Field | Purpose |
 |-------|---------|
-| `forge_url` | Forge API base URL |
-| `model_path` | Optional path to a GGUF model (blank = auto-download) |
-| `appearance` | Prepended to every image prompt for visual consistency |
-| `negative_prompt` | Always passed to Stable Diffusion as negative |
-| `system_prompt` | System prompt used for the chat persona |
-| `image` | SD generation parameters (steps, size, sampler, etc.) |
+| `model_path` | Explicit path to a GGUF file. Leave blank to auto-detect. |
+| `ollama_model` | Model name to find in your Ollama cache if `model_path` is blank. |
+| `appearance` | SD tags prepended to every image prompt for visual consistency. |
+| `negative_prompt` | Always passed to Stable Diffusion as the negative prompt. |
+| `system_prompt` | Alice's personality, injected at the start of every conversation. |
+| `image` | SD generation settings — steps, resolution, CFG scale, sampler. |
 
-Edit `alice.json` to change Alice's personality, appearance, image quality settings, or swap models. Restart `alice.py` to apply changes.
+Restart `alice.py` after editing `alice.json`.
 
 ---
 
@@ -135,91 +150,114 @@ Edit `alice.json` to change Alice's personality, appearance, image quality setti
 
 ### Chat
 
-Type a message and press **Enter** or **Send**. Alice responds in character.
+Type a message and press **Enter**. Alice responds in character and an image is automatically generated after each reply.
 
-### Image generation
+### Controlling images
 
-Type `/image` to generate an image based on the current conversation history.
-
-Add instructions after `/image` to control the scene. Tokens starting with `no ` are routed to the **negative prompt**:
+After a chat exchange, images are generated automatically based on the conversation. You can also click the **Image** button to regenerate manually with optional extra instructions:
 
 ```
-/image
-/image holding a rose, candlelight, close up
-/image standing in a doorway, backlit, flowing dress, soft glow
+holding a rose, candlelight
+standing in a doorway, backlit
+no background clutter
 ```
 
-The extra positive text is prepended to the SD prompt so Stable Diffusion weights it highest. `no X` tokens are added to the negative prompt alongside the base negatives from `alice.json`.
+Tags starting with `no ` are sent to the negative prompt. Everything else is added to the positive prompt.
 
 ### Clear history
 
-Click **Clear** in the top right to reset the conversation.
+Click **Clear** in the top right to reset the conversation and start fresh.
 
 ---
 
 ## How It Works
 
-```
-You
- │
- ▼
-alice.py (FastAPI on port 8000)
- │
- ├─ /chat  ──► llama.cpp (GGUF model)
- │              └─ maintains conversation history
- │
- └─ /image ──► llama.cpp (prompt extractor)
-                └─ extracts SD prompt tags from conversation history
-                    └─ Forge API (port 7860)
-                        └─ dreamshaper_8 on GPU
+```mermaid
+flowchart TD
+    User([You]) -->|message| Alice
+
+    subgraph Alice ["alice.py — port 8000"]
+        Chat["/chat"]
+        Image["/image"]
+        History[(conversation\nhistory)]
+    end
+
+    Chat --> LLM
+    Chat --> History
+    History --> Chat
+
+    Image --> Extractor["LLM\nprompt extractor"]
+    History --> Extractor
+    Extractor -->|SD tags| Forge
+
+    subgraph GPU
+        LLM["llama-cpp-python\nGGUF model"]
+        Forge["Stable Diffusion Forge\nport 7860"]
+    end
+
+    Forge -->|image| User
+    LLM -->|reply| User
 ```
 
-The `/image` command passes the last 12 messages to the LLM with instructions to extract Stable Diffusion prompt tags. Those tags are combined with `appearance` from `alice.json` and any extra instructions you typed.
+### Startup sequence
+
+```mermaid
+flowchart LR
+    A[python alice.py] --> B[Install pip deps]
+    B --> C[Load GGUF model]
+    C --> D[Clone Forge\nif missing]
+    D --> E[Download\nRealistic Vision\nif missing]
+    E --> F[Start Forge]
+    F --> G[Switch Forge\nto Realistic Vision]
+    G --> H[Open browser\nlocalhost:8000]
+```
 
 ---
 
-## Customising the Persona
+## Customising Alice
 
-Alice's personality is defined by the `"system_prompt"` field in `alice.json`. This prompt is injected at the start of every conversation -- this is where you define personality, appearance, backstory, and the user's details.
+Everything about Alice's personality and appearance is in `alice.json`:
 
-### Tips
+- **`system_prompt`** — defines personality, backstory, how she speaks, and who she's talking to
+- **`appearance`** — SD tags used in every image (hair colour, eye colour, clothing style, etc.)
 
-- Be specific about physical appearance -- the system prompt feeds both the chat responses and (indirectly) the image prompts extracted from conversation
-- Keep the persona consistent with the `"appearance"` field in `alice.json` -- if the system prompt says blonde but appearance says brunette, the images and text will contradict each other
-- You can swap to a different GGUF model by setting `"model_path"` or dropping one into `models\`
+Keep these consistent with each other. If the system prompt says "red hair" but appearance says "blonde", the chat and images will contradict each other.
 
 ---
 
-
+## Troubleshooting
 
 ### `python` not found
-Reinstall Python and tick **"Add Python to PATH"**.
+Reinstall Python and tick **"Add Python to PATH"** during setup.
 
-### Model download is slow
-The default GGUF model is ~7GB. Place your own `.gguf` file in `models\` to avoid the download.
+### LLM not loading
+Check that a `.gguf` file exists in `models/`, or that `ollama_model` in `alice.json` matches a model in your Ollama cache (`~/.ollama/models/`).
 
-### `launch.py not found` from Forge
-Do **not** run `webui.bat` directly from the command line. Let `alice.py` launch it -- it sets the correct working directory. Just run `python alice.py`.
+### Images not generating
+- Check the terminal for `Forge error:` lines
+- Make sure Forge is running (`http://localhost:7860` should load)
+- Forge restarts automatically on the next image request if it crashed
 
-### Forge 404 on `/image`
-Forge must run with `--api`. `alice.py` patches `webui.bat` automatically on first clone. If you installed Forge manually, add to `webui.bat`:
-```bat
-set COMMANDLINE_ARGS=--api --cuda-malloc
-```
-
-### Forge times out on startup
-First load takes 2-3 minutes (installs venv, downloads PyTorch). Subsequent starts are ~30 seconds. Alice waits up to 5 minutes automatically.
-
-### No image generated
-Check the terminal for a `Forge error:` line. Common causes:
-- Forge crashed -- alice.py auto-restarts it on the next `/image`
-- No checkpoint in `models\Stable-diffusion\`
+### Forge takes a long time on first start
+Normal — it installs a Python 3.10 venv and downloads PyTorch (~2 GB). Only happens once. Subsequent starts take ~30 seconds.
 
 ### Slow image generation
-Normal on first generation while the model loads into VRAM. Check the Forge terminal shows `Device: cuda:0 NVIDIA GeForce ...` to confirm GPU is being used.
+Expected on the first generation while the model loads into VRAM. Check the Forge console shows `Device: cuda:0` to confirm GPU is active.
 
-### Non-interactive sessions
-If you run Alice in a non-interactive shell, it will skip opening the browser and will exit instead of waiting for input.
+### Out of VRAM
+Both the LLM and Forge use the GPU simultaneously. On 8 GB cards this can cause OOM during image generation. Options:
+- Reduce LLM GPU layers by setting a lower value in `alice.py` (`n_gpu_layers`)
+- Use a smaller GGUF model (Q4 quantisation instead of fp16)
+- Reduce image resolution in `alice.json`
+
+---
+
+## Ports
+
+| Port | Service |
+|------|---------|
+| 8000 | Alice (FastAPI) |
+| 7860 | Stable Diffusion Forge |
 
 ---
 
@@ -228,41 +266,8 @@ If you run Alice in a non-interactive shell, it will skip opening the browser an
 The following are excluded from the repo:
 
 ```
-/stable-diffusion-webui-forge
-/tmp
-/alice.modelfile
-/.claude
-/backups
+stable-diffusion-webui-forge/
+models/
 alice.json
+backups/
 ```
-
-`alice.json` contains your personal persona text and must not be committed to a public repo.
-
----
-
-## Recommendations
-
-- Keep any custom persona or private notes in `alice.json`; it is excluded from git.
-- Use `backups\` for local-only copies of files you want to keep private; it is git-ignored.
-- Review defaults in `alice.py` and `Readme.md` before sharing the repo publicly.
-
----
-
-## Requirements
-
-| Requirement | Minimum | Notes |
-|-------------|---------|-------|
-| OS | Windows 10/11 | Linux/macOS untested |
-| Python | 3.10+ | Must be in PATH |
-| Git | Any recent | Must be in PATH |
-| RAM | 16GB | 32GB recommended |
-| VRAM | 6GB | 8GB+ recommended |
-| Disk | 30GB free | 7GB models + 15GB Forge venv + checkpoints |
-| GPU | NVIDIA | AMD untested with Forge |
-
-## Ports
-
-| Port | Service |
-|------|---------|
-| 8000 | Alice (FastAPI) |
-| 7860 | Stable Diffusion Forge |
