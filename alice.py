@@ -133,9 +133,20 @@ def ensure_ollama():
 def ensure_ollama_running():
     global OLLAMA_URL, OLLAMA_HOST
     step("Starting Ollama service...")
-    if http_ok(f"{OLLAMA_URL}/api/tags"):
-        ok("Already running.")
-        return
+
+    default_port = int(OLLAMA_URL.rsplit(":", 1)[-1])
+
+    # First: check if Ollama is already running on any nearby port — reuse it
+    for candidate in range(default_port, default_port + 10):
+        url = f"http://127.0.0.1:{candidate}"
+        if http_ok(f"{url}/api/tags"):
+            if candidate == default_port:
+                ok("Already running.")
+            else:
+                ok(f"Already running on port {candidate}.")
+            OLLAMA_URL = url
+            OLLAMA_HOST = f"127.0.0.1:{candidate}"
+            return
 
     def port_bindable(port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -145,21 +156,12 @@ def ensure_ollama_running():
             except OSError:
                 return False
 
-    def kill_ollama_processes():
-        subprocess.run(["taskkill", "/F", "/IM", "ollama app.exe"], capture_output=True)
-        subprocess.run(["taskkill", "/F", "/IM", "ollama.exe"], capture_output=True)
-
-    kill_ollama_processes()
-    time.sleep(2)
-
-    # Find a bindable port — try default first, then fallback
-    default_port = int(OLLAMA_URL.rsplit(":", 1)[-1])
+    # Not running anywhere — find a free port and start fresh
     ollama_port = default_port
     if not port_bindable(ollama_port):
         for candidate in range(default_port + 1, default_port + 10):
             if port_bindable(candidate):
                 warn(f"Port {default_port} is blocked. Using port {candidate} instead.")
-                warn("To fix permanently, reinstall Ollama.")
                 ollama_port = candidate
                 break
         else:
