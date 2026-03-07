@@ -20,6 +20,7 @@
     "video": {
         "frames": 6,
         "steps": 15,
-        "frame_ms": 200
+        "frame_ms": 200,
+        "denoise": 0.45
     }
 }
