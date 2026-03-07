@@ -297,16 +297,42 @@ def ensure_forge():
 
     checkpoints = glob.glob(os.path.join(FORGE_DIR, "models", "Stable-diffusion", "*.safetensors"))
     if not checkpoints:
-        print()
-        print("  !! No .safetensors checkpoint found.")
-        print(f"     Add one to: {FORGE_DIR}\\models\\Stable-diffusion\\")
-        print("     Recommended: https://civitai.com/models/4384 (dreamshaper_8)")
-        if INTERACTIVE:
-            input("\n     Press Enter after adding a checkpoint, then re-run alice.py...")
+        ok("No checkpoint found — will download Realistic Vision V5.1...")
+    ok(f"Checkpoint: {os.path.basename(checkpoints[0])}" if checkpoints else "Downloading...")
+
+
+_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
+_RV_URL = ("https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE"
+           "/resolve/main/Realistic_Vision_V5.1_fp16-no-ema.safetensors")
+
+
+def ensure_checkpoint():
+    step("Checking checkpoint...")
+    sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
+    os.makedirs(sd_dir, exist_ok=True)
+    rv_path = os.path.join(sd_dir, _RV_FILENAME)
+    if os.path.exists(rv_path):
+        ok(f"Realistic Vision already present.")
+        return
+    ok(f"Downloading Realistic Vision V5.1 (2.1 GB)...")
+    _download_with_progress(_RV_URL, rv_path)
+    ok("Download complete.")
+
+
+def _set_forge_model(name: str):
+    """Tell a running Forge instance to switch to the named checkpoint."""
+    try:
+        r = req.get(f"{FORGE_URL}/sdapi/v1/sd-models", timeout=5)
+        models = [m["title"] for m in r.json()]
+        match = next((m for m in models if name in m), None)
+        if match:
+            req.post(f"{FORGE_URL}/sdapi/v1/options",
+                     json={"sd_model_checkpoint": match}, timeout=30)
+            ok(f"Forge model set to: {match}")
         else:
-            print("\n     Non-interactive session detected; exiting.")
-        sys.exit(0)
-    ok(f"Checkpoint: {os.path.basename(checkpoints[0])}")
+            warn(f"Model '{name}' not found in Forge model list.")
+    except Exception as e:
+        warn(f"Could not set Forge model: {e}")
 
 
 def start_forge():
@@ -738,8 +764,10 @@ def _startup():
     try:
         load_llm()
         ensure_forge()
+        ensure_checkpoint()
         ensure_animatediff()
         start_forge()
+        _set_forge_model(_RV_FILENAME)
     except Exception as e:
         print(f"\n[Alice] FATAL ERROR IN STARTUP THREAD: {e}")
         import traceback
