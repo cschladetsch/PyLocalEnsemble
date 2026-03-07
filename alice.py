@@ -348,7 +348,7 @@ def generate_image(prompt: str, extra_negative: str = ""):
     negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
     try:
         r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
-            "prompt":          ALICE_APPEARANCE + ", " + prompt + ", " + IMG_CFG["suffix"],
+            "prompt":          prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"],
             "negative_prompt": negative,
             "steps":           IMG_CFG["steps"],
             "width":           IMG_CFG["width"],
@@ -437,7 +437,7 @@ async def video_from_history(body: VideoRequest):
     positive_extra = ", ".join(positive_parts)
     extra_negative = ", ".join(negative_parts)
     prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-    full_prompt = ALICE_APPEARANCE + ", " + prompt + ", " + IMG_CFG["suffix"]
+    full_prompt = prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"]
     negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
 
     vid_cfg = CFG.get("video", {})
