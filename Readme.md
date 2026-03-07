@@ -238,10 +238,20 @@ The following are excluded from the repo:
 /stable-diffusion-webui-forge
 /tmp
 /alice.modelfile
+/.claude
+/backups
 alice.json
 ```
 
 `alice.json` contains your personal persona text and must not be committed to a public repo.
+
+---
+
+## Recommendations
+
+- Keep any custom persona or private notes in `alice.json`; it is excluded from git.
+- Use `backups\` for local-only copies of files you want to keep private; it is git-ignored.
+- Review defaults in `alice.py` and `Readme.md` before sharing the repo publicly.
 
 ---
 
