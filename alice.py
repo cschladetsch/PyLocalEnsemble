@@ -576,7 +576,9 @@ async function triggerMedia(endpoint) {
   const label = endpoint === '/video' ? 'Generating video...' : 'Generating scene...';
   const header = endpoint === '/video' ? 'Generated Video' : 'Generated Scene';
   document.getElementById('ih').textContent = header;
-  addMsg('user', 'You', endpoint.slice(1) + (extra ? ' ' + extra : ''));
+  if (extra) {
+    addMsg('user', 'You', extra);
+  }
   document.getElementById('ic').innerHTML = `<div class="ph gen">${label}</div>`;
   document.getElementById('pd').innerHTML = '';
   try {
