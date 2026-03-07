@@ -235,31 +235,20 @@ def _apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
 
 def extract_sd_prompt(text: str) -> str:
     try:
-        raw_tags = _llm_complete(
-            f"Read this conversation and extract a Stable Diffusion image prompt.\n\n"
-            f"{text}\n\n"
-            f"Rules:\n"
-            f"- Output comma-separated tags only. No sentences. No explanation.\n"
-            f"- Prioritize concrete pose/action details above all else\n"
-            f"- Focus on: pose, action, expression, clothing, location/setting, lighting, mood\n"
-            f"- Extract only specific details explicitly mentioned\n"
-            f"- Keep it literal; avoid embellishment or inference\n"
-            f"- Do not include character names or dialogue\n"
-            f"- For partial exposure: be explicit, e.g. 'one breast exposed, one breast covered', 'topless', 'dress pulled down one side'\n"
-            f"- If only one breast is shown, include BOTH 'one breast exposed' AND 'one breast covered' as separate tags\n"
-            f"Tags:"
-        )
-        refined = _llm_complete(
-            f"Condense and normalize these Stable Diffusion tags.\n\n"
-            f"{raw_tags}\n\n"
-            f"Rules:\n"
-            f"- Output comma-separated tags only. No sentences. No explanation.\n"
-            f"- Keep 15-30 tags max; remove redundancy\n"
-            f"- Ensure pose/action tags are present\n"
-            f"- Do not add new facts not present in the original tags\n"
-            f"Tags:"
-        )
-        return refined
+        result = _llm_chat([
+            {"role": "system", "content": (
+                "You extract Stable Diffusion image prompts from conversations. "
+                "Output ONLY comma-separated tags. Maximum 25 tags. "
+                "No sentences, no explanation, no lists, nothing else. "
+                "Focus on: pose, clothing state, expression, setting, lighting, mood. "
+                "For partial nudity be precise: 'one breast exposed, other breast covered'. "
+                "Never invent content not present in the conversation."
+            )},
+            {"role": "user", "content": f"Extract SD tags from this conversation:\n\n{text}"},
+        ])
+        # Strip any preamble the model adds before the actual tags
+        tags = result.strip().split("\n")[-1]
+        return tags
     except Exception as e:
         print(f"LLM prompt extraction error: {e}")
         return ""
