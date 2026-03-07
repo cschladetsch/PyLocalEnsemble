@@ -199,13 +199,21 @@ def ensure_model():
             fail(f"Download failed: {e}\nPlace a GGUF file in {MODEL_DIR} and restart.")
 
     ok(f"Loading {os.path.basename(model_path)} ...")
-    from llama_cpp import Llama
+    from llama_cpp import Llama, llama_cpp as _llama_cpp
+    try:
+        supports_gpu = bool(_llama_cpp.llama_supports_gpu_offload())
+    except Exception:
+        supports_gpu = False
     llm = Llama(
         model_path=model_path,
         n_ctx=4096,
         n_gpu_layers=-1,  # use GPU if available; falls back to CPU silently
         verbose=False,
     )
+    if supports_gpu:
+        ok("llama.cpp GPU offload supported; LLM will use GPU if available.")
+    else:
+        warn("llama.cpp GPU offload not supported; LLM will run on CPU.")
     ok("Model ready.")
 
 
