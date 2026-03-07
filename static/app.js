@@ -305,6 +305,46 @@ function updMsg(id, t) {
   e.innerHTML = e.querySelector('.sndr').outerHTML + t;
 }
 
+async function _sttTranscribe(webmBlob, btn) {
+  try {
+    const arrayBuf = await webmBlob.arrayBuffer();
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+    await audioCtx.close();
+    const pcm = audioBuf.getChannelData(0);
+    const wav = new ArrayBuffer(44 + pcm.length * 2);
+    const v = new DataView(wav);
+    const ws = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    ws(0,'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); ws(8,'WAVE'); ws(12,'fmt ');
+    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+    v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+    ws(36,'data'); v.setUint32(40, pcm.length * 2, true);
+    let off = 44;
+    for (let i = 0; i < pcm.length; i++) {
+      const x = Math.max(-1, Math.min(1, pcm[i]));
+      v.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7FFF, true); off += 2;
+    }
+    const res = await fetch('/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: new Blob([wav], { type: 'audio/wav' })
+    });
+    const d = await res.json();
+    if (d.text) {
+      document.getElementById('inp').value = d.text;
+      document.getElementById('inp').focus();
+      btn.textContent = 'Mic';
+    } else {
+      btn.textContent = '?';
+      setTimeout(() => { btn.textContent = 'Mic'; }, 1500);
+    }
+  } catch (e) {
+    console.warn('STT error:', e);
+    btn.textContent = 'Mic';
+  }
+  btn.disabled = false;
+}
+
 async function toggleMic() {
   const btn = document.getElementById('mic-btn');
   if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -314,54 +354,38 @@ async function toggleMic() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
+
+    // Silence detection: auto-stop after 1.5s of quiet
+    const actx = new AudioContext();
+    const analyser = actx.createAnalyser();
+    actx.createMediaStreamSource(stream).connect(analyser);
+    analyser.fftSize = 512;
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    let silenceStart = null, hasSpeech = false, silenceTimer = null;
+    const SILENCE_THRESHOLD = 10, SILENCE_DELAY = 1500;
+    function checkSilence() {
+      if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+      analyser.getByteFrequencyData(buf);
+      const rms = buf.reduce((a, b) => a + b, 0) / buf.length;
+      if (rms > SILENCE_THRESHOLD) { hasSpeech = true; silenceStart = null; }
+      else if (hasSpeech) {
+        if (!silenceStart) silenceStart = Date.now();
+        if (Date.now() - silenceStart > SILENCE_DELAY) { mediaRecorder.stop(); actx.close(); return; }
+      }
+      silenceTimer = setTimeout(checkSilence, 100);
+    }
+    checkSilence();
+
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = async () => {
+      clearTimeout(silenceTimer);
       stream.getTracks().forEach(t => t.stop());
       btn.textContent = 'Mic';
       btn.classList.remove('recording');
-      const webmBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
       btn.disabled = true;
       btn.textContent = '...';
-      try {
-        // Decode WebM via Web Audio API then re-encode as WAV for Whisper
-        const arrayBuf = await webmBlob.arrayBuffer();
-        const audioCtx = new AudioContext({ sampleRate: 16000 });
-        const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-        await audioCtx.close();
-        const pcm = audioBuf.getChannelData(0);
-        const wav = new ArrayBuffer(44 + pcm.length * 2);
-        const v = new DataView(wav);
-        const s = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
-        s(0,'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); s(8,'WAVE'); s(12,'fmt ');
-        v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-        v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
-        s(36,'data'); v.setUint32(40, pcm.length * 2, true);
-        let off = 44;
-        for (let i = 0; i < pcm.length; i++) {
-          const x = Math.max(-1, Math.min(1, pcm[i]));
-          v.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7FFF, true); off += 2;
-        }
-        const wavBlob = new Blob([wav], { type: 'audio/wav' });
-        const res = await fetch('/stt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'audio/wav' },
-          body: wavBlob
-        });
-        const d = await res.json();
-        if (d.text) {
-          document.getElementById('inp').value = d.text;
-          document.getElementById('inp').focus();
-          btn.textContent = 'Mic';
-        } else {
-          btn.textContent = '?';
-          setTimeout(() => { btn.textContent = 'Mic'; }, 1500);
-        }
-      } catch (e) {
-        console.warn('STT error:', e);
-        btn.textContent = 'Mic';
-      }
-      btn.disabled = false;
+      await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn);
     };
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
