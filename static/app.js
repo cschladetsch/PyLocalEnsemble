@@ -333,12 +333,18 @@ async function toggleMic() {
         if (d.text) {
           document.getElementById('inp').value = d.text;
           document.getElementById('inp').focus();
+          btn.textContent = 'Mic';
+        } else {
+          btn.textContent = '?';
+          setTimeout(() => { btn.textContent = 'Mic'; }, 1500);
         }
-      } catch (e) { console.warn('STT error:', e); }
+      } catch (e) {
+        console.warn('STT error:', e);
+        btn.textContent = 'Mic';
+      }
       btn.disabled = false;
-      btn.textContent = 'Mic';
     };
-    mediaRecorder.start();
+    mediaRecorder.start(100);
     btn.textContent = 'Stop';
     btn.classList.add('recording');
   } catch (e) {

@@ -841,8 +841,8 @@ def _ensure_whisper():
     with _whisper_lock:
         if _WHISPER is None:
             from faster_whisper import WhisperModel
-            ok("Loading Whisper STT (base, CPU)...")
-            _WHISPER = WhisperModel("base", device="cpu", compute_type="int8")
+            ok("Loading Whisper STT (small.en, CPU)...")
+            _WHISPER = WhisperModel("small.en", device="cpu", compute_type="int8")
             ok("Whisper STT ready.")
 
 
@@ -864,8 +864,10 @@ async def stt(request: Request):
         tmp = f.name
     try:
         def _transcribe():
-            segments, _ = _WHISPER.transcribe(tmp, language="en", beam_size=5)
-            return " ".join(s.text for s in segments).strip()
+            segments, _ = _WHISPER.transcribe(tmp, language="en", beam_size=5, vad_filter=False)
+            text = " ".join(s.text for s in segments).strip()
+            print(f"        STT: {repr(text)}")
+            return text
         text = await loop.run_in_executor(None, _transcribe)
         return JSONResponse({"text": text})
     except Exception as e:
