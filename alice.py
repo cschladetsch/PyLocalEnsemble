@@ -82,7 +82,6 @@ def load_config():
                 data = json.load(f)
             merged = {**_DEFAULT_CONFIG, **data}
             merged["image"] = {**_DEFAULT_CONFIG["image"], **data.get("image", {})}
-            # Backward compat: extract system_prompt from old modelfile format
             if "system_prompt" not in data and "modelfile" in data:
                 m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
                 if m:
@@ -91,11 +90,6 @@ def load_config():
             return merged
         except Exception as e:
             print(f"        WARNING: could not load {CONFIG_FILE}: {e} -- using defaults")
-    else:
-        print(f"        config: {CONFIG_FILE} not found, using defaults")
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(_DEFAULT_CONFIG, f, indent=4)
-        print(f"        config: wrote default config to {CONFIG_FILE}")
     return _DEFAULT_CONFIG.copy()
 
 CFG = load_config()
