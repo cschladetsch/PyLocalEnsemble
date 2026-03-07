@@ -34,10 +34,16 @@ async function speak(text) {
 
 function disableAll() {
   ['btn', 'ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
+  const s = document.getElementById('stop-btn'); if (s) s.disabled = false;
 }
 function enableAll() {
   ['btn', 'ibtn', 'vbtn'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = false; });
+  const s = document.getElementById('stop-btn'); if (s) s.disabled = true;
 }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') interrupt('user ESC');
+});
 
 async function interrupt(reason) {
   if (imgAbort) {
