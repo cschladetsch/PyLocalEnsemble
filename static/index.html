@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alice</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Montserrat:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Alice</h1>
+  <div style="display:flex;gap:.6rem;align-items:center">
+    <select id="persona-select" class="cb" onchange="switchPersona(this.value)" style="cursor:pointer"></select>
+    <button class="cb" onclick="clearHistory()">Clear</button>
+  </div>
+</header>
+<div class="main">
+  <div class="cp">
+    <div class="msgs" id="msgs">
+      <div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>
+    </div>
+    <div class="ir">
+      <input type="text" id="inp" placeholder="Say something... or /image or /video" onkeydown="if(event.key==='Enter')send()">
+      <button id="vbtn" onclick="doVideo()">Video</button>
+      <button id="ibtn" onclick="doImage()">Image</button>
+      <button id="btn" onclick="send()">Send</button>
+    </div>
+  </div>
+  <div class="ip">
+    <div class="ih" id="ih">Generated Scene</div>
+    <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
+    <div class="pd" id="pd-wrap" style="display:none">
+      <textarea id="pd" rows="3"></textarea>
+      <button onclick="regenFromPrompt()">Regenerate</button>
+    </div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
