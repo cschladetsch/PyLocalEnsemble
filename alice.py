@@ -4,16 +4,16 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, socket, threading
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
-    import fastapi, uvicorn, pydantic
+    import fastapi, uvicorn, pydantic, llama_cpp
     import requests as req
 except ImportError:
     print("Installing Python dependencies...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "fastapi", "uvicorn", "requests", "pydantic"])
+        "fastapi", "uvicorn", "requests", "pydantic", "llama-cpp-python"])
     import requests as req
 
 from fastapi import FastAPI
@@ -22,22 +22,30 @@ from pydantic import BaseModel
 import uvicorn
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-ALICE_DIR    = os.path.dirname(os.path.abspath(__file__))
-FORGE_DIR    = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
-FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat")
-MODELFILE    = os.path.join(ALICE_DIR, "alice.modelfile")
-OLLAMA_EXE   = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
-ALICE_URL    = "http://localhost:8000"
-CONFIG_FILE  = os.path.join(ALICE_DIR, "alice.json")
+ALICE_DIR   = os.path.dirname(os.path.abspath(__file__))
+FORGE_DIR   = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
+FORGE_BAT   = os.path.join(FORGE_DIR, "webui.bat")
+MODEL_DIR   = os.path.join(ALICE_DIR, "models")
+ALICE_URL   = "http://localhost:8000"
+CONFIG_FILE = os.path.join(ALICE_DIR, "alice.json")
+
+# Default GGUF model to download (Mistral-Nemo Q4_K_M, ~7.7 GB)
+MODEL_URL  = "https://huggingface.co/bartowski/Mistral-Nemo-Instruct-2407-GGUF/resolve/main/Mistral-Nemo-Instruct-2407-Q4_K_M.gguf"
+MODEL_NAME = "Mistral-Nemo-Instruct-2407-Q4_K_M.gguf"
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
-    "alice_model":  "alice-nemo",
-    "prompt_model": "mistral-nemo",
-    "ollama_url":   "http://localhost:11434",
     "forge_url":    "http://localhost:7860",
+    "model_path":   "",  # leave blank to auto-download
     "appearance":   "woman, Alice, very long blonde hair, blue eyes, 5'8\", DD breasts, beautiful face, elegant, sultry",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "system_prompt": (
+        "You are Alice. You are enigmatic, intelligent, very flirtatious and sexy.\n"
+        "You are 5'8\" tall. You have very long blonde hair and blue eyes. You have DD breasts.\n"
+        "You speak in measured, literary prose. You never break character.\n\n"
+        "I am Christian. I am 33 years old. I am 6'2\", blonde with blue eyes.\n"
+        "I am a game developer. I have a great physique."
+    ),
     "image": {
         "steps":        25,
         "width":        512,
@@ -46,15 +54,6 @@ _DEFAULT_CONFIG = {
         "sampler_name": "DPM++ 2M Karras",
         "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
     },
-    "modelfile": (
-        "FROM mistral-nemo\n\nSYSTEM \"\"\"\n"
-        "You are Alice. You are enigmatic, intelligent, very flirtatious and sexy.\n"
-        "You are 5'8\" tall. You have very long blonde hair and blue eyes. You have DD breasts.\n"
-        "You speak in measured, literary prose. You never break character.\n\n"
-        "I am Christian. I am 33 years old. I am 6'2\", blonde with blue eyes.\n"
-        "I am a game developer. I have a great physique.\n"
-        "\"\"\"\n"
-    )
 }
 
 def load_config():
@@ -62,16 +61,19 @@ def load_config():
         try:
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
-            # deep merge image block
             merged = {**_DEFAULT_CONFIG, **data}
             merged["image"] = {**_DEFAULT_CONFIG["image"], **data.get("image", {})}
+            # Backward compat: extract system_prompt from old modelfile format
+            if "system_prompt" not in data and "modelfile" in data:
+                m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
+                if m:
+                    merged["system_prompt"] = m.group(1).strip()
             print(f"        config: loaded {CONFIG_FILE}")
             return merged
         except Exception as e:
             print(f"        WARNING: could not load {CONFIG_FILE}: {e} -- using defaults")
     else:
         print(f"        config: {CONFIG_FILE} not found, using defaults")
-        # write defaults so user can edit
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(_DEFAULT_CONFIG, f, indent=4)
         print(f"        config: wrote default config to {CONFIG_FILE}")
@@ -79,15 +81,11 @@ def load_config():
 
 CFG = load_config()
 
-ALICE_MODEL       = CFG["alice_model"]
-PROMPT_MODEL      = CFG["prompt_model"]
-OLLAMA_URL        = CFG["ollama_url"]
-OLLAMA_HOST       = CFG["ollama_url"].removeprefix("http://")
-FORGE_URL         = CFG["forge_url"]
-ALICE_APPEARANCE  = CFG["appearance"]
-BASE_NEGATIVE     = CFG["negative_prompt"]
-MODELFILE_CONTENT = CFG["modelfile"]
-IMG_CFG           = CFG["image"]
+FORGE_URL        = CFG["forge_url"]
+ALICE_APPEARANCE = CFG["appearance"]
+BASE_NEGATIVE    = CFG["negative_prompt"]
+SYSTEM_PROMPT    = CFG["system_prompt"]
+IMG_CFG          = CFG["image"]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def step(msg):  print(f"\n[Alice] {msg}")
@@ -115,106 +113,54 @@ def wait_for(url, label, retries=40, delay=3):
 
 # ── Install / start steps ────────────────────────────────────────────────────
 
-def ensure_ollama():
-    step("Checking Ollama...")
-    if not os.path.exists(OLLAMA_EXE):
-        ok("Downloading Ollama installer...")
-        installer = os.path.join(os.environ["TEMP"], "OllamaSetup.exe")
-        urllib.request.urlretrieve("https://ollama.com/download/OllamaSetup.exe", installer)
-        ok("Running Ollama installer (follow the prompts)...")
-        subprocess.run([installer], check=True)
-        time.sleep(3)
-        if not os.path.exists(OLLAMA_EXE):
-            warn("Ollama not found at expected path after install.")
-    else:
-        ok("Ollama present.")
+llm = None  # loaded by ensure_model() in background thread
 
 
-def ensure_ollama_running():
-    global OLLAMA_URL, OLLAMA_HOST
-    step("Starting Ollama service...")
+def _download_with_progress(url: str, dest: str):
+    def reporthook(count, block_size, total_size):
+        if total_size > 0:
+            pct = min(count * block_size / total_size * 100, 100)
+            print(f"\r        {pct:5.1f}%", end="", flush=True)
+    urllib.request.urlretrieve(url, dest, reporthook=reporthook)
+    print()
 
-    default_port = int(OLLAMA_URL.rsplit(":", 1)[-1])
 
-    # First: check if Ollama is already running on any nearby port — reuse it
-    for candidate in range(default_port, default_port + 10):
-        url = f"http://127.0.0.1:{candidate}"
-        if http_ok(f"{url}/api/tags"):
-            if candidate == default_port:
-                ok("Already running.")
-            else:
-                ok(f"Already running on port {candidate}.")
-            OLLAMA_URL = url
-            OLLAMA_HOST = f"127.0.0.1:{candidate}"
-            return
+def ensure_model():
+    global llm
+    step("Setting up language model...")
+    os.makedirs(MODEL_DIR, exist_ok=True)
 
-    def port_bindable(port):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return True
-            except OSError:
-                return False
+    # 1. Explicit path in config
+    model_path = CFG.get("model_path", "").strip()
 
-    # Not running anywhere — find a free port and start fresh
-    ollama_port = default_port
-    if not port_bindable(ollama_port):
-        for candidate in range(default_port + 1, default_port + 10):
-            if port_bindable(candidate):
-                warn(f"Port {default_port} is blocked. Using port {candidate} instead.")
-                ollama_port = candidate
-                break
-        else:
-            fail(f"Ports {default_port}-{default_port+9} are all blocked.\nTry reinstalling Ollama.")
+    # 2. Any .gguf already in models/
+    if not model_path or not os.path.exists(model_path):
+        existing = glob.glob(os.path.join(MODEL_DIR, "*.gguf"))
+        if existing:
+            model_path = existing[0]
+            ok(f"Found model: {os.path.basename(model_path)}")
 
-    ollama_host = f"127.0.0.1:{ollama_port}"
-    OLLAMA_URL = f"http://{ollama_host}"
-    OLLAMA_HOST = ollama_host
+    # 3. Download default model
+    if not model_path or not os.path.exists(model_path):
+        model_path = os.path.join(MODEL_DIR, MODEL_NAME)
+        ok(f"Downloading {MODEL_NAME} (~7.7 GB) ...")
+        ok("This is a one-time download. Go grab a coffee.")
+        try:
+            _download_with_progress(MODEL_URL, model_path)
+        except Exception as e:
+            if os.path.exists(model_path):
+                os.remove(model_path)
+            fail(f"Download failed: {e}\nPlace a GGUF file in {MODEL_DIR} and restart.")
 
-    env = os.environ.copy()
-    env["OLLAMA_HOST"] = ollama_host
-    proc = subprocess.Popen(
-        [OLLAMA_EXE, "serve"],
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
+    ok(f"Loading {os.path.basename(model_path)} ...")
+    from llama_cpp import Llama
+    llm = Llama(
+        model_path=model_path,
+        n_ctx=4096,
+        n_gpu_layers=-1,  # use GPU if available; falls back to CPU silently
+        verbose=False,
     )
-    time.sleep(2)
-    if proc.poll() is not None:
-        _, err = proc.communicate()
-        err_text = err.decode(errors='replace').strip()
-        fail(f"Ollama exited immediately (code {proc.returncode}).\n        stderr: {err_text}\n        Try running 'ollama serve' in a terminal to see the full error.")
-
-    if not wait_for(f"{OLLAMA_URL}/api/tags", "Ollama"):
-        fail("Ollama did not start in time. Try running 'ollama serve' in a terminal to diagnose.")
-
-
-def ensure_models():
-    step("Checking models...")
-    ollama_env = {**os.environ, "OLLAMA_HOST": OLLAMA_HOST}
-    result = subprocess.run([OLLAMA_EXE, "list"], capture_output=True, text=True, env=ollama_env)
-    models = result.stdout
-
-    if PROMPT_MODEL not in models:
-        ok(f"Pulling {PROMPT_MODEL} (~7GB, this will take a while)...")
-        subprocess.run([OLLAMA_EXE, "pull", PROMPT_MODEL], check=True, env=ollama_env)
-    else:
-        ok(f"{PROMPT_MODEL} present.")
-
-    if ALICE_MODEL not in models:
-        ok("Writing modelfile...")
-        with open(MODELFILE, "w", encoding="utf-8") as f:
-            f.write(MODELFILE_CONTENT)
-        ok(f"Creating {ALICE_MODEL}...")
-        result = subprocess.run([OLLAMA_EXE, "create", ALICE_MODEL, "-f", MODELFILE], env=ollama_env)
-        if result.returncode != 0:
-            warn(f"Could not create {ALICE_MODEL}.")
-            warn(f"Run manually: ollama create alice-nemo -f \"{MODELFILE}\"")
-        else:
-            ok(f"{ALICE_MODEL} created.")
-    else:
-        ok(f"{ALICE_MODEL} present.")
+    ok("Model ready.")
 
 
 def find_python310() -> str:
@@ -310,35 +256,27 @@ class ImageRequest(BaseModel):
 
 
 def chat_alice(message: str) -> str:
+    if llm is None:
+        raise RuntimeError("Model is still loading — please wait a moment and try again.")
     history.append({"role": "user", "content": message})
     try:
-        r = req.post(f"{OLLAMA_URL}/api/chat", json={
-            "model": ALICE_MODEL,
-            "messages": history,
-            "stream": False,
-        }, timeout=180)
-        r.raise_for_status()
-        reply = r.json()["message"]["content"]
-    except req.exceptions.ConnectionError:
+        response = llm.create_chat_completion(
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
+            max_tokens=1024,
+        )
+        reply = response["choices"][0]["message"]["content"]
+    except Exception as e:
         history.pop()
-        raise RuntimeError(f"Ollama is not running. Start it with: ollama serve")
-    except req.exceptions.Timeout:
-        history.pop()
-        raise RuntimeError("Ollama timed out — model may still be loading. Try again in a moment.")
-    except req.exceptions.HTTPError as e:
-        history.pop()
-        raise RuntimeError(f"Ollama error {e.response.status_code}: {e.response.text[:200]}")
-    except (KeyError, ValueError) as e:
-        history.pop()
-        raise RuntimeError(f"Unexpected Ollama response: {e}")
+        raise RuntimeError(f"Model error: {e}")
     history.append({"role": "assistant", "content": reply})
     return reply
 
 
 def extract_sd_prompt(text: str) -> str:
-    r = req.post(f"{OLLAMA_URL}/api/chat", json={
-        "model": PROMPT_MODEL,
-        "messages": [{"role": "user", "content":
+    if llm is None:
+        return ""
+    response = llm.create_chat_completion(
+        messages=[{"role": "user", "content":
             f"Read this conversation and extract a Stable Diffusion image prompt.\n\n"
             f"{text}\n\n"
             f"Rules:\n"
@@ -351,12 +289,10 @@ def extract_sd_prompt(text: str) -> str:
             f"- Do not include character names or dialogue\n"
             f"- Output only the tags, nothing else"
         }],
-        "stream": False,
-    }, timeout=30)
-    return r.json()["message"]["content"]
+        max_tokens=200,
+    )
+    return response["choices"][0]["message"]["content"]
 
-
-BASE_NEGATIVE = CFG["negative_prompt"]
 
 def generate_image(prompt: str, extra_negative: str = ""):
     if not http_ok(f"{FORGE_URL}/sdapi/v1/sd-models"):
@@ -662,9 +598,7 @@ async function clearHistory() {
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 def _startup():
-    ensure_ollama()
-    ensure_ollama_running()
-    ensure_models()
+    ensure_model()
     ensure_forge()
     start_forge()
 
