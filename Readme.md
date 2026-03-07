@@ -1,7 +1,7 @@
 # Alice
 
 A single-file local AI companion with chat and image generation.
-Powered by [Ollama](https://ollama.com) (LLM) and [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) (images).
+Powered by [llama.cpp](https://github.com/ggerganov/llama.cpp) (LLM via `llama-cpp-python`) and [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) (images).
 Everything runs locally -- no cloud, no API keys, no subscriptions.
 
 ---
@@ -59,11 +59,8 @@ Alice works through the following steps automatically:
 
 | Step | What happens |
 |------|-------------|
-| Python deps | Installs `fastapi`, `uvicorn`, `requests`, `pydantic` via pip |
-| Ollama | Downloads and installs Ollama if not found |
-| Ollama service | Starts the Ollama background service |
-| mistral-nemo | Pulls the model (~7GB) if not present |
-| alice-nemo | Creates the Alice persona from `alice.json` if not present |
+| Python deps | Installs `fastapi`, `uvicorn`, `requests`, `pydantic`, `llama-cpp-python` via pip |
+| LLM model | Finds or downloads a GGUF model (~7GB) if not present |
 | Forge | Clones Stable Diffusion WebUI Forge if not present |
 | webui.bat | Patches Forge with `--api --cuda-malloc` flags |
 | Checkpoint | Pauses if no `.safetensors` model file is found (see below) |
@@ -111,14 +108,11 @@ All user-facing settings live in `alice.json`. This file is not committed to git
 
 ```json
 {
-    "alice_model":  "alice-nemo",
-    "prompt_model": "mistral-nemo",
-    "ollama_url":   "http://localhost:11434",
     "forge_url":    "http://localhost:7860",
-
-    "appearance": "woman, Alice, very long blonde hair, blue eyes, ...",
-
+    "model_path":   "",
+    "appearance":   "woman, Alice, very long blonde hair, blue eyes, ...",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, ...",
+    "system_prompt": "You are Alice. You are enigmatic, intelligent, ...",
 
     "image": {
         "steps": 25,
@@ -127,20 +121,18 @@ All user-facing settings live in `alice.json`. This file is not committed to git
         "cfg_scale": 7,
         "sampler_name": "DPM++ 2M Karras",
         "suffix": "photorealistic, highly detailed, 8k, masterpiece"
-    },
-
-    "modelfile": "FROM mistral-nemo\n\nSYSTEM \"\"\"...\"\"\"\n"
+    }
 }
 ```
 
 | Field | Purpose |
 |-------|---------|
-| `alice_model` | Ollama model used for chat (the persona) |
-| `prompt_model` | Ollama model used to extract SD prompts from conversation |
+| `forge_url` | Forge API base URL |
+| `model_path` | Optional path to a GGUF model (blank = auto-download) |
 | `appearance` | Prepended to every image prompt for visual consistency |
 | `negative_prompt` | Always passed to Stable Diffusion as negative |
+| `system_prompt` | System prompt used for the chat persona |
 | `image` | SD generation parameters (steps, size, sampler, etc.) |
-| `modelfile` | Full Ollama modelfile content for the alice-nemo persona |
 
 Edit `alice.json` to change Alice's personality, appearance, image quality settings, or swap models. Restart `alice.py` to apply changes.
 
@@ -180,75 +172,28 @@ You
  ▼
 alice.py (FastAPI on port 8000)
  │
- ├─ /chat  ──► Ollama (alice-nemo)
+ ├─ /chat  ──► llama.cpp (GGUF model)
  │              └─ maintains conversation history
  │
- └─ /image ──► Ollama (mistral-nemo)
+ └─ /image ──► llama.cpp (prompt extractor)
                 └─ extracts SD prompt tags from conversation history
                     └─ Forge API (port 7860)
                         └─ dreamshaper_8 on GPU
 ```
 
-The `/image` command passes the last 12 messages to `mistral-nemo` with instructions to extract Stable Diffusion prompt tags. Those tags are combined with `appearance` from `alice.json` and any extra instructions you typed.
+The `/image` command passes the last 12 messages to the LLM with instructions to extract Stable Diffusion prompt tags. Those tags are combined with `appearance` from `alice.json` and any extra instructions you typed.
 
 ---
 
 ## Customising the Persona
 
-Alice's personality is defined by an Ollama modelfile. The `"modelfile"` field in `alice.json` is used to create the `alice-nemo` model on first run.
-
-### Modelfile structure
-
-```
-FROM <base-model>
-
-SYSTEM """
-<your system prompt here>
-"""
-```
-
-The `FROM` line sets the base model. Alice uses `mistral-nemo` by default. The `SYSTEM` block is the instruction injected at the start of every conversation -- this is where you define personality, appearance, backstory, and the user's details.
-
-### Applying changes
-
-After editing the `"modelfile"` field in `alice.json`, recreate the model:
-
-```
-ollama create alice-nemo -f alice.modelfile
-```
-
-Or delete the model and let `alice.py` recreate it on next run:
-
-```
-ollama rm alice-nemo
-python alice.py
-```
+Alice's personality is defined by the `"system_prompt"` field in `alice.json`. This prompt is injected at the start of every conversation -- this is where you define personality, appearance, backstory, and the user's details.
 
 ### Tips
 
 - Be specific about physical appearance -- the system prompt feeds both the chat responses and (indirectly) the image prompts extracted from conversation
-- Keep the persona consistent with the `"appearance"` field in `alice.json` -- if the modelfile says blonde but appearance says brunette, the images and text will contradict each other
-- The base model can be changed to any model available in Ollama -- run `ollama list` to see what you have. Larger models give better prose but are slower
-- Ollama modelfiles support `PARAMETER` directives for temperature, context length etc -- see https://ollama.com/docs/modelfile
-
-### Example: tame companion (alice.modelfile.example)
-
-A safe-for-work example is included in the repo as `alice.modelfile.example`:
-
-```
-FROM mistral-nemo
-
-SYSTEM """
-You are Alice. You are intelligent, witty, and warm.
-You speak in measured, literary prose and have a dry sense of humour.
-You are curious about ideas and enjoy thoughtful conversation.
-You never break character.
-
-The user's name is Christian. He is a software engineer and game developer.
-"""
-```
-
-To use it, copy its contents into the `"modelfile"` field in `alice.json`, then recreate the model.
+- Keep the persona consistent with the `"appearance"` field in `alice.json` -- if the system prompt says blonde but appearance says brunette, the images and text will contradict each other
+- You can swap to a different GGUF model by setting `"model_path"` or dropping one into `models\`
 
 ---
 
@@ -257,8 +202,8 @@ To use it, copy its contents into the `"modelfile"` field in `alice.json`, then 
 ### `python` not found
 Reinstall Python and tick **"Add Python to PATH"**.
 
-### Ollama not found after install
-Ollama installs to `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`. If it went elsewhere, update `OLLAMA_EXE` near the top of `alice.py`.
+### Model download is slow
+The default GGUF model is ~7GB. Place your own `.gguf` file in `models\` to avoid the download.
 
 ### `launch.py not found` from Forge
 Do **not** run `webui.bat` directly from the command line. Let `alice.py` launch it -- it sets the correct working directory. Just run `python alice.py`.
@@ -280,11 +225,8 @@ Check the terminal for a `Forge error:` line. Common causes:
 ### Slow image generation
 Normal on first generation while the model loads into VRAM. Check the Forge terminal shows `Device: cuda:0 NVIDIA GeForce ...` to confirm GPU is being used.
 
-### alice-nemo model not found
-The persona wasn't created. Ensure `alice.json` has a valid `modelfile` field, then run:
-```
-ollama create alice-nemo -f alice.modelfile
-```
+### Non-interactive sessions
+If you run Alice in a non-interactive shell, it will skip opening the browser and will exit instead of waiting for input.
 
 ---
 
@@ -321,4 +263,3 @@ alice.json
 |------|---------|
 | 8000 | Alice (FastAPI) |
 | 7860 | Stable Diffusion Forge |
-| 11434 | Ollama |
