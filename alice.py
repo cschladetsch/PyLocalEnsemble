@@ -42,6 +42,13 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
     from kokoro_onnx import Kokoro as _Kokoro
 
+try:
+    from PIL import Image as _PILImage
+except ImportError:
+    print("Installing Pillow...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "Pillow"])
+    from PIL import Image as _PILImage
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -724,39 +731,51 @@ async def video_from_history(body: VideoRequest):
         positive_extra = ", ".join(positive_parts)
         extra_negative = ", ".join(negative_parts)
         prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-        full_prompt = prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"]
-        negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
         vid_cfg = CFG.get("video", {})
-        r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
-            "prompt":          full_prompt,
-            "negative_prompt": negative,
-            "steps":           vid_cfg.get("steps", 20),
-            "width":           vid_cfg.get("width", 512),
-            "height":          vid_cfg.get("height", 512),
-            "cfg_scale":       vid_cfg.get("cfg_scale", 7),
-            "sampler_name":    vid_cfg.get("sampler_name", "DPM++ 2M Karras"),
-            "script_name":     "AnimateDiff",
-            "script_args":     [
-                vid_cfg.get("motion_module", "mm_sd_v15_v2.ckpt"),
-                vid_cfg.get("frames", 16),
-                vid_cfg.get("fps", 8),
-                True,
-                vid_cfg.get("format", "GIF"),
-                False,
-            ],
-        }, timeout=600)
-        return r.json(), full_prompt
+        n_frames  = vid_cfg.get("frames", 6)
+        steps     = vid_cfg.get("steps", 15)
+        width     = vid_cfg.get("width",  IMG_CFG.get("width",  512))
+        height    = vid_cfg.get("height", IMG_CFG.get("height", 512))
+        cfg_scale = vid_cfg.get("cfg_scale", IMG_CFG.get("cfg_scale", 7))
+        duration  = vid_cfg.get("frame_ms", 200)
+        full_prompt = prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"]
+        negative    = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
+
+        frames = []
+        for _ in range(n_frames):
+            try:
+                r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
+                    "prompt":          full_prompt,
+                    "negative_prompt": negative,
+                    "steps":           steps,
+                    "width":           width,
+                    "height":          height,
+                    "cfg_scale":       cfg_scale,
+                    "sampler_name":    IMG_CFG.get("sampler_name", "DPM++ 2M Karras"),
+                    "seed":            -1,
+                }, timeout=120)
+                imgs = r.json().get("images", [])
+                if imgs:
+                    frames.append(_PILImage.open(io.BytesIO(base64.b64decode(imgs[0]))))
+            except Exception as e:
+                print(f"[Alice] Frame error: {e}")
+
+        if not frames:
+            return None, full_prompt
+
+        gif_buf = io.BytesIO()
+        frames[0].save(
+            gif_buf, format="GIF", save_all=True,
+            append_images=frames[1:], loop=0, duration=duration, optimize=False
+        )
+        return base64.b64encode(gif_buf.getvalue()).decode(), full_prompt
 
     loop = asyncio.get_running_loop()
     try:
-        data, full_prompt = await loop.run_in_executor(None, _run)
-        if "video" in data:
-            return JSONResponse({"video": data["video"], "sd_prompt": full_prompt})
-        imgs = data.get("images", [])
-        if imgs:
-            return JSONResponse({"video": imgs[0], "sd_prompt": full_prompt, "fallback": True})
-        print(f"\n[Alice] Forge Video Response: {str(data)[:1000]}")
-        return JSONResponse({"error": "No output from Forge. Is AnimateDiff installed?"}, status_code=500)
+        gif_b64, full_prompt = await loop.run_in_executor(None, _run)
+        if gif_b64:
+            return JSONResponse({"gif": gif_b64, "sd_prompt": full_prompt})
+        return JSONResponse({"error": "No frames generated — is Forge running?"}, status_code=500)
     except Exception as e:
         print(f"Forge video error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -891,7 +910,6 @@ def _startup():
         load_tts()
         ensure_forge()
         ensure_checkpoint()
-        ensure_animatediff()
         start_forge()
         _set_forge_model(_RV_FILENAME)
     except Exception as e:
