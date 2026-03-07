@@ -58,8 +58,8 @@ _DEFAULT_CONFIG = {
     "forge_url":    "http://localhost:7860",
     "model_path":   "",
     "ollama_model": "mistral-nemo",
-    "appearance":   "woman, Alice, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality, clothed, dressed, covered",
+    "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
     "system_prompt": (
         "You are Alice. You are enigmatic, intelligent, and warm.\n"
         "You speak in measured, literary prose. You never break character.\n"
@@ -69,9 +69,9 @@ _DEFAULT_CONFIG = {
         "steps":        25,
         "width":        512,
         "height":       768,
-        "cfg_scale":    9,
+        "cfg_scale":    7,
         "sampler_name": "DPM++ 2M Karras",
-        "suffix":       "nsfw, photorealistic, highly detailed, 8k, masterpiece"
+        "suffix":       "photorealistic, highly detailed, 8k, masterpiece"
     },
 }
 
