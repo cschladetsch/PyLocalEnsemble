@@ -257,11 +257,13 @@ def extract_sd_prompt(text: str) -> str:
                 "You extract Stable Diffusion image prompts from conversations. "
                 "Output ONLY comma-separated tags. Maximum 25 tags. "
                 "No sentences, no explanation, no lists, nothing else. "
-                "Focus on: pose, clothing state, expression, setting, lighting, mood. "
-                "For partial nudity be precise: 'one breast exposed, other breast covered'. "
-                "Never invent content not present in the conversation."
+                "IMPORTANT: Focus entirely on the MOST RECENT exchange — what is happening RIGHT NOW in the scene. "
+                "Describe the current visual state: pose, body position, clothing state, expression, setting, lighting, mood. "
+                "If clothing is being removed or adjusted, describe the resulting state, not the action. "
+                "Never invent content not present in the conversation. "
+                "Never output verbs or actions — only visual states (e.g. not 'removing dress' but 'dress around waist')."
             )},
-            {"role": "user", "content": f"Extract SD tags from this conversation:\n\n{text}"},
+            {"role": "user", "content": f"Extract SD tags describing the current scene:\n\n{text}"},
         ])
         # Strip any preamble the model adds before the actual tags
         tags = result.strip().split("\n")[-1]
@@ -453,7 +455,7 @@ async def image_from_history(body: ImageRequest):
     if not history:
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
     messages = "\n".join(
-        f"{m['role'].capitalize()}: {m['content']}" for m in history[-12:]
+        f"{m['role'].capitalize()}: {m['content']}" for m in history[-4:]
     )
     base_prompt = extract_sd_prompt(messages)
 
@@ -486,7 +488,7 @@ async def video_from_history(body: VideoRequest):
     if not history:
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
     messages = "\n".join(
-        f"{m['role'].capitalize()}: {m['content']}" for m in history[-12:]
+        f"{m['role'].capitalize()}: {m['content']}" for m in history[-4:]
     )
     base_prompt = extract_sd_prompt(messages)
 
