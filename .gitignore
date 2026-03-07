@@ -1,10 +1,7 @@
 /stable-diffusion-forge
 /stable-diffusion-webui-forge
 /tmp
-/alice.modelfile
-/alice.modelfile.mine
-alice.json
+alice.json.mine
+personas.json
 /.claude
 /backups
-
-personas.json
