@@ -390,7 +390,7 @@ async function toggleMic() {
       stream.getTracks().forEach(t => t.stop());
       btn.classList.remove('recording');
       btn.disabled = true;
-      btn.textContent = '...';
+      btn.textContent = 'STT…';
       await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn);
     };
     mediaRecorder.start(100);
