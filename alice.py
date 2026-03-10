@@ -887,13 +887,17 @@ async def stt(request: Request):
                 raise RuntimeError("No audio stream found")
             resampler = _av.audio.resampler.AudioResampler(format='s16', layout='mono', rate=16000)
             buf = bytearray()
+
+            def _drain(rf):
+                if rf is None:
+                    return
+                frames = rf if isinstance(rf, list) else [rf]
+                for f in frames:
+                    buf.extend(bytes(f.planes[0]))
+
             for frame in container.decode(audio):
-                rf = resampler.resample(frame)
-                if rf is not None:
-                    buf.extend(bytes(rf.planes[0]))
-            rf = resampler.resample(None)
-            if rf is not None:
-                buf.extend(bytes(rf.planes[0]))
+                _drain(resampler.resample(frame))
+            _drain(resampler.resample(None))
             container.close()
             print(f"        PyAV decoded {len(buf)} bytes of PCM")
             with wave.open(dst, 'wb') as wf:
