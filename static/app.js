@@ -320,7 +320,8 @@ function updMsg(id, t) {
   e.innerHTML = e.querySelector('.sndr').outerHTML + t;
 }
 
-async function _sttTranscribe(webmBlob, btn, tid) {
+async function _sttTranscribe(webmBlob, btn) {
+  const inp = document.getElementById('inp');
   try {
     console.log('STT blob:', webmBlob.size, 'bytes,', webmBlob.type);
     const res = await fetch('/stt', {
@@ -329,16 +330,19 @@ async function _sttTranscribe(webmBlob, btn, tid) {
       body: webmBlob
     });
     const d = await res.json();
-    btn.textContent = 'Mic'; btn.disabled = false;
     if (d.text) {
-      updMsg(tid, d.text); // show transcription immediately
-      await _chatWith(d.text);
+      inp.value = d.text;
+      inp.focus();
+      inp.setSelectionRange(d.text.length, d.text.length);
     } else {
-      updMsg(tid, '<em style="color:#888">Could not hear anything.</em>');
+      inp.placeholder = 'Could not hear anything — try again';
+      setTimeout(() => inp.placeholder = 'Say something... or /image', 2500);
     }
   } catch (e) {
     console.warn('STT error:', e);
-    updMsg(tid, '<em style="color:#888">Transcription failed.</em>');
+    inp.placeholder = 'Transcription failed';
+    setTimeout(() => inp.placeholder = 'Say something... or /image', 2500);
+  } finally {
     btn.textContent = 'Mic'; btn.disabled = false;
   }
 }
@@ -387,8 +391,7 @@ async function toggleMic() {
       btn.classList.remove('recording');
       btn.disabled = true;
       btn.textContent = '...';
-      const tid = addMsg('user', 'You', '<span class="gen dots">transcribing</span>');
-      await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn, tid);
+      await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn);
     };
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
