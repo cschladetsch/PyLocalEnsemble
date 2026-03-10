@@ -77,6 +77,7 @@ _auto_image_counter = 0
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
+    "name":         "Alice",
     "forge_url":    "http://localhost:7860",
     "model_path":   "",
     "ollama_model": "mistral-nemo",
@@ -126,6 +127,7 @@ def load_config():
 
 CFG = load_config()
 
+NAME             = CFG.get("name", "Alice")
 FORGE_URL        = CFG["forge_url"]
 ALICE_APPEARANCE = CFG["appearance"]
 BASE_NEGATIVE    = CFG["negative_prompt"]
@@ -154,7 +156,7 @@ PERSONAS = _load_personas()
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-def step(msg):  print(f"\n[Alice] {msg}")
+def step(msg):  print(f"\n[{NAME}] {msg}")
 def ok(msg):    print(f"        ok: {msg}")
 def warn(msg):  print(f"        WARNING: {msg}")
 def fail(msg):  print(f"\n        ERROR: {msg}"); sys.exit(1)
@@ -324,6 +326,7 @@ def _tts_wav_b64(text: str) -> str:
     tts_cfg = CFG.get("tts", {})
     voice = tts_cfg.get("voice", "af_nicole")
     speed = tts_cfg.get("speed", 0.85)
+    print(f"[tts] voice={voice}, speed={speed}, {len(text)} chars: {text[:60]!r}{'...' if len(text)>60 else ''}")
     samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -613,6 +616,10 @@ def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg
         print("Forge down, restarting...")
         start_forge()
     negative = (extra_negative + ", " + BASE_NEGATIVE) if extra_negative else BASE_NEGATIVE
+    _steps = steps if steps is not None else IMG_CFG["steps"]
+    _cfg = cfg_scale if cfg_scale is not None else IMG_CFG["cfg_scale"]
+    print(f"\n[image] prompt ({len(prompt)} chars): {prompt[:120]!r}{'...' if len(prompt)>120 else ''}")
+    print(f"[image] steps={_steps}, cfg={_cfg}, size={IMG_CFG['width']}x{IMG_CFG['height']}")
     try:
         r = req.post(f"{FORGE_URL}/sdapi/v1/txt2img", json={
             "prompt":          prompt + ", " + ALICE_APPEARANCE + ", " + IMG_CFG["suffix"],
@@ -625,11 +632,15 @@ def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg
         }, timeout=300)
         data = r.json()
         if "images" not in data:
-            print(f"Forge response (no images key): {str(data)[:300]}")
+            print(f"[image] Forge response (no images key): {str(data)[:300]}")
         imgs = data.get("images", [])
+        if imgs:
+            print(f"[image] done — got image ({len(imgs[0])} b64 chars)")
+        else:
+            print("[image] Forge returned no images")
         return imgs[0] if imgs else None
     except Exception as e:
-        print(f"Forge error: {e}")
+        print(f"[image] Forge error: {e}")
         return None
 
 
@@ -644,6 +655,8 @@ async def chat(body: ChatRequest):
     if memory:
         sys_prompt += f"\n\nMemory of earlier conversation:\n{memory}"
     messages = [{"role": "system", "content": sys_prompt}] + list(history)
+
+    print(f"\n[chat] user: {body.message[:120]!r}")
 
     async def generate():
         global _auto_image_counter
@@ -683,6 +696,7 @@ async def chat(body: ChatRequest):
         await fut
 
         reply = "".join(collected)
+        print(f"[chat] raw reply ({len(reply)} chars): {reply[:80]!r}{'...' if len(reply)>80 else ''}")
         reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
         reply = re.sub(
             r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
@@ -698,6 +712,7 @@ async def chat(body: ChatRequest):
         _auto_image_counter += 1
         auto_every = CFG.get("image", {}).get("auto_every", 1)
         auto_image = (_auto_image_counter % auto_every == 0)
+        print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_image}")
 
         yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_image})}\n\n"
 
@@ -779,7 +794,7 @@ async def switch_model(body: ModelSwitchRequest):
     if not os.path.exists(body.path):
         return JSONResponse({"error": "Model file not found."}, status_code=404)
     import asyncio
-    print(f"\n[Alice] Switching model to: {os.path.basename(body.path)}")
+    print(f"\n[{NAME}] Switching model to: {os.path.basename(body.path)}")
     kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
     try:
         new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
@@ -794,7 +809,7 @@ async def switch_model(body: ModelSwitchRequest):
         LLM = new_llm
         history.clear()
         memory = ""
-    print(f"[Alice] Model ready: {os.path.basename(body.path)}")
+    print(f"[{NAME}] Model ready: {os.path.basename(body.path)}")
     return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
 
 
@@ -814,7 +829,7 @@ async def switch_persona(name: str):
     SYSTEM_PROMPT    = p.get("system_prompt", SYSTEM_PROMPT)
     history.clear()
     memory = ""
-    print(f"\n[Alice] Switched to persona: {name}")
+    print(f"\n[{NAME}] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name})
 
 
@@ -936,6 +951,11 @@ async def clear():
     return {"status": "cleared"}
 
 
+@app.get("/info")
+async def info():
+    return JSONResponse({"name": NAME})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     with open(os.path.join(ALICE_DIR, "static", "index.html"), encoding="utf-8") as f:
@@ -955,18 +975,18 @@ def _startup():
         start_forge()
         _set_forge_model(_RV_FILENAME)
     except Exception as e:
-        print(f"\n[Alice] FATAL ERROR IN STARTUP THREAD: {e}")
+        print(f"\n[{NAME}] FATAL ERROR IN STARTUP THREAD: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
     print()
     print("=" * 60)
-    print("  Alice")
+    print(f"  {NAME}")
     print("=" * 60)
 
     print()
-    print(f"[Alice] Starting server at {ALICE_URL}")
+    print(f"[{NAME}] Starting server at {ALICE_URL}")
     
     # Start background tasks
     t = threading.Thread(target=_startup, daemon=True)
@@ -984,4 +1004,4 @@ if __name__ == "__main__":
     try:
         uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
     except Exception as e:
-        print(f"\n[Alice] Server failed: {e}")
+        print(f"\n[{NAME}] Server failed: {e}")

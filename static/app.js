@@ -1,5 +1,21 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
 let mediaRecorder = null, audioChunks = [];
+let charName = 'Alice';
+
+async function loadInfo() {
+  try {
+    const r = await fetch('/info');
+    const d = await r.json();
+    charName = d.name || 'Alice';
+    document.title = charName;
+    const h1 = document.querySelector('h1');
+    if (h1) h1.textContent = charName;
+    // Update the initial greeting sender label
+    const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
+    if (firstMsg) firstMsg.textContent = charName;
+  } catch (e) { console.warn('Could not load info:', e); }
+}
+loadInfo();
 
 function resay() {
   if (!lastAudioSrc) return;
@@ -109,7 +125,8 @@ async function triggerMedia(extra = '', auto = false) {
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (d.image) {
-      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
+      const caption = d.sd_prompt ? `<div class="img-caption">${d.sd_prompt.slice(0, 200)}${d.sd_prompt.length > 200 ? '…' : ''}</div>` : '';
+      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">${caption}`;
       setPrompt(d.sd_prompt);
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
@@ -143,7 +160,7 @@ async function switchModel(sel) {
   const name = sel.options[sel.selectedIndex].text;
   sel.disabled = true;
   disableAll();
-  const tid = addMsg('alice', 'Alice', `<span class="gen">Loading ${name}...</span>`);
+  const tid = addMsg('alice', charName, `<span class="gen">Loading ${name}...</span>`);
   const res = await fetch('/model', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -166,7 +183,7 @@ async function loadPersonas() {
 
 async function switchPersona(name) {
   await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
-  document.getElementById('msgs').innerHTML = '<div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>';
+  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
 }
@@ -233,7 +250,7 @@ async function regenFromPrompt() {
 
 async function _chatWith(msg) {
   await interrupt('new message sent');
-  const tid = addMsg('alice', 'Alice', '<span class="gen dots">thinking</span>');
+  const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
   chatAbort = new AbortController();
@@ -386,7 +403,7 @@ async function toggleMic() {
 
 async function clearHistory() {
   await fetch('/history', { method: 'DELETE' });
-  document.getElementById('msgs').innerHTML = '<div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>';
+  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
