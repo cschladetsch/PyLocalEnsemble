@@ -83,6 +83,10 @@ Key settings:
 | `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
 | `llama_server.ctx_size` | `2048` | Context window in tokens — increase for longer memory |
+| `llama_url` | `"http://127.0.0.1:8080"` | llama-server URL (override with `LLAMA_URL` env var) |
+| `memory.max_history` | `16` | Compress history after this many messages |
+| `memory.keep_recent` | `8` | Messages kept after compression |
+| `memory.max_chars` | `1500` | Max chars in rolling memory summary — scale with `ctx_size` |
 
 Restart `alice.py` after editing `alice.json`.
 
@@ -146,9 +150,9 @@ Alice maintains a rolling memory so long conversations don't lose earlier contex
 - **History** is saved to `history.json` after each reply and reloaded on startup.
 - When history exceeds **16 messages**, the oldest 8 are summarised by the LLM into a brief paragraph and stored as `memory`.
 - That memory paragraph is prepended to the system prompt on every subsequent request.
-- The memory buffer is capped at **1500 characters**.
+- The memory buffer is capped at **1500 characters** by default.
 
-**Why 1500 characters?** The memory string is injected directly into every system prompt, which counts against the context window. With the default `ctx_size = 2048` tokens, roughly 375 tokens (≈ 1500 chars at 4 chars/token) is a safe budget that leaves room for the system prompt itself, recent history, and the user's message. If you increase `ctx_size` — e.g. to 4096 or 8192 in `alice.json` — raise `_MAX_MEMORY` proportionally in `alice.py`.
+**Why 1500 characters?** The memory string is injected directly into every system prompt, which counts against the context window. With the default `ctx_size = 2048` tokens, roughly 375 tokens (≈ 1500 chars at 4 chars/token) is a safe budget that leaves room for the system prompt itself, recent history, and the user's message. If you increase `ctx_size` — e.g. to 4096 or 8192 — raise `memory.max_chars` proportionally in `alice.json`.
 
 - **Clear** — the Clear button wipes history, memory, and `history.json`.
 - Memory is also cleared when switching personas or models.
@@ -206,16 +210,22 @@ The leftmost dropdown lists models available from the llama-server. To add model
 
 ```
 alice/
-├── alice.py                         ← entire app (FastAPI server)
-├── install.py                       ← one-time installer
-├── alice.json                       ← your personal config (gitignored)
-├── alice.json.example               ← SFW reference config (committed)
-├── personas.json                    ← your personas (gitignored)
-├── history.json                     ← conversation history (auto-created, gitignored)
-├── models/                          ← GGUF models (gitignored)
-│   └── tts/                         ← Kokoro model files (auto-downloaded by install.py)
-├── llama-cpp/                       ← llama-server binary (gitignored)
-└── stable-diffusion-webui-forge/    ← auto-cloned by install.py (gitignored)
+├── alice.py          ← FastAPI routes + startup (imports modules below)
+├── config.py         ← paths, defaults, load/save config, personas
+├── llm.py            ← llama-server lifecycle, chat, history, memory
+├── tts.py            ← Kokoro TTS load + synthesis
+├── stt.py            ← Whisper STT load + transcription pipeline
+├── image.py          ← SD Forge lifecycle, prompt extraction, generation
+├── utils.py          ← step/ok/warn, http_ok, wait_for
+├── install.py        ← one-time installer (run once before alice.py)
+├── alice.json        ← your personal config (gitignored)
+├── alice.json.example             ← SFW reference config (committed)
+├── personas.json                  ← your personas (gitignored)
+├── history.json                   ← conversation history (auto-created, gitignored)
+├── models/                        ← GGUF models (gitignored)
+│   └── tts/                       ← Kokoro model files (auto-downloaded by install.py)
+├── llama-cpp/                     ← llama-server binary (gitignored)
+└── stable-diffusion-webui-forge/  ← auto-cloned by install.py (gitignored)
     └── models/
         └── Stable-diffusion/
             └── Realistic_Vision_V5.1_fp16-no-ema.safetensors
@@ -235,19 +245,40 @@ alice/
 
 ## Architecture
 
+### Module structure
+
 ```mermaid
-graph LR
-    Browser -->|HTTP + SSE| Alice["alice.py\nFastAPI :8000"]
+graph TD
+    subgraph App ["alice.py — routes + startup"]
+        Routes["FastAPI routes\n/chat /image /tts /stt …"]
+    end
 
-    Alice -->|OpenAI API| LlamaServer["llama-server\n:8080"]
-    Alice -->|REST API| Forge["SD Forge\n:7860"]
-    Alice -->|in-process| Kokoro["Kokoro TTS\nONNX"]
-    Alice -->|in-process| Whisper["faster-whisper\nSTT"]
+    subgraph Modules ["Python modules"]
+        Config["config.py\npaths · defaults · load/save · personas"]
+        LLM["llm.py\nllama-server · chat · history · memory"]
+        TTS["tts.py\nKokoro load + synthesis"]
+        STT["stt.py\nWhisper load + transcription"]
+        Image["image.py\nForge · prompt extraction · generation"]
+        Utils["utils.py\nstep · ok · warn · http_ok · wait_for"]
+    end
 
-    LlamaServer --> GGUF["GGUF model\n(GPU)"]
-    Forge --> SD["Stable Diffusion\n(GPU)"]
-    Kokoro --> CPU1["CPU"]
-    Whisper --> CPU2["CPU"]
+    subgraph External ["External processes (GPU)"]
+        LlamaServer["llama-server :8080\nOpenAI-compatible API"]
+        Forge["SD Forge :7860\nStable Diffusion"]
+    end
+
+    Routes --> Config
+    Routes --> LLM
+    Routes --> TTS
+    Routes --> STT
+    Routes --> Image
+    LLM --> Utils
+    TTS --> Utils
+    STT --> Utils
+    Image --> Utils
+    Image --> LLM
+    LLM --> LlamaServer
+    Image --> Forge
 ```
 
 ### Request flow — chat turn
@@ -284,17 +315,17 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A([python alice.py]) --> B[Load alice.json]
-    B --> C[Connect to\nllama-server]
-    C -->|not running| D[Start llama-server\nprocess]
+    A([python alice.py]) --> B["config.py\nLoad alice.json"]
+    B --> C["llm.load_llm()\nConnect to llama-server"]
+    C -->|not running| D["llm._start_server()\nSpawn llama-server"]
     D --> E[Retry until ready\nup to 2 min]
     C -->|already up| E
-    E --> F[Load history.json]
-    F --> G[Load Kokoro TTS]
-    G --> H{Forge\nrunning?}
-    H -->|no| I[Start Forge\nwebui.bat]
+    E --> F["llm.load_history()\nRestore history + memory"]
+    F --> G["tts.load_tts()\nLoad Kokoro ONNX"]
+    G --> H{"image: Forge\nrunning?"}
+    H -->|no| I["image.start_forge()\nwebui.bat / webui.sh"]
     H -->|yes| J
-    I --> J[Set checkpoint]
+    I --> J["image.set_forge_model()\nSelect checkpoint"]
     J --> K([Open browser\nlocalhost:8000])
 ```
 
@@ -302,16 +333,16 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    M[New message arrives] --> C{history >\n16 msgs?}
+    M[New message arrives] --> C{"history >\nmemory.max_history\n(default 16)?"}
     C -->|no| R[Normal reply]
-    C -->|yes| S[Take oldest 8 messages]
-    S --> LLM[LLM summarises\ninto 2-4 sentences]
-    LLM --> MEM[Append to memory\nstring]
-    MEM --> CAP{memory >\n1500 chars?}
-    CAP -->|yes| TRIM[Trim to last\n1500 chars]
+    C -->|yes| S["Take oldest messages\nkeep memory.keep_recent\n(default 8)"]
+    S --> LLM[llm.py: LLM summarises\ninto 2-4 sentences]
+    LLM --> MEM[Append to memory string]
+    MEM --> CAP{"memory >\nmemory.max_chars\n(default 1500)?"}
+    CAP -->|yes| TRIM[Trim to last N chars]
     CAP -->|no| R
     TRIM --> R
-    R --> SYS[Inject memory\ninto system prompt]
+    R --> SYS[Inject memory into\nsystem prompt]
 ```
 
 ---

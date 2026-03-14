@@ -29,29 +29,46 @@ The target user is already running local AI tools. They understand LLMs and Stab
 
 ```mermaid
 graph TD
-    subgraph Runtime ["Runtime (alice.py)"]
-        FastAPI["FastAPI :8000\n(chat, TTS, STT, image API)"]
-        Kokoro["Kokoro ONNX\nTTS — CPU"]
-        Whisper["faster-whisper\nSTT — CPU"]
+    subgraph App ["alice.py — routes + startup"]
+        Routes["FastAPI :8000\nroutes + startup"]
     end
 
-    subgraph GPU ["GPU Process"]
-        LlamaServer["llama-server :8080\nOpenAI-compatible API\nGGUF model — Vulkan/CUDA/Metal"]
+    subgraph Modules ["Python modules"]
+        Config["config.py"]
+        LLM["llm.py"]
+        TTS_M["tts.py"]
+        STT_M["stt.py"]
+        Image_M["image.py"]
+        Utils["utils.py"]
+    end
+
+    subgraph GPU ["External GPU Processes"]
+        LlamaServer["llama-server :8080\nGGUF — Vulkan/CUDA/Metal"]
         Forge["SD Forge :7860\nStable Diffusion"]
+    end
+
+    subgraph CPU ["In-process (CPU)"]
+        Kokoro["Kokoro ONNX\nTTS"]
+        Whisper["faster-whisper\nSTT"]
     end
 
     subgraph Install ["install.py (run once)"]
         Pip["pip packages"]
-        BinaryDl["llama-server binary\nVulkan/platform build"]
-        ModelDl["GGUF model download\nor scan existing"]
-        TTSDl["Kokoro model + voices"]
-        ForgeSetup["git clone Forge\n+ RV5 checkpoint"]
+        BinaryDl["llama-server binary"]
+        ModelDl["GGUF model"]
+        TTSDl["Kokoro models"]
+        ForgeSetup["git clone Forge\n+ checkpoint"]
     end
 
-    FastAPI --> LlamaServer
-    FastAPI --> Forge
-    FastAPI --> Kokoro
-    FastAPI --> Whisper
+    Routes --> Config
+    Routes --> LLM
+    Routes --> TTS_M
+    Routes --> STT_M
+    Routes --> Image_M
+    LLM --> LlamaServer
+    Image_M --> Forge
+    TTS_M --> Kokoro
+    STT_M --> Whisper
 ```
 
 ---
@@ -68,6 +85,7 @@ gantt
     STT mic input                  :done, 2026-01, 2026-02
     Config / persona system        :done, 2026-01, 2026-02
     install.py one-command setup   :done, 2026-02, 2026-03
+    Module split + config-driven memory :done, 2026-03, 2026-03
 
     section Phase 2 · Distribution
     Packaging / release zip        :active, 2026-03, 2026-04
@@ -93,6 +111,8 @@ gantt
 - [x] Rolling conversation memory with LLM-based compression
 - [x] `install.py` — one command sets up everything (llama-server, model, TTS, Forge)
 - [x] `alice.py` — assumes installed, just runs
+- [x] Module split — `config`, `llm`, `tts`, `stt`, `image`, `utils`
+- [x] Memory limits configurable in `alice.json` (`memory.max_history`, `memory.keep_recent`, `memory.max_chars`)
 
 ### Phase 2 — Distribution
 
@@ -165,5 +185,5 @@ A free tier with limitations (capped personas, watermarked output) can drive pai
 | Platform | Gumroad (alias) |
 | Distribution | Reddit organic |
 | Identity | Fully separated alias |
-| Current status | Working, install.py complete |
+| Current status | Working — modular, install.py complete |
 | Launch blocker | Packaging + Gumroad listing |
