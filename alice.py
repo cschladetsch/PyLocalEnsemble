@@ -83,6 +83,7 @@ _WHISPER = None
 _whisper_lock = threading.Lock()
 _llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
 _auto_image_counter = 0
+_gen_cancel = threading.Event()   # set to signal running image gen to abort
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
@@ -716,7 +717,7 @@ async def chat(body: ChatRequest):
         ).strip()
 
         history.append({"role": "assistant", "content": reply})
-        _compress_history()
+        await loop.run_in_executor(None, _compress_history)
         _save_history()
 
         _auto_image_counter += 1
@@ -740,12 +741,12 @@ async def generate_raw(body: GenerateRequest):
 
 @app.post("/interrupt")
 async def interrupt():
+    _gen_cancel.set()   # signal any running image _run to abort after LLM finishes
     try:
         req.post(f"{FORGE_URL}/sdapi/v1/interrupt", timeout=5)
-        return {"status": "interrupted"}
     except Exception as e:
-        print(f"Interrupt error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        print(f"Interrupt Forge error: {e}")
+    return {"status": "interrupted"}
 
 @app.get("/progress")
 async def get_progress():
@@ -762,10 +763,16 @@ async def image_from_history(body: ImageRequest):
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
 
     def _run():
+        _gen_cancel.clear()
         recent = history[-6:]
         messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
         last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+        print("[image] extracting SD prompt via LLM...")
         base_prompt = extract_sd_prompt(messages, appearance=ALICE_APPEARANCE, last_user_msg=last_user, persona=SYSTEM_PROMPT)
+        # Check if we were cancelled while the LLM was running
+        if _gen_cancel.is_set():
+            print("[image] cancelled before Forge call")
+            return None, None
         positive_parts, negative_parts = [], []
         for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
             if token.lower().startswith("no "):
@@ -781,7 +788,10 @@ async def image_from_history(body: ImageRequest):
         return ALICE_APPEARANCE + ", " + prompt, image
 
     loop = asyncio.get_running_loop()
-    sd_prompt, image = await loop.run_in_executor(None, _run)
+    result = await loop.run_in_executor(None, _run)
+    sd_prompt, image = result if result[0] is not None else (None, None)
+    if image is None and sd_prompt is None:
+        return JSONResponse({"error": "Cancelled."}, status_code=200)
     return JSONResponse({"sd_prompt": sd_prompt, "image": image})
 
 
