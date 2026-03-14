@@ -93,7 +93,7 @@ function startProgress() {
       const fill   = document.getElementById('img-pb');
       const status = document.getElementById('img-status');
       if (fill)   fill.style.width = pct + '%';
-      if (status && pct > 0) status.textContent = `Generating... ${pct}%`;
+      if (status) status.textContent = pct > 0 ? `Generating... ${pct}%` : 'Preparing...';
     } catch {}
   }, 800);
 }
