@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio, tempfile
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio, tempfile, shutil
 
 # -- Windows CUDA DLL loading fix --
 if os.name == "nt":
@@ -36,13 +36,6 @@ except ImportError:
         "fastapi", "uvicorn", "requests", "pydantic"])
     import requests as req
 
-try:
-    from llama_cpp import Llama
-except ImportError:
-    print("Installing llama-cpp-python...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "llama-cpp-python"])
-    from llama_cpp import Llama
 
 try:
     from kokoro_onnx import Kokoro as _Kokoro
@@ -76,21 +69,19 @@ ALICE_URL   = "http://localhost:8000"
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 
-# llama-cpp global (loaded at startup)
-LLM = None
-TTS = None
-_WHISPER = None
+LLM_READY    = False   # True once llama.cpp server is confirmed reachable
+TTS          = None
+_WHISPER     = None
 _whisper_lock = threading.Lock()
-_llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
 _auto_image_counter = 0
-_gen_cancel = threading.Event()   # set to signal running image gen to abort
+_gen_cancel  = threading.Event()   # set to signal running image gen to abort
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
     "name":         "Alice",
     "forge_url":    "http://localhost:7860",
     "model_path":   "",
-    "ollama_model": "mistral-nemo",
+    "llama_model":  "mistral-nemo",
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
     "system_prompt": (
@@ -102,6 +93,12 @@ _DEFAULT_CONFIG = {
         "Never use phrases like 'please note', 'I should mention', 'as an AI', or 'I aimed to'.\n"
         "Never describe yourself or the scene in third person. Speak as yourself, directly."
     ),
+    "llama_server": {
+        "n_gpu_layers": 33,    # tune down if VRAM OOM; 33 fits mistral-nemo on 8 GB
+        "ctx_size":     2048,
+        "batch_size":   512,
+        "threads":      8,
+    },
     "tts": {
         "voice": "af_nicole",
         "speed": 0.85
@@ -123,8 +120,9 @@ def load_config():
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             merged = {**_DEFAULT_CONFIG, **data}
-            merged["image"] = {**_DEFAULT_CONFIG["image"], **data.get("image", {})}
-            merged["tts"]   = {**_DEFAULT_CONFIG["tts"],   **data.get("tts",   {})}
+            merged["image"]        = {**_DEFAULT_CONFIG["image"],        **data.get("image",        {})}
+            merged["tts"]          = {**_DEFAULT_CONFIG["tts"],          **data.get("tts",          {})}
+            merged["llama_server"] = {**_DEFAULT_CONFIG["llama_server"], **data.get("llama_server", {})}
             if "system_prompt" not in data and "modelfile" in data:
                 m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
                 if m:
@@ -136,6 +134,10 @@ def load_config():
     return _DEFAULT_CONFIG.copy()
 
 CFG = load_config()
+
+LLAMA_URL = os.environ.get("LLAMA_URL", "http://127.0.0.1:8080")
+if not LLAMA_URL.startswith("http"):
+    LLAMA_URL = "http://" + LLAMA_URL
 
 NAME             = CFG.get("name", "Alice")
 FORGE_URL        = CFG["forge_url"]
@@ -200,44 +202,17 @@ _KEEP_RECENT  = 8     # keep this many recent messages after compression
 _MAX_MEMORY   = 1500  # max chars in rolling memory summary
 
 
-def _find_gguf() -> str:
-    """Auto-detect a GGUF model: check config, local models/, then Ollama cache."""
-    configured = CFG.get("model_path", "")
-    if configured and os.path.exists(configured):
-        return configured
+_LLAMA_DIR   = os.path.join(ALICE_DIR, "llama-cpp")
+_MODELS_DIR  = os.path.join(ALICE_DIR, "models")
 
-    # Local models/ dir
-    local = glob.glob(os.path.join(ALICE_DIR, "models", "*.gguf"))
-    if local:
-        return local[0]
+_DEFAULT_MODEL_REPO  = "bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF"
+_DEFAULT_MODEL_QUANT = "Q4_K_M"
 
-    # Ollama blob cache — find blob via manifest for configured model
-    ollama_root = os.path.join(os.path.expanduser("~"), ".ollama", "models")
-    ollama_blobs = os.path.join(ollama_root, "blobs")
-    model_name = CFG.get("ollama_model", "mistral-nemo").split(":")[0]
-    manifest_path = os.path.join(ollama_root, "manifests", "registry.ollama.ai",
-                                 "library", model_name, "latest")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path) as f:
-                manifest = json.load(f)
-            for layer in manifest.get("layers", []):
-                if layer.get("mediaType") == "application/vnd.ollama.image.model":
-                    digest = layer["digest"].replace(":", "-")
-                    blob_path = os.path.join(ollama_blobs, digest)
-                    if os.path.exists(blob_path):
-                        return blob_path
-        except Exception:
-            pass
+_SKIP_MODEL_KEYWORDS = ["coder", "code", "math", "embed", "rerank", "starcoder", "tabby", "sql"]
 
-    # Fallback: largest blob
-    if os.path.exists(ollama_blobs):
-        blobs = [os.path.join(ollama_blobs, f) for f in os.listdir(ollama_blobs)
-                 if not f.endswith(".part")]
-        if blobs:
-            return max(blobs, key=os.path.getsize)
 
-    return ""
+def _llama_model() -> str:
+    return CFG.get("llama_model", "mistral-nemo")
 
 
 def _download_with_progress(url: str, dest: str):
@@ -249,54 +224,200 @@ def _download_with_progress(url: str, dest: str):
     print()
 
 
-_DEFAULT_GGUF_URL  = ("https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF"
-                      "/resolve/main/Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf")
-_DEFAULT_GGUF_NAME = "Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf"
+def _list_llama_models() -> list:
+    """Return list of (name, name) tuples from the llama.cpp server."""
+    try:
+        r = req.get(f"{LLAMA_URL}/v1/models", timeout=5)
+        return [(m["id"], m["id"]) for m in r.json().get("data", [])]
+    except Exception:
+        return []
 
 
-def _ensure_default_gguf() -> str:
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    dest = os.path.join(MODEL_DIR, _DEFAULT_GGUF_NAME)
-    if not os.path.exists(dest):
-        ok(f"Downloading {_DEFAULT_GGUF_NAME} (~2 GB)...")
-        _download_with_progress(_DEFAULT_GGUF_URL, dest)
-        ok("Model downloaded.")
-    return dest
+def _start_llama_server():
+    """Launch llama-server with model_path from config, if available."""
+    model_path = CFG.get("model_path", "")
+    if not model_path or not os.path.exists(model_path):
+        warn("model_path not set or file not found — start llama-server manually.")
+        return
+    exe = (CFG.get("llama_server_path", "") or
+           shutil.which("llama-server") or
+           shutil.which("llama-server.exe"))
+    if not exe or not os.path.exists(exe):
+        exe = shutil.which("llama-server") or shutil.which("llama-server.exe")
+    if not exe:
+        warn("llama-server not found — run install.py or start it manually.")
+        return
+    sc = {**_DEFAULT_CONFIG["llama_server"], **CFG.get("llama_server", {})}
+    ok(f"Starting llama-server with {os.path.basename(model_path)} "
+       f"(ngl={sc['n_gpu_layers']}, ctx={sc['ctx_size']})...")
+    flags = [
+        exe, "-m", model_path,
+        "--host", "127.0.0.1", "--port", "8080",
+        "-ngl",       str(sc["n_gpu_layers"]),
+        "--ctx-size",  str(sc["ctx_size"]),
+        "--batch-size", str(sc["batch_size"]),
+        "--threads",   str(sc["threads"]),
+    ]
+    kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(flags, **kw)
 
 
-def _list_ggufs() -> list:
-    """Return list of (display_name, full_path) for all findable GGUFs."""
-    found = {}
-    # Local models/ dir
-    for p in glob.glob(os.path.join(MODEL_DIR, "*.gguf")):
-        found[os.path.basename(p)] = p
-    # Ollama blobs
-    ollama_blobs = os.path.join(os.path.expanduser("~"), ".ollama", "models", "blobs")
-    if os.path.exists(ollama_blobs):
-        for f in os.listdir(ollama_blobs):
-            if not f.endswith(".part"):
-                p = os.path.join(ollama_blobs, f)
-                if os.path.getsize(p) > 100_000_000:  # >100MB — likely a model
-                    found.setdefault(f, p)
-    return [(name, path) for name, path in sorted(found.items())]
+def _try_connect_llama(silent=False) -> bool:
+    """Attempt one connection to llama.cpp server. Returns True if LLM_READY was set."""
+    global LLM_READY
+    try:
+        r = req.get(f"{LLAMA_URL}/health", timeout=3)
+        if r.json().get("status") == "ok":
+            LLM_READY = True
+            ok(f"llama.cpp server ready at {LLAMA_URL}")
+            return True
+        return False
+    except Exception as e:
+        if not silent:
+            warn(f"llama.cpp server not reachable: {e}")
+        return False
+
+
+def _find_local_gguf() -> str:
+    """Return the first suitable .gguf found in common locations, or ''."""
+    home = os.path.expanduser("~")
+    roots = [
+        _MODELS_DIR,
+        os.path.join(home, ".cache", "lm-studio", "models"),
+        os.path.join(home, "AppData", "Local", "nomic.ai", "GPT4All"),
+        os.path.join(home, "models"),
+    ]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for path in glob.glob(os.path.join(root, "**", "*.gguf"), recursive=True):
+            name = os.path.basename(path).lower()
+            if not any(kw in name for kw in _SKIP_MODEL_KEYWORDS):
+                return path
+    return ""
+
+
+def _hf_resolve(repo_id: str, quant: str) -> tuple:
+    """Return (filename, url) for a GGUF in a HuggingFace repo."""
+    data = req.get(f"https://huggingface.co/api/models/{repo_id}", timeout=15).json()
+    files = [s["rfilename"] for s in data.get("siblings", []) if s["rfilename"].endswith(".gguf")]
+    match = next((f for f in files if quant in f), None) or (files[0] if files else None)
+    if not match:
+        raise RuntimeError(f"No GGUF found in {repo_id}")
+    return match, f"https://huggingface.co/{repo_id}/resolve/main/{match}"
+
+
+def _ensure_llama_server():
+    """Download llama-server (Vulkan) if not already present."""
+    if CFG.get("llama_server_path") and os.path.exists(CFG["llama_server_path"]):
+        return
+    if shutil.which("llama-server") or shutil.which("llama-server.exe"):
+        return
+
+    step("Downloading llama-server ...")
+    try:
+        release = req.get("https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
+                          timeout=15).json()
+    except Exception as e:
+        warn(f"Could not fetch llama.cpp release: {e}")
+        return
+
+    assets = release.get("assets", [])
+    plat = "win" if os.name == "nt" else ("macos" if sys.platform == "darwin" else "ubuntu")
+    prefs = (["vulkan", "avx2", "cpu"] if plat == "win"
+             else (["arm64", "x64"] if plat == "macos" else ["x64"]))
+
+    asset = None
+    for pref in prefs:
+        for a in assets:
+            n = a["name"].lower()
+            if plat in n and pref in n and n.endswith(".zip"):
+                asset = a
+                break
+        if asset:
+            break
+
+    if not asset:
+        warn("No suitable llama-server binary found — start it manually.")
+        return
+
+    os.makedirs(_LLAMA_DIR, exist_ok=True)
+    zip_path = os.path.join(_LLAMA_DIR, asset["name"])
+    ok(f"Downloading {asset['name']} ({asset['size'] // 1_048_576} MB)...")
+    _download_with_progress(asset["browser_download_url"], zip_path)
+
+    import zipfile
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(_LLAMA_DIR)
+    os.remove(zip_path)
+
+    exe_name = "llama-server.exe" if os.name == "nt" else "llama-server"
+    exe = next((os.path.join(r, f) for r, _, fs in os.walk(_LLAMA_DIR)
+                for f in fs if f == exe_name), None)
+    if exe:
+        CFG["llama_server_path"] = exe
+        _save_config()
+        ok(f"llama-server ready: {exe}")
+    else:
+        warn(f"Extraction done but llama-server not found in {_LLAMA_DIR}")
+
+
+def _ensure_model():
+    """Find or download a model GGUF, save to config."""
+    if CFG.get("model_path") and os.path.exists(CFG["model_path"]):
+        return
+
+    found = _find_local_gguf()
+    if found:
+        ok(f"Using model: {os.path.basename(found)}")
+        CFG["model_path"] = found
+        _save_config()
+        return
+
+    step(f"Downloading default model ({_DEFAULT_MODEL_REPO}) ...")
+    try:
+        filename, url = _hf_resolve(_DEFAULT_MODEL_REPO, _DEFAULT_MODEL_QUANT)
+    except Exception as e:
+        warn(f"Could not resolve model: {e}")
+        return
+
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    dest = os.path.join(_MODELS_DIR, filename)
+    ok(f"Downloading {filename} (this will take a while)...")
+    _download_with_progress(url, dest)
+    CFG["model_path"] = dest
+    _save_config()
+    ok(f"Model ready: {filename}")
+
+
+def _save_config():
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(CFG, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        warn(f"Could not save config: {e}")
 
 
 def load_llm():
-    global LLM
-    step("Loading LLM...")
-    path = _find_gguf()
-    if not path:
-        ok("No GGUF found — downloading default model...")
-        path = _ensure_default_gguf()
-    ok(f"Model: {os.path.basename(path)}")
-    kwargs = dict(model_path=path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
-    try:
-        LLM = Llama(**kwargs)
-    except Exception as e:
-        warn(f"GPU load failed ({e}), retrying CPU-only...")
-        kwargs.update(n_gpu_layers=0, flash_attn=False)
-        LLM = Llama(**kwargs)
-    ok("LLM ready.")
+    global LLM_READY
+    step(f"Connecting to llama.cpp server at {LLAMA_URL} ...")
+    if not http_ok(LLAMA_URL + "/health", timeout=2):
+        _start_llama_server()
+
+    def _retry_loop():
+        for _ in range(60):   # up to 2 minutes, every 2s
+            if LLM_READY:
+                return
+            time.sleep(2)
+            if _try_connect_llama(silent=True):
+                return
+        warn("Gave up waiting for llama.cpp server. Start it manually and restart alice.py.")
+
+    if not _try_connect_llama():
+        warn("llama.cpp server not ready yet — retrying in background. UI will unlock when ready.")
+        threading.Thread(target=_retry_loop, daemon=True).start()
 
 
 _TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
@@ -349,11 +470,13 @@ def _tts_wav_b64(text: str) -> str:
 
 
 def _llm_chat(messages: list) -> str:
-    if LLM is None:
-        raise RuntimeError("LLM not loaded")
-    with _llm_lock:
-        result = LLM.create_chat_completion(messages=messages)
-    return result["choices"][0]["message"]["content"]
+    r = req.post(f"{LLAMA_URL}/v1/chat/completions", json={
+        "model":    _llama_model(),
+        "messages": messages,
+        "stream":   False,
+    }, timeout=120)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 
@@ -658,8 +781,10 @@ def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg
 @app.post("/chat")
 async def chat(body: ChatRequest):
     global _auto_image_counter
-    if LLM is None:
-        return JSONResponse({"error": "LLM not ready"}, status_code=503)
+    if not LLM_READY:
+        async def _not_ready():
+            yield f"data: {json.dumps({'error': 'LLM server is still starting up — please wait a moment and try again.'})}\n\n"
+        return StreamingResponse(_not_ready(), media_type="text/event-stream")
 
     history.append({"role": "user", "content": body.message})
     sys_prompt = SYSTEM_PROMPT
@@ -676,13 +801,27 @@ async def chat(body: ChatRequest):
 
         def _run():
             try:
-                with _llm_lock:
-                    stream = LLM.create_chat_completion(messages=messages, stream=True)
-                    for chunk in stream:
-                        delta = chunk["choices"][0]["delta"].get("content", "")
-                        if delta:
-                            collected.append(delta)
-                            q.put(delta)
+                r = req.post(f"{LLAMA_URL}/v1/chat/completions", json={
+                    "model":    _llama_model(),
+                    "messages": messages,
+                    "stream":   True,
+                }, stream=True, timeout=120)
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8")
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    data = json.loads(payload)
+                    delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    if delta:
+                        collected.append(delta)
+                        q.put(delta)
             except Exception as e:
                 q.put(e)
             q.put(None)
@@ -799,8 +938,8 @@ async def image_from_history(body: ImageRequest):
 
 @app.get("/models")
 async def list_models():
-    models = [{"name": name, "path": path} for name, path in _list_ggufs()]
-    current = os.path.basename(LLM.model_path) if LLM and hasattr(LLM, 'model_path') else ""
+    models = [{"name": name, "path": path} for name, path in _list_llama_models()]
+    current = _llama_model()
     return JSONResponse({"models": models, "current": current})
 
 
@@ -810,27 +949,13 @@ class ModelSwitchRequest(BaseModel):
 
 @app.post("/model")
 async def switch_model(body: ModelSwitchRequest):
-    global LLM
-    if not os.path.exists(body.path):
-        return JSONResponse({"error": "Model file not found."}, status_code=404)
-    import asyncio
-    print(f"\n[{NAME}] Switching model to: {os.path.basename(body.path)}")
-    kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
-    try:
-        new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
-    except Exception as e:
-        kwargs.update(n_gpu_layers=0, flash_attn=False)
-        try:
-            new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
-        except Exception as e2:
-            return JSONResponse({"error": str(e2)}, status_code=500)
-    with _llm_lock:
-        global memory
-        LLM = new_llm
-        history.clear()
-        memory = ""
-    print(f"[{NAME}] Model ready: {os.path.basename(body.path)}")
-    return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
+    global memory
+    model = body.path
+    print(f"\n[{NAME}] Switching llama model to: {model}")
+    CFG["llama_model"] = model
+    history.clear()
+    memory = ""
+    return JSONResponse({"status": "ok", "model": model})
 
 
 @app.get("/personas")
@@ -977,7 +1102,7 @@ async def clear():
 
 @app.get("/info")
 async def info():
-    return JSONResponse({"name": NAME})
+    return JSONResponse({"name": NAME, "llm_ready": LLM_READY})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -991,6 +1116,8 @@ async def index():
 # ── Entry point ──────────────────────────────────────────────────────────────
 def _startup():
     try:
+        _ensure_llama_server()
+        _ensure_model()
         load_llm()
         _load_history()
         load_tts()

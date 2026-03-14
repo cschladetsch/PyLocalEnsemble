@@ -9,3 +9,4 @@ personas.json
 history.json
 __pycache__/
 *.pyc
+/llama-cpp

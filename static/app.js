@@ -1,6 +1,7 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
 let mediaRecorder = null, audioChunks = [];
 let charName = 'Alice';
+let llmReady = false;
 
 async function loadInfo() {
   try {
@@ -10,11 +11,35 @@ async function loadInfo() {
     document.title = charName;
     const h1 = document.querySelector('h1');
     if (h1) h1.textContent = charName;
-    // Update the initial greeting sender label
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
-  } catch (e) { console.warn('Could not load info:', e); }
+    if (!llmReady && d.llm_ready) {
+      llmReady = true;
+      setLLMReady(true);
+    } else if (!d.llm_ready) {
+      setLLMReady(false);
+      setTimeout(loadInfo, 2000); // poll until ready
+    }
+  } catch (e) { console.warn('Could not load info:', e); setTimeout(loadInfo, 2000); }
 }
+
+function setLLMReady(ready) {
+  const inp = document.getElementById('inp');
+  const btn = document.getElementById('ibtn');
+  const mic = document.getElementById('mic-btn');
+  if (ready) {
+    inp.disabled = false;
+    inp.placeholder = 'Say something... or /image';
+    if (btn) btn.disabled = false;
+    if (mic) mic.disabled = false;
+  } else {
+    inp.disabled = true;
+    inp.placeholder = 'Waiting for LLM server to start...';
+    if (btn) btn.disabled = true;
+    if (mic) mic.disabled = true;
+  }
+}
+
 loadInfo();
 
 function resay() {
