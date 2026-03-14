@@ -1,0 +1,30 @@
+{
+    "name": "Alice",
+    "forge_url": "http://localhost:7860",
+    "model_path": "",
+    "llama_server_path": "",
+    "llama_model": "local-model",
+    "stt_silence_seconds": 3,
+    "appearance": "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
+    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "system_prompt": "You are Alice. Respond always in first person as Alice — never narrate in third person.\nYou are enigmatic, witty, and fully present.\nYou speak in measured, literary prose. You never break character.",
+    "llama_server": {
+        "n_gpu_layers": 33,
+        "ctx_size": 2048,
+        "batch_size": 512,
+        "threads": 8
+    },
+    "tts": {
+        "voice": "af_nicole",
+        "speed": 1.0
+    },
+    "image": {
+        "steps": 25,
+        "width": 512,
+        "height": 768,
+        "cfg_scale": 7,
+        "sampler_name": "DPM++ 2M Karras",
+        "suffix": "photorealistic, highly detailed, 8k, masterpiece",
+        "auto_every": 1
+    }
+}
