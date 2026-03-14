@@ -4,7 +4,7 @@ Alice - single file app.
 Run: python alice.py
 Installs everything missing, starts all services, opens the browser.
 """
-import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio, tempfile
+import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, threading, base64, io, wave, asyncio, tempfile, shutil
 
 # -- Windows CUDA DLL loading fix --
 if os.name == "nt":
@@ -69,7 +69,9 @@ ALICE_URL   = "http://localhost:8000"
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 
-OLLAMA_URL   = "http://localhost:11434"
+OLLAMA_URL   = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+if not OLLAMA_URL.startswith("http"):
+    OLLAMA_URL = "http://" + OLLAMA_URL
 
 LLM_READY    = False   # True once Ollama is confirmed reachable with the model
 TTS          = None
@@ -215,20 +217,45 @@ def _list_ollama_models() -> list:
         return []
 
 
+def _start_ollama():
+    """Start the Ollama server process if not already running."""
+    ollama_exe = shutil.which("ollama")
+    if not ollama_exe:
+        # Try common Windows install location
+        candidate = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
+        if os.path.exists(candidate):
+            ollama_exe = candidate
+    if not ollama_exe:
+        fail("Ollama not found. Install it from https://ollama.com")
+
+    ok("Starting Ollama server...")
+    if os.name == "nt":
+        subprocess.Popen([ollama_exe, "serve"],
+                         creationflags=subprocess.CREATE_NEW_CONSOLE,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen([ollama_exe, "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wait_for(OLLAMA_URL + "/api/tags", "Ollama", retries=20, delay=1)
+
+
 def load_llm():
     global LLM_READY
     model = _ollama_model()
     step(f"Connecting to Ollama ({model})...")
+    # Start Ollama if not reachable
+    if not http_ok(OLLAMA_URL + "/api/tags", timeout=2):
+        _start_ollama()
     try:
         r = req.get(f"{OLLAMA_URL}/api/tags", timeout=10)
         names = [m["name"] for m in r.json().get("models", [])]
         if not any(n == model or n.startswith(model + ":") for n in names):
-            warn(f"Model '{model}' not in Ollama. Pulling...")
+            warn(f"Model '{model}' not pulled. Pulling now (may take a while)...")
             subprocess.run(["ollama", "pull", model], check=False)
         LLM_READY = True
         ok(f"Ollama ready — model: {model}")
     except Exception as e:
-        fail(f"Ollama not reachable ({e}). Run: ollama serve")
+        fail(f"Ollama not reachable: {e}")
 
 
 _TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
