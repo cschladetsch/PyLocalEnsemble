@@ -1,6 +1,7 @@
 {
     "name": "Alice",
     "forge_url": "http://localhost:7860",
+    "llama_url": "http://127.0.0.1:8080",
     "model_path": "",
     "llama_server_path": "",
     "llama_model": "local-model",
@@ -26,5 +27,10 @@
         "sampler_name": "DPM++ 2M Karras",
         "suffix": "photorealistic, highly detailed, 8k, masterpiece",
         "auto_every": 1
+    },
+    "memory": {
+        "max_history": 16,
+        "keep_recent": 8,
+        "max_chars": 1500
     }
 }
