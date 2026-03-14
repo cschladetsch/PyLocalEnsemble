@@ -3,7 +3,7 @@
 Alice installer — run once to set up everything needed.
   python install.py
 """
-import sys, os, subprocess, json, platform, shutil
+import sys, os, subprocess, json, platform, shutil, threading, itertools, time
 
 MIN_PYTHON  = (3, 10)
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
@@ -11,6 +11,33 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "alice.json")
 REQ_FILE    = os.path.join(SCRIPT_DIR, "requirements.txt")
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+class Spinner:
+    """Context manager that shows a spinning animation while work is done."""
+    _CHARS = '|/-\\'
+
+    def __init__(self, msg):
+        self.msg = msg
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+        # clear the spinner line
+        print(f"\r{' ' * (len(self.msg) + 8)}\r", end='', flush=True)
+
+    def _spin(self):
+        for ch in itertools.cycle(self._CHARS):
+            if self._stop.is_set():
+                break
+            print(f"\r      {ch}  {self.msg}", end='', flush=True)
+            time.sleep(0.1)
+
 
 def heading(n, text):
     print(f"\n[{n}] {text}")
@@ -48,15 +75,15 @@ def check_python():
 def install_packages():
     heading("2/4", "Python packages")
     if os.path.exists(REQ_FILE):
-        info(f"installing from {REQ_FILE}")
-        subprocess.check_call([sys.executable, "-m", "pip", "install",
-                               "--quiet", "-r", REQ_FILE])
+        with Spinner(f"pip install -r requirements.txt"):
+            subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                   "--quiet", "-r", REQ_FILE])
     else:
         pkgs = ["fastapi", "uvicorn[standard]", "pydantic", "requests",
                 "kokoro-onnx", "faster-whisper", "av"]
-        info("installing: " + ", ".join(pkgs))
-        subprocess.check_call([sys.executable, "-m", "pip", "install",
-                               "--quiet", *pkgs])
+        with Spinner("pip install " + " ".join(pkgs)):
+            subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                   "--quiet", *pkgs])
     ok("all packages installed")
 
 
@@ -152,8 +179,8 @@ def setup_config():
 
     # Pull the model via Ollama
     model = cfg.get("ollama_model", "mistral-nemo")
-    info(f"pulling model: {model}  (may take a few minutes on first run) ...")
-    r = run("ollama", "pull", model)
+    with Spinner(f"ollama pull {model}  (first run may take a few minutes)"):
+        r = run("ollama", "pull", model)
     if r.returncode == 0:
         ok(f"model '{model}' ready")
     else:

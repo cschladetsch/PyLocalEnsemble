@@ -178,14 +178,15 @@ def http_ok(url, timeout=2):
         return False
 
 def wait_for(url, label, retries=40, delay=3):
-    print(f"        Waiting for {label}", end="", flush=True)
-    for _ in range(retries):
+    _spin = iter("|/-\\|/-\\".__mul__(999))
+    for i in range(retries):
         if http_ok(url, timeout=2):
-            print(" ready.")
+            print(f"\r        {label} ready.{' ' * 20}")
             return True
-        print(".", end="", flush=True)
+        ch = next(_spin)
+        print(f"\r        {ch}  Waiting for {label}...", end="", flush=True)
         time.sleep(delay)
-    print(" timed out.")
+    print(f"\r        Waiting for {label}... timed out.{' ' * 10}")
     return False
 
 # ── LLM (llama-cpp-python) ───────────────────────────────────────────────────
