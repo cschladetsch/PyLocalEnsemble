@@ -36,13 +36,6 @@ except ImportError:
         "fastapi", "uvicorn", "requests", "pydantic"])
     import requests as req
 
-try:
-    from llama_cpp import Llama
-except ImportError:
-    print("Installing llama-cpp-python...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "llama-cpp-python"])
-    from llama_cpp import Llama
 
 try:
     from kokoro_onnx import Kokoro as _Kokoro
@@ -76,14 +69,14 @@ ALICE_URL   = "http://localhost:8000"
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 
-# llama-cpp global (loaded at startup)
-LLM = None
-TTS = None
-_WHISPER = None
+OLLAMA_URL   = "http://localhost:11434"
+
+LLM_READY    = False   # True once Ollama is confirmed reachable with the model
+TTS          = None
+_WHISPER     = None
 _whisper_lock = threading.Lock()
-_llm_lock = threading.Lock()  # llama-cpp Llama is not thread-safe
 _auto_image_counter = 0
-_gen_cancel = threading.Event()   # set to signal running image gen to abort
+_gen_cancel  = threading.Event()   # set to signal running image gen to abort
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
@@ -200,44 +193,8 @@ _KEEP_RECENT  = 8     # keep this many recent messages after compression
 _MAX_MEMORY   = 1500  # max chars in rolling memory summary
 
 
-def _find_gguf() -> str:
-    """Auto-detect a GGUF model: check config, local models/, then Ollama cache."""
-    configured = CFG.get("model_path", "")
-    if configured and os.path.exists(configured):
-        return configured
-
-    # Local models/ dir
-    local = glob.glob(os.path.join(ALICE_DIR, "models", "*.gguf"))
-    if local:
-        return local[0]
-
-    # Ollama blob cache — find blob via manifest for configured model
-    ollama_root = os.path.join(os.path.expanduser("~"), ".ollama", "models")
-    ollama_blobs = os.path.join(ollama_root, "blobs")
-    model_name = CFG.get("ollama_model", "mistral-nemo").split(":")[0]
-    manifest_path = os.path.join(ollama_root, "manifests", "registry.ollama.ai",
-                                 "library", model_name, "latest")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path) as f:
-                manifest = json.load(f)
-            for layer in manifest.get("layers", []):
-                if layer.get("mediaType") == "application/vnd.ollama.image.model":
-                    digest = layer["digest"].replace(":", "-")
-                    blob_path = os.path.join(ollama_blobs, digest)
-                    if os.path.exists(blob_path):
-                        return blob_path
-        except Exception:
-            pass
-
-    # Fallback: largest blob
-    if os.path.exists(ollama_blobs):
-        blobs = [os.path.join(ollama_blobs, f) for f in os.listdir(ollama_blobs)
-                 if not f.endswith(".part")]
-        if blobs:
-            return max(blobs, key=os.path.getsize)
-
-    return ""
+def _ollama_model() -> str:
+    return CFG.get("ollama_model", "mistral-nemo")
 
 
 def _download_with_progress(url: str, dest: str):
@@ -249,54 +206,29 @@ def _download_with_progress(url: str, dest: str):
     print()
 
 
-_DEFAULT_GGUF_URL  = ("https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF"
-                      "/resolve/main/Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf")
-_DEFAULT_GGUF_NAME = "Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf"
-
-
-def _ensure_default_gguf() -> str:
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    dest = os.path.join(MODEL_DIR, _DEFAULT_GGUF_NAME)
-    if not os.path.exists(dest):
-        ok(f"Downloading {_DEFAULT_GGUF_NAME} (~2 GB)...")
-        _download_with_progress(_DEFAULT_GGUF_URL, dest)
-        ok("Model downloaded.")
-    return dest
-
-
-def _list_ggufs() -> list:
-    """Return list of (display_name, full_path) for all findable GGUFs."""
-    found = {}
-    # Local models/ dir
-    for p in glob.glob(os.path.join(MODEL_DIR, "*.gguf")):
-        found[os.path.basename(p)] = p
-    # Ollama blobs
-    ollama_blobs = os.path.join(os.path.expanduser("~"), ".ollama", "models", "blobs")
-    if os.path.exists(ollama_blobs):
-        for f in os.listdir(ollama_blobs):
-            if not f.endswith(".part"):
-                p = os.path.join(ollama_blobs, f)
-                if os.path.getsize(p) > 100_000_000:  # >100MB — likely a model
-                    found.setdefault(f, p)
-    return [(name, path) for name, path in sorted(found.items())]
+def _list_ollama_models() -> list:
+    """Return list of (name, name) tuples for models known to Ollama."""
+    try:
+        r = req.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        return [(m["name"], m["name"]) for m in r.json().get("models", [])]
+    except Exception:
+        return []
 
 
 def load_llm():
-    global LLM
-    step("Loading LLM...")
-    path = _find_gguf()
-    if not path:
-        ok("No GGUF found — downloading default model...")
-        path = _ensure_default_gguf()
-    ok(f"Model: {os.path.basename(path)}")
-    kwargs = dict(model_path=path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
+    global LLM_READY
+    model = _ollama_model()
+    step(f"Connecting to Ollama ({model})...")
     try:
-        LLM = Llama(**kwargs)
+        r = req.get(f"{OLLAMA_URL}/api/tags", timeout=10)
+        names = [m["name"] for m in r.json().get("models", [])]
+        if not any(n == model or n.startswith(model + ":") for n in names):
+            warn(f"Model '{model}' not in Ollama. Pulling...")
+            subprocess.run(["ollama", "pull", model], check=False)
+        LLM_READY = True
+        ok(f"Ollama ready — model: {model}")
     except Exception as e:
-        warn(f"GPU load failed ({e}), retrying CPU-only...")
-        kwargs.update(n_gpu_layers=0, flash_attn=False)
-        LLM = Llama(**kwargs)
-    ok("LLM ready.")
+        fail(f"Ollama not reachable ({e}). Run: ollama serve")
 
 
 _TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
@@ -349,11 +281,13 @@ def _tts_wav_b64(text: str) -> str:
 
 
 def _llm_chat(messages: list) -> str:
-    if LLM is None:
-        raise RuntimeError("LLM not loaded")
-    with _llm_lock:
-        result = LLM.create_chat_completion(messages=messages)
-    return result["choices"][0]["message"]["content"]
+    r = req.post(f"{OLLAMA_URL}/api/chat", json={
+        "model":    _ollama_model(),
+        "messages": messages,
+        "stream":   False,
+    }, timeout=120)
+    r.raise_for_status()
+    return r.json()["message"]["content"]
 
 
 
@@ -658,7 +592,7 @@ def generate_image(prompt: str, extra_negative: str = "", steps: int = None, cfg
 @app.post("/chat")
 async def chat(body: ChatRequest):
     global _auto_image_counter
-    if LLM is None:
+    if not LLM_READY:
         return JSONResponse({"error": "LLM not ready"}, status_code=503)
 
     history.append({"role": "user", "content": body.message})
@@ -676,13 +610,22 @@ async def chat(body: ChatRequest):
 
         def _run():
             try:
-                with _llm_lock:
-                    stream = LLM.create_chat_completion(messages=messages, stream=True)
-                    for chunk in stream:
-                        delta = chunk["choices"][0]["delta"].get("content", "")
-                        if delta:
-                            collected.append(delta)
-                            q.put(delta)
+                r = req.post(f"{OLLAMA_URL}/api/chat", json={
+                    "model":    _ollama_model(),
+                    "messages": messages,
+                    "stream":   True,
+                }, stream=True, timeout=120)
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    delta = data.get("message", {}).get("content", "")
+                    if delta:
+                        collected.append(delta)
+                        q.put(delta)
+                    if data.get("done"):
+                        break
             except Exception as e:
                 q.put(e)
             q.put(None)
@@ -799,8 +742,8 @@ async def image_from_history(body: ImageRequest):
 
 @app.get("/models")
 async def list_models():
-    models = [{"name": name, "path": path} for name, path in _list_ggufs()]
-    current = os.path.basename(LLM.model_path) if LLM and hasattr(LLM, 'model_path') else ""
+    models = [{"name": name, "path": path} for name, path in _list_ollama_models()]
+    current = _ollama_model()
     return JSONResponse({"models": models, "current": current})
 
 
@@ -810,27 +753,13 @@ class ModelSwitchRequest(BaseModel):
 
 @app.post("/model")
 async def switch_model(body: ModelSwitchRequest):
-    global LLM
-    if not os.path.exists(body.path):
-        return JSONResponse({"error": "Model file not found."}, status_code=404)
-    import asyncio
-    print(f"\n[{NAME}] Switching model to: {os.path.basename(body.path)}")
-    kwargs = dict(model_path=body.path, n_gpu_layers=-1, n_ctx=8192, n_batch=512, flash_attn=True, verbose=False)
-    try:
-        new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
-    except Exception as e:
-        kwargs.update(n_gpu_layers=0, flash_attn=False)
-        try:
-            new_llm = await asyncio.get_running_loop().run_in_executor(None, lambda: Llama(**kwargs))
-        except Exception as e2:
-            return JSONResponse({"error": str(e2)}, status_code=500)
-    with _llm_lock:
-        global memory
-        LLM = new_llm
-        history.clear()
-        memory = ""
-    print(f"[{NAME}] Model ready: {os.path.basename(body.path)}")
-    return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
+    global memory
+    model = body.path  # for Ollama, path field carries the model name
+    print(f"\n[{NAME}] Switching Ollama model to: {model}")
+    CFG["ollama_model"] = model
+    history.clear()
+    memory = ""
+    return JSONResponse({"status": "ok", "model": model})
 
 
 @app.get("/personas")
