@@ -84,14 +84,16 @@ function doImage() {
 
 let progressTimer = null;
 function startProgress() {
-  stopProgress(); // clear any existing timer before starting a new one
+  stopProgress();
   progressTimer = setInterval(async () => {
     try {
       const r = await fetch('/progress');
       const d = await r.json();
       const pct = Math.round((d.progress || 0) * 100);
-      const el = document.querySelector('#ic .gen');
-      if (el && pct > 0) el.textContent = `Generating scene... ${pct}%`;
+      const fill   = document.getElementById('img-pb');
+      const status = document.getElementById('img-status');
+      if (fill)   fill.style.width = pct + '%';
+      if (status && pct > 0) status.textContent = `Generating... ${pct}%`;
     } catch {}
   }, 800);
 }
@@ -109,7 +111,9 @@ async function triggerMedia(extra = '', auto = false) {
 
   if (extra && !auto) addMsg('user', 'You', extra);
 
-  document.getElementById('ic').innerHTML = '<div class="ph gen">Generating scene...</div>';
+  document.getElementById('ic').innerHTML =
+    '<div class="ph gen" id="img-status">Generating scene...</div>' +
+    '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
 
@@ -224,7 +228,9 @@ async function regenFromPrompt() {
   await interrupt('regenerating');
   imgAbort = new AbortController();
   disableAll();
-  document.getElementById('ic').innerHTML = '<div class="ph gen">Regenerating...</div>';
+  document.getElementById('ic').innerHTML =
+    '<div class="ph gen" id="img-status">Regenerating...</div>' +
+    '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
   const steps = parseInt(document.getElementById('steps').value);
   const cfg_scale = parseFloat(document.getElementById('cfg').value);
   try {
