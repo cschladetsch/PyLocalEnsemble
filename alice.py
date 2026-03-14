@@ -26,37 +26,17 @@ if os.name == "nt":
                 except (AttributeError, OSError):
                     pass
 
-# ── Bootstrap pip deps ───────────────────────────────────────────────────────
+# ── Check dependencies ────────────────────────────────────────────────────────
 try:
     import fastapi, uvicorn, pydantic
     import requests as req
-except ImportError:
-    print("Installing Python dependencies...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "fastapi", "uvicorn", "requests", "pydantic"])
-    import requests as req
-
-
-try:
     from kokoro_onnx import Kokoro as _Kokoro
-except ImportError:
-    print("Installing kokoro-onnx...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "kokoro-onnx"])
-    from kokoro_onnx import Kokoro as _Kokoro
-
-try:
-    import faster_whisper as _faster_whisper_pkg  # noqa: F401 — ensure installed
-except ImportError:
-    print("Installing faster-whisper...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "faster-whisper"])
     import faster_whisper as _faster_whisper_pkg  # noqa: F401
-
-try:
-    import av as _av_pkg  # noqa: F401 — ensure installed
-except ImportError:
-    print("Installing av...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "av"])
     import av as _av_pkg  # noqa: F401
+except ImportError as _e:
+    print(f"\nERROR: Missing dependency: {_e}")
+    print("Run:  python install.py")
+    sys.exit(1)
 
 
 import queue as _queue
@@ -85,10 +65,11 @@ _gen_cancel  = threading.Event()   # set to signal running image gen to abort
 
 # ── Config ───────────────────────────────────────────────────────────────────
 _DEFAULT_CONFIG = {
-    "name":         "Alice",
-    "forge_url":    "http://localhost:7860",
-    "model_path":   "",
-    "llama_model":  "mistral-nemo",
+    "name":               "Alice",
+    "forge_url":          "http://localhost:7860",
+    "model_path":         "",
+    "llama_model":        "mistral-nemo",
+    "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
     "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
     "system_prompt": (
@@ -122,6 +103,10 @@ _DEFAULT_CONFIG = {
 }
 
 def load_config():
+    example = os.path.join(ALICE_DIR, "alice.json.example")
+    if not os.path.exists(CONFIG_FILE) and os.path.exists(example):
+        shutil.copy(example, CONFIG_FILE)
+        print(f"        config: created {CONFIG_FILE} from example")
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, encoding="utf-8") as f:
@@ -209,26 +194,10 @@ _KEEP_RECENT  = 8     # keep this many recent messages after compression
 _MAX_MEMORY   = 1500  # max chars in rolling memory summary
 
 
-_LLAMA_DIR   = os.path.join(ALICE_DIR, "llama-cpp")
-_MODELS_DIR  = os.path.join(ALICE_DIR, "models")
-
-_DEFAULT_MODEL_REPO  = "bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF"
-_DEFAULT_MODEL_QUANT = "Q4_K_M"
-
-_SKIP_MODEL_KEYWORDS = ["coder", "code", "math", "embed", "rerank", "starcoder", "tabby", "sql"]
-
 
 def _llama_model() -> str:
     return CFG.get("llama_model", "mistral-nemo")
 
-
-def _download_with_progress(url: str, dest: str):
-    def reporthook(count, block_size, total_size):
-        if total_size > 0:
-            pct = min(count * block_size / total_size * 100, 100)
-            print(f"\r        {pct:5.1f}%", end="", flush=True)
-    urllib.request.urlretrieve(url, dest, reporthook=reporthook)
-    print()
 
 
 def _list_llama_models() -> list:
@@ -287,116 +256,6 @@ def _try_connect_llama(silent=False) -> bool:
         return False
 
 
-def _find_local_gguf() -> str:
-    """Return the first suitable .gguf found in common locations, or ''."""
-    home = os.path.expanduser("~")
-    roots = [
-        _MODELS_DIR,
-        os.path.join(home, ".cache", "lm-studio", "models"),
-        os.path.join(home, "AppData", "Local", "nomic.ai", "GPT4All"),
-        os.path.join(home, "models"),
-    ]
-    for root in roots:
-        if not os.path.isdir(root):
-            continue
-        for path in glob.glob(os.path.join(root, "**", "*.gguf"), recursive=True):
-            name = os.path.basename(path).lower()
-            if not any(kw in name for kw in _SKIP_MODEL_KEYWORDS):
-                return path
-    return ""
-
-
-def _hf_resolve(repo_id: str, quant: str) -> tuple:
-    """Return (filename, url) for a GGUF in a HuggingFace repo."""
-    data = req.get(f"https://huggingface.co/api/models/{repo_id}", timeout=15).json()
-    files = [s["rfilename"] for s in data.get("siblings", []) if s["rfilename"].endswith(".gguf")]
-    match = next((f for f in files if quant in f), None) or (files[0] if files else None)
-    if not match:
-        raise RuntimeError(f"No GGUF found in {repo_id}")
-    return match, f"https://huggingface.co/{repo_id}/resolve/main/{match}"
-
-
-def _ensure_llama_server():
-    """Download llama-server (Vulkan) if not already present."""
-    if CFG.get("llama_server_path") and os.path.exists(CFG["llama_server_path"]):
-        return
-    if shutil.which("llama-server") or shutil.which("llama-server.exe"):
-        return
-
-    step("Downloading llama-server ...")
-    try:
-        release = req.get("https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
-                          timeout=15).json()
-    except Exception as e:
-        warn(f"Could not fetch llama.cpp release: {e}")
-        return
-
-    assets = release.get("assets", [])
-    plat = "win" if os.name == "nt" else ("macos" if sys.platform == "darwin" else "ubuntu")
-    prefs = (["vulkan", "avx2", "cpu"] if plat == "win"
-             else (["arm64", "x64"] if plat == "macos" else ["x64"]))
-
-    asset = None
-    for pref in prefs:
-        for a in assets:
-            n = a["name"].lower()
-            if plat in n and pref in n and n.endswith(".zip"):
-                asset = a
-                break
-        if asset:
-            break
-
-    if not asset:
-        warn("No suitable llama-server binary found — start it manually.")
-        return
-
-    os.makedirs(_LLAMA_DIR, exist_ok=True)
-    zip_path = os.path.join(_LLAMA_DIR, asset["name"])
-    ok(f"Downloading {asset['name']} ({asset['size'] // 1_048_576} MB)...")
-    _download_with_progress(asset["browser_download_url"], zip_path)
-
-    import zipfile
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(_LLAMA_DIR)
-    os.remove(zip_path)
-
-    exe_name = "llama-server.exe" if os.name == "nt" else "llama-server"
-    exe = next((os.path.join(r, f) for r, _, fs in os.walk(_LLAMA_DIR)
-                for f in fs if f == exe_name), None)
-    if exe:
-        CFG["llama_server_path"] = exe
-        _save_config()
-        ok(f"llama-server ready: {exe}")
-    else:
-        warn(f"Extraction done but llama-server not found in {_LLAMA_DIR}")
-
-
-def _ensure_model():
-    """Find or download a model GGUF, save to config."""
-    if CFG.get("model_path") and os.path.exists(CFG["model_path"]):
-        return
-
-    found = _find_local_gguf()
-    if found:
-        ok(f"Using model: {os.path.basename(found)}")
-        CFG["model_path"] = found
-        _save_config()
-        return
-
-    step(f"Downloading default model ({_DEFAULT_MODEL_REPO}) ...")
-    try:
-        filename, url = _hf_resolve(_DEFAULT_MODEL_REPO, _DEFAULT_MODEL_QUANT)
-    except Exception as e:
-        warn(f"Could not resolve model: {e}")
-        return
-
-    os.makedirs(_MODELS_DIR, exist_ok=True)
-    dest = os.path.join(_MODELS_DIR, filename)
-    ok(f"Downloading {filename} (this will take a while)...")
-    _download_with_progress(url, dest)
-    CFG["model_path"] = dest
-    _save_config()
-    ok(f"Model ready: {filename}")
 
 
 def _save_config():
@@ -427,27 +286,15 @@ def load_llm():
         threading.Thread(target=_retry_loop, daemon=True).start()
 
 
-_TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
-_TTS_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
-
-
 def load_tts():
     global TTS
     step("Loading TTS (Kokoro)...")
-    os.makedirs(TTS_DIR, exist_ok=True)
     model_path  = os.path.join(TTS_DIR, "kokoro-v0_19.onnx")
     voices_path = os.path.join(TTS_DIR, "voices.bin")
-    # Remove stale voices.json downloaded under wrong name
-    stale = os.path.join(TTS_DIR, "voices.json")
-    if os.path.exists(stale):
-        os.remove(stale)
+    if not os.path.exists(model_path) or not os.path.exists(voices_path):
+        warn("TTS models not found — run install.py. Audio will be disabled.")
+        return
     try:
-        if not os.path.exists(model_path):
-            ok("Downloading Kokoro model (~80 MB)...")
-            _download_with_progress(_TTS_MODEL_URL, model_path)
-        if not os.path.exists(voices_path):
-            ok("Downloading Kokoro voices...")
-            _download_with_progress(_TTS_VOICES_URL, voices_path)
         import numpy as np
         _orig_load = np.load
         np.load = lambda *a, **kw: _orig_load(*a, **{**kw, "allow_pickle": True})
@@ -653,57 +500,6 @@ def find_python310() -> str:
     return ""
 
 
-def ensure_forge():
-    step("Checking Stable Diffusion Forge...")
-    if not os.path.exists(FORGE_BAT):
-        ok("Cloning Forge (large repo, may take several minutes)...")
-        result = subprocess.run(["git", "clone",
-            "https://github.com/lllyasviel/stable-diffusion-webui-forge",
-            FORGE_DIR])
-        if result.returncode != 0:
-            fail("Failed to clone Forge. Ensure git is installed and you have internet access.")
-        ok("Forge cloned.")
-    else:
-        ok("Forge present.")
-
-    # If venv was built with wrong Python, nuke it so Forge rebuilds with 3.10
-    venv_python = os.path.join(FORGE_DIR, "venv", "Scripts", "python.exe")
-    if os.path.exists(venv_python):
-        try:
-            r = subprocess.run([venv_python, "--version"], capture_output=True, text=True)
-            version = r.stdout.strip() + r.stderr.strip()
-            if "3.10" not in version:
-                warn(f"Forge venv is {version.strip()}, needs 3.10 -- deleting venv for rebuild...")
-                import shutil
-                shutil.rmtree(os.path.join(FORGE_DIR, "venv"))
-                ok("Venv deleted. Forge will rebuild with Python 3.10 on next start.")
-            else:
-                ok(f"Forge venv: {version.strip()}")
-        except Exception as e:
-            warn(f"Could not check venv Python version: {e}")
-
-    checkpoints = glob.glob(os.path.join(FORGE_DIR, "models", "Stable-diffusion", "*.safetensors"))
-    if not checkpoints:
-        ok("No checkpoint found — will download Realistic Vision V5.1...")
-    ok(f"Checkpoint: {os.path.basename(checkpoints[0])}" if checkpoints else "Downloading...")
-
-
-_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
-_RV_URL = ("https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE"
-           "/resolve/main/Realistic_Vision_V5.1_fp16-no-ema.safetensors")
-
-
-def ensure_checkpoint():
-    step("Checking checkpoint...")
-    sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
-    os.makedirs(sd_dir, exist_ok=True)
-    rv_path = os.path.join(sd_dir, _RV_FILENAME)
-    if os.path.exists(rv_path):
-        ok(f"Realistic Vision already present.")
-        return
-    ok(f"Downloading Realistic Vision V5.1 (2.1 GB)...")
-    _download_with_progress(_RV_URL, rv_path)
-    ok("Download complete.")
 
 
 def _set_forge_model(name: str):
@@ -1134,7 +930,11 @@ async def clear():
 
 @app.get("/info")
 async def info():
-    return JSONResponse({"name": NAME, "llm_ready": LLM_READY})
+    return JSONResponse({
+        "name":        NAME,
+        "llm_ready":   LLM_READY,
+        "stt_silence": CFG.get("stt_silence_seconds", 3),
+    })
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1146,15 +946,14 @@ async def index():
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
+_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
+
+
 def _startup():
     try:
-        _ensure_llama_server()
-        _ensure_model()
         load_llm()
         _load_history()
         load_tts()
-        ensure_forge()
-        ensure_checkpoint()
         start_forge()
         _set_forge_model(_RV_FILENAME)
     except Exception as e:

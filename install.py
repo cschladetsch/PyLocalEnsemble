@@ -12,10 +12,22 @@ CONFIG_FILE  = os.path.join(SCRIPT_DIR, "alice.json")
 REQ_FILE     = os.path.join(SCRIPT_DIR, "requirements.txt")
 LLAMA_DIR    = os.path.join(SCRIPT_DIR, "llama-cpp")
 MODELS_DIR   = os.path.join(SCRIPT_DIR, "models")
+TTS_DIR      = os.path.join(SCRIPT_DIR, "models", "tts")
+FORGE_DIR    = os.path.join(SCRIPT_DIR, "stable-diffusion-webui-forge")
+FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat")
 
 # Default NSFW model (uncensored Mistral-Nemo fine-tune, Q4_K_M ~7 GB)
 _DEFAULT_MODEL_REPO = "bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF"
 _DEFAULT_MODEL_QUANT = "Q4_K_M"
+
+# TTS models
+_TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
+_TTS_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
+
+# Stable Diffusion checkpoint
+_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
+_RV_URL = ("https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE"
+           "/resolve/main/Realistic_Vision_V5.1_fp16-no-ema.safetensors")
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +79,7 @@ def _json_get(url: str) -> dict:
 # ── steps ─────────────────────────────────────────────────────────────────────
 
 def check_python():
-    heading("1/4", "Python version")
+    heading("1/6", "Python version")
     v = sys.version_info[:2]
     if v < MIN_PYTHON:
         die(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ required, found {v[0]}.{v[1]}")
@@ -75,7 +87,7 @@ def check_python():
 
 
 def install_packages():
-    heading("2/4", "Python packages")
+    heading("2/6", "Python packages")
     if os.path.exists(REQ_FILE):
         with Spinner("pip install -r requirements.txt"):
             subprocess.check_call([sys.executable, "-m", "pip", "install",
@@ -122,7 +134,7 @@ def _pick_llama_asset(assets: list) -> dict | None:
 
 
 def install_llama_server(cfg: dict):
-    heading("3/4", "llama.cpp server")
+    heading("3/6", "llama.cpp server")
 
     exe = _llama_server_exe()
     if exe:
@@ -222,7 +234,7 @@ def _find_existing_ggufs() -> list:
 
 
 def setup_model(cfg: dict):
-    heading("4/4", "Model")
+    heading("4/6", "Model")
 
     model_path = cfg.get("model_path", "")
     if model_path and os.path.exists(model_path):
@@ -277,6 +289,96 @@ def setup_model(cfg: dict):
     ok(f"model downloaded: {filename}")
 
 
+def install_tts_models():
+    heading("5/6", "TTS models (Kokoro)")
+    os.makedirs(TTS_DIR, exist_ok=True)
+    model_path  = os.path.join(TTS_DIR, "kokoro-v0_19.onnx")
+    voices_path = os.path.join(TTS_DIR, "voices.bin")
+    # Remove stale voices.json if present
+    stale = os.path.join(TTS_DIR, "voices.json")
+    if os.path.exists(stale):
+        os.remove(stale)
+    if not os.path.exists(model_path):
+        info("downloading Kokoro ONNX model (~80 MB) ...")
+        _download(_TTS_MODEL_URL, model_path, "kokoro-v0_19.onnx")
+    else:
+        ok("Kokoro model already present")
+    if not os.path.exists(voices_path):
+        info("downloading Kokoro voices ...")
+        _download(_TTS_VOICES_URL, voices_path, "voices.bin")
+    else:
+        ok("Kokoro voices already present")
+
+
+def _find_python310() -> str:
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python310\python.exe"),
+        r"C:\Python310\python.exe",
+        r"C:\Program Files\Python310\python.exe",
+    ]
+    try:
+        r = subprocess.run(["py", "-3.10", "-c", "import sys; print(sys.executable)"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            candidates.insert(0, r.stdout.strip())
+    except FileNotFoundError:
+        pass
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+def install_forge():
+    heading("6/6", "Stable Diffusion Forge")
+
+    # Clone if not present
+    if not os.path.exists(FORGE_BAT):
+        info("cloning Stable Diffusion Forge (large repo, may take several minutes) ...")
+        result = subprocess.run(["git", "clone",
+            "https://github.com/lllyasviel/stable-diffusion-webui-forge",
+            FORGE_DIR])
+        if result.returncode != 0:
+            warn("Failed to clone Forge. Ensure git is installed and you have internet access.")
+            warn("Forge is optional — chat and TTS will still work without it.")
+            return
+        ok("Forge cloned")
+    else:
+        ok("Forge already present")
+
+    # Warn if Forge venv was built with wrong Python version
+    venv_python = os.path.join(FORGE_DIR, "venv", "Scripts", "python.exe")
+    if os.path.exists(venv_python):
+        try:
+            r = subprocess.run([venv_python, "--version"], capture_output=True, text=True)
+            version = (r.stdout + r.stderr).strip()
+            if "3.10" not in version:
+                warn(f"Forge venv is {version}, needs 3.10 — deleting venv for rebuild ...")
+                shutil.rmtree(os.path.join(FORGE_DIR, "venv"))
+                ok("Venv deleted; Forge will rebuild with Python 3.10 on first run")
+        except Exception as e:
+            warn(f"Could not check Forge venv: {e}")
+
+    py310 = _find_python310()
+    if not py310:
+        warn("Python 3.10 not found — Forge needs it.")
+        warn("Install from: https://python.org/downloads/release/python-31011/")
+    else:
+        ok(f"Python 3.10 found: {py310}")
+
+    # Download checkpoint if not present
+    sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
+    os.makedirs(sd_dir, exist_ok=True)
+    existing = glob.glob(os.path.join(sd_dir, "*.safetensors"))
+    if existing:
+        ok(f"Checkpoint already present: {os.path.basename(existing[0])}")
+    else:
+        info(f"downloading Realistic Vision V5.1 (~2.1 GB) ...")
+        dest = os.path.join(sd_dir, _RV_FILENAME)
+        _download(_RV_URL, dest, _RV_FILENAME)
+        ok(f"checkpoint ready: {_RV_FILENAME}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -302,6 +404,9 @@ def main():
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=4)
     ok("alice.json saved")
+
+    install_tts_models()
+    install_forge()
 
     print("\n" + "=" * 50)
     print("  Installation complete!")
