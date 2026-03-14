@@ -2,13 +2,14 @@
 
 > **⚠️ NSFW / 18+ — This project generates adult content. You must be 18 or older to use it.**
 
-A local AI companion with streaming chat, voice, persistent memory, and contextual image generation. Everything runs on your machine — no cloud, no API keys, no subscriptions.
+A local AI companion with streaming chat, voice, mic input, and contextual image generation. Everything runs on your own hardware — no cloud, no API keys, no subscriptions.
 
 Powered by:
-- [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) — local LLM inference (GGUF, GPU-accelerated)
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) — local LLM inference via OpenAI-compatible server (GGUF, GPU-accelerated)
 - [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) — image generation
-- [Realistic Vision V5.1](https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE) — default image model (auto-downloaded)
+- [Realistic Vision V5.1](https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE) — default image checkpoint (auto-downloaded)
 - [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx) — offline neural TTS
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — offline STT (Whisper small.en)
 
 ---
 
@@ -17,201 +18,140 @@ Powered by:
 | | Minimum | Recommended |
 |---|---------|-------------|
 | **OS** | Windows 10 | Windows 11 |
-| **Python** | 3.10 | 3.13 |
+| **Python** | 3.10 | 3.11–3.13 |
 | **Git** | Any | Latest |
 | **RAM** | 16 GB | 32 GB |
 | **VRAM** | 4 GB | 8 GB+ |
-| **Disk** | 30 GB free | 50 GB free |
-| **GPU** | NVIDIA (CUDA) | RTX 2070 or better |
+| **Disk** | 20 GB free | 40 GB free |
+| **GPU** | NVIDIA or AMD (Vulkan) | RTX 2070 / RX 6700 or better |
 
-> AMD GPUs are untested. CPU-only mode works but is slow.
+> CPU-only mode works but LLM inference will be slow.
 
 ---
 
 ## Installation
 
-### 1. Install Python
-
-Download from https://python.org/downloads — any version 3.10 or later.
-
-> **During installation, tick "Add Python to PATH".** Without this, nothing will work.
-
-Verify:
-```
-python --version
-```
-
-### 2. Install Git
-
-Download from https://git-scm.com and install with defaults.
-
-### 3. Install NVIDIA drivers
-
-Download the latest Game Ready or Studio driver from https://nvidia.com/drivers
-
-### 4. Clone and run
+Run once:
 
 ```
-git clone https://github.com/cschladetsch/PyAliceLlmImage alice
-cd alice
+python install.py
+```
+
+This performs 6 steps:
+
+| Step | What | Size |
+|------|------|------|
+| 1 | Python version check | — |
+| 2 | pip packages (`fastapi`, `uvicorn`, `kokoro-onnx`, `faster-whisper`, `av`, …) | ~500 MB |
+| 3 | llama-server binary (Vulkan build on Windows) | ~50 MB |
+| 4 | LLM model — scans for existing GGUFs, or downloads default from HuggingFace | ~7 GB |
+| 5 | Kokoro TTS model and voices | ~80 MB |
+| 6 | Stable Diffusion Forge (git clone) + Realistic Vision V5.1 checkpoint | ~5 GB |
+
+**Total first-install time: 15–45 minutes** depending on connection and hardware.
+
+---
+
+## Running
+
+```
 python alice.py
 ```
 
-Open your browser to `http://localhost:8000`.
+Opens at `http://localhost:8000`. Subsequent starts take ~30–60 seconds.
 
----
-
-## First Run
-
-On first run, Alice automatically:
-
-| Step | What happens | Time |
-|------|-------------|------|
-| Pip deps | Installs `fastapi`, `uvicorn`, `llama-cpp-python`, `kokoro-onnx`, etc. | ~2 min |
-| LLM | Downloads `Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf` (~2.1 GB) if no model found | ~5 min |
-| TTS | Downloads Kokoro ONNX model and voices (~90 MB) | ~1 min |
-| Forge | Clones Stable Diffusion WebUI Forge if not present | ~5 min |
-| Checkpoint | Downloads Realistic Vision V5.1 (2.1 GB) if not present | ~5 min |
-| Forge start | Starts Forge, installs its venv + PyTorch on first launch | ~5 min |
-| Browser | Opens `http://localhost:8000` | instant |
-
-**Total first-run time: 15–30 minutes** depending on your connection and hardware.
-
-Subsequent starts take ~30–60 seconds.
-
----
-
-## LLM Model
-
-Alice uses a GGUF model loaded in-process via `llama-cpp-python`. No Ollama server is required.
-
-**Auto-detection order:**
-
-1. `"model_path"` in `alice.json` — explicit path to any `.gguf` file
-2. Any `.gguf` file in the `models/` folder next to `alice.py`
-3. Your Ollama model cache (model named in `"ollama_model"`)
-4. Auto-downloads `Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf` if nothing found
-
-**To use a specific model:**
-- Drop a `.gguf` file into `models/`, **or**
-- Set `"model_path"` in `alice.json` to the full path
-
-**Switching models at runtime:**
-
-Use the model dropdown in the header. All `.gguf` files in `models/` appear as options. Switching reloads the model without restarting and clears conversation history.
-
-**Recommended models:**
-
-| Model | VRAM | Size | Notes |
-|-------|------|------|-------|
-| `Llama-3.2-3B-Instruct-uncensored-Q4_K_M` | 4 GB | 2.1 GB | Default. Fast. Limited NSFW compliance. |
-| `Mistral-7B-Instruct-v0.3-uncensored-Q4_K_M` | 6 GB | 4.4 GB | Noticeably better quality and compliance. |
-| `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Best quality for NSFW on consumer GPUs. |
-| `Midnight-Rose-70B-Q2_K` | 24 GB+ | ~25 GB | Near-GPT-4 quality. High-end only. |
-
-> The model handles both conversation **and** image prompt extraction. A better model gives better responses and more accurate scene descriptions.
->
-> Drop any `.gguf` into `models/` and select it from the dropdown — no restart needed.
-
----
-
-## Directory Structure
-
-```
-alice/
-├── alice.py                         ← entire app, single file
-├── alice.json                       ← SFW default config (committed)
-├── alice.json.mine                  ← your personal config (git-ignored)
-├── personas.json                    ← your personas (git-ignored)
-├── personas.example.json            ← example personas file
-├── history.json                     ← conversation memory (auto-created, git-ignored)
-├── models/                          ← GGUF models go here (git-ignored)
-│   └── tts/                         ← Kokoro TTS model files (auto-downloaded)
-└── stable-diffusion-webui-forge/    ← auto-cloned (git-ignored)
-    └── models/
-        └── Stable-diffusion/
-            └── Realistic_Vision_V5.1_fp16-no-ema.safetensors
-```
+`alice.py` assumes `install.py` has been run. If dependencies are missing it exits with a clear message.
 
 ---
 
 ## Configuration
 
-`alice.json` is the default config — SFW and committed to the repo. To personalise, copy it to `alice.json.mine` and edit that. Then copy `alice.json.mine` over `alice.json` to use your personal settings.
+`install.py` creates `alice.json` from `alice.json.example` on first run. `alice.json` is gitignored — it is your personal config.
 
-```json
-{
-    "forge_url":       "http://localhost:7860",
-    "model_path":      "",
-    "ollama_model":    "mistral-nemo",
-    "appearance":      "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
-    "system_prompt":   "You are Alice. You are enigmatic, intelligent, and warm.\nYou speak in measured, literary prose. You never break character.",
+Key settings:
 
-    "tts": {
-        "voice": "af_nicole",
-        "speed": 0.85
-    },
+| Key | Default | Description |
+|-----|---------|-------------|
+| `name` | `"Alice"` | Character name shown in UI |
+| `model_path` | `""` | Absolute path to a GGUF model file (set by `install.py`) |
+| `llama_server_path` | `""` | Path to `llama-server` binary (set by `install.py`, auto-detected if blank) |
+| `system_prompt` | *(see example)* | LLM system prompt / personality |
+| `appearance` | *(see example)* | SD prompt fragment for consistent character appearance |
+| `stt_silence_seconds` | `3` | Seconds of mic silence before recording auto-stops |
+| `tts.voice` | `"af_nicole"` | Kokoro voice ID |
+| `tts.speed` | `0.85` | TTS speed multiplier |
+| `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
+| `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
+| `llama_server.ctx_size` | `2048` | Context window in tokens — increase for longer memory |
 
-    "image": {
-        "steps":      25,
-        "width":      512,
-        "height":     768,
-        "cfg_scale":  7,
-        "sampler_name": "DPM++ 2M Karras",
-        "suffix":     "photorealistic, highly detailed, 8k, masterpiece",
-        "auto_every": 1
-    }
-}
-```
+Restart `alice.py` after editing `alice.json`.
 
-| Field | Purpose |
-|-------|---------|
-| `forge_url` | Forge API URL. Change only if Forge runs on a different port. |
-| `model_path` | Full path to a `.gguf` file. Leave blank to auto-detect. |
-| `appearance` | SD tags prepended to every image prompt. Defines Alice's consistent look. |
-| `negative_prompt` | Passed to every SD generation as the negative prompt. |
-| `system_prompt` | Alice's personality and persona. Injected at the start of every conversation. |
-| `tts.voice` | Kokoro voice. Options: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (British), `bf_isabella`. |
-| `tts.speed` | Speech rate. `0.85` is slightly slower. `1.0` is normal. |
-| `image.steps` | SD denoising steps. Higher = better quality, slower. 20–30 is typical. |
-| `image.cfg_scale` | How strictly SD follows the prompt. 7–12 is typical. |
-| `image.suffix` | Tags always appended to the positive prompt. |
-| `image.auto_every` | Generate an image every N chat messages. `1` = every message, `2` = every other, `0` = never. |
+---
 
-**Restart `alice.py` after editing `alice.json`.**
+## GPU Compatibility
+
+`install.py` downloads the platform-appropriate `llama-server` binary automatically:
+
+| Platform | GPU | Build |
+|----------|-----|-------|
+| Windows | NVIDIA or AMD | Vulkan (universal) |
+| Windows fallback | CPU only | AVX2 |
+| macOS Apple Silicon | Metal | arm64 |
+| macOS Intel | Metal | x64 |
+| Linux | NVIDIA/CPU | Ubuntu x64 |
+
+---
+
+## LLM Model
+
+Alice uses a GGUF model served by `llama-server` via the OpenAI-compatible API.
+
+**Auto-detection order (during `install.py`):**
+
+1. `model_path` already set in `alice.json`
+2. Existing `.gguf` files in `models/`, `~/.cache/lm-studio/models/`, or GPT4All directory
+3. Downloads `bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF` (Q4_K_M, ~7 GB) from HuggingFace
+
+**Recommended models:**
+
+| Model | VRAM | Size | Notes |
+|-------|------|------|-------|
+| `dolphin-2.9.4-mistral-nemo-12b-Q4_K_M` | 8 GB | ~7 GB | Default — good balance |
+| `Mistral-7B-Instruct-v0.3-uncensored-Q4_K_M` | 6 GB | 4.4 GB | Lighter option |
+| `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Alternative 8B |
+
+To use a different model: set `model_path` in `alice.json` and restart.
 
 ---
 
 ## Personas
 
-Create a `personas.json` file (git-ignored) to define named personas. Switch between them using the dropdown in the header.
+Create a `personas.json` file to define named personas. Switch between them using the dropdown in the header. Switching clears history and memory.
 
 ```json
 {
-    "Default": {
-        "system_prompt": "You are Alice...",
-        "appearance": "woman, long blonde hair..."
-    },
-    "Egyptian Goddess": {
-        "system_prompt": "You are Nefertari...",
-        "appearance": "ancient Egyptian woman, dark skin, kohl-lined eyes..."
+    "Noir": {
+        "system_prompt": "You are a hard-boiled detective ...",
+        "appearance": "woman, dark hair, trench coat, film noir lighting"
     }
 }
 ```
 
-Switching personas clears conversation history and memory. See `personas.example.json` for a full example.
-
 ---
 
-## Memory
+## Conversation Memory
 
-Alice maintains persistent memory across sessions:
+Alice maintains a rolling memory so long conversations don't lose earlier context:
 
-- **Conversation history** is saved to `history.json` after each reply and reloaded on startup
-- **Rolling summary** — when history exceeds 16 messages, the oldest 8 are summarised by the LLM into a compact memory paragraph. This keeps the context window from filling up while preserving important context
-- **Clear** — the Clear button wipes history, memory, and `history.json`
-- Memory is also cleared when switching personas or models
+- **History** is saved to `history.json` after each reply and reloaded on startup.
+- When history exceeds **16 messages**, the oldest 8 are summarised by the LLM into a brief paragraph and stored as `memory`.
+- That memory paragraph is prepended to the system prompt on every subsequent request.
+- The memory buffer is capped at **1500 characters**.
+
+**Why 1500 characters?** The memory string is injected directly into every system prompt, which counts against the context window. With the default `ctx_size = 2048` tokens, roughly 375 tokens (≈ 1500 chars at 4 chars/token) is a safe budget that leaves room for the system prompt itself, recent history, and the user's message. If you increase `ctx_size` — e.g. to 4096 or 8192 in `alice.json` — raise `_MAX_MEMORY` proportionally in `alice.py`.
+
+- **Clear** — the Clear button wipes history, memory, and `history.json`.
+- Memory is also cleared when switching personas or models.
 
 ---
 
@@ -221,28 +161,31 @@ Alice maintains persistent memory across sessions:
 
 Type a message and press **Enter**. Alice streams her reply word-by-word, speaks it aloud, then generates a contextual image.
 
-Press **ESC** or click **Stop** at any time to interrupt generation.
+Press **ESC** or click **Stop** to interrupt at any time.
 
-### Voice
+### Microphone (push-to-talk)
+
+Click **Mic** to start recording. Click again to stop manually, or wait for the silence auto-stop (default 3 seconds, configurable via `stt_silence_seconds` in `alice.json`).
+
+The small arrow next to the Mic button opens a device selector — your chosen device is remembered across sessions.
+
+After recording, Alice transcribes and sends automatically.
+
+### Voice (TTS)
 
 Alice speaks every reply using Kokoro neural TTS.
 
 | Control | Action |
 |---------|--------|
-| **Voice dropdown** | Switch TTS voice instantly (no restart needed) |
-| **Mute** | Toggle voice on/off |
-| **Re-say** | Replay the last spoken reply |
+| Voice dropdown | Switch TTS voice instantly |
+| Mute | Toggle voice on/off |
+| Re-say | Replay the last spoken reply |
 
 Available voices: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (British), `bf_isabella`.
 
 ### Image panel
 
-The right panel shows the generated scene with a live progress percentage during generation. Press **+** (top-right of image panel) to open the prompt editor:
-
-- **Textarea** — editable SD prompt extracted from the conversation
-- **Steps slider** — denoising steps for this generation (10–60)
-- **CFG slider** — prompt adherence for this generation (1–20)
-- **Regenerate** — re-run Forge with your edited prompt and slider values
+The right panel shows the generated scene. Click **+** to open the prompt editor — edit the extracted SD prompt, adjust Steps/CFG sliders, and click **Regenerate**.
 
 ### Manual image generation
 
@@ -251,133 +194,32 @@ Use the **Image** button or type a command:
 ```
 /image
 /image candlelight, close up, warm glow
-/image outdoor, golden hour, no background clutter
 ```
-
-Tags prefixed with `no ` go to the negative prompt.
-
-### Interrupting generation
-
-- Press **ESC** anywhere on the page, or
-- Click the **Stop** button (top-left of header, active only during generation)
-
-Both cancel in-flight chat, TTS, and image generation.
 
 ### Model switcher
 
-The leftmost dropdown in the header lists all `.gguf` files in `models/`. Select one to reload the LLM — Alice will confirm in chat when ready.
-
-### Clear
-
-Click **Clear** to reset the conversation, wipe memory, and delete `history.json`.
+The leftmost dropdown lists models available from the llama-server. To add models, set `model_path` in `alice.json` and restart.
 
 ---
 
-## How It Works
+## Directory Structure
 
-```mermaid
-flowchart TD
-    User([You]) -->|message| Chat
-
-    subgraph Alice ["alice.py — port 8000"]
-        Chat["/chat (SSE stream)"]
-        Image["/image"]
-        Generate["/generate"]
-        TTS["/tts"]
-        Progress["/progress"]
-        Memory[(history + memory)]
-    end
-
-    Chat -->|tokens| User
-    Chat --> LLM
-    Chat <--> Memory
-    Image --> Extractor["LLM — extract\nSD tags from\nlast 6 messages"]
-    Memory --> Extractor
-    Generate -->|raw prompt| Forge
-    Chat --> TTS
-    Progress -->|poll| Forge
-
-    subgraph GPU ["GPU (CUDA)"]
-        LLM["llama-cpp-python\nGGUF model"]
-        Forge["Stable Diffusion Forge\nport 7860"]
-    end
-
-    subgraph CPU
-        KokoroTTS["Kokoro ONNX\nneural TTS"]
-    end
-
-    TTS --> KokoroTTS
-    Extractor --> Forge
-    Forge -->|image| User
-    KokoroTTS -->|audio| User
 ```
-
-### Startup sequence
-
-```mermaid
-flowchart LR
-    A[python alice.py] --> B[Install\npip deps]
-    B --> C[Load GGUF\nmodel on GPU]
-    C --> CH[Load history\n& memory]
-    CH --> D[Load Kokoro\nTTS]
-    D --> E[Clone Forge\nif missing]
-    E --> F[Download\nRealistic Vision\nif missing]
-    F --> G[Start Forge]
-    G --> H[Switch\ncheckpoint]
-    H --> I[Open browser\nlocalhost:8000]
+alice/
+├── alice.py                         ← entire app (FastAPI server)
+├── install.py                       ← one-time installer
+├── alice.json                       ← your personal config (gitignored)
+├── alice.json.example               ← SFW reference config (committed)
+├── personas.json                    ← your personas (gitignored)
+├── history.json                     ← conversation history (auto-created, gitignored)
+├── models/                          ← GGUF models (gitignored)
+│   └── tts/                         ← Kokoro model files (auto-downloaded by install.py)
+├── llama-cpp/                       ← llama-server binary (gitignored)
+└── stable-diffusion-webui-forge/    ← auto-cloned by install.py (gitignored)
+    └── models/
+        └── Stable-diffusion/
+            └── Realistic_Vision_V5.1_fp16-no-ema.safetensors
 ```
-
----
-
-## Image Prompt Pipeline
-
-When an image is triggered (automatically after chat, or manually):
-
-1. The last **6 messages** of conversation are passed to the LLM
-2. The LLM extracts visual state tags — pose, clothing/nudity state, expression, setting, lighting, mood
-3. Non-visual tags (verbs, scents, sounds) are filtered out
-4. Duplicate tags are removed
-5. `appearance` from `alice.json` is appended for visual consistency
-6. `suffix` from `alice.json` is appended (quality tags)
-7. The final prompt is sent to Forge, with live progress shown in the UI
-
-You can see and edit the prompt by clicking **+** below the image, then click **Regenerate**.
-
----
-
-## Troubleshooting
-
-### No sound / TTS 503 error
-Wait for `ok: TTS ready.` in the terminal — TTS loads after the LLM. If it never appears, check for a `WARNING: TTS failed to load` line above it.
-
-### `llama-cpp-python` install fails
-This package compiles a C extension. If it fails:
-- Install Visual Studio Build Tools: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-- Or install a prebuilt CUDA wheel: `pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121`
-
-### LLM responses are slow
-- Use a smaller model (3B Q4 is the sweet spot for low-end GPUs)
-- Ensure the model is loading on GPU — look for `n_gpu_layers` in the startup output
-- `flash_attn=True` is enabled by default; if your GPU doesn't support it, alice falls back automatically
-
-### Images not generating
-- Check the terminal for `Forge error:` lines
-- Visit `http://localhost:7860` — Forge should be running
-- Forge auto-restarts on the next image request if it crashed
-
-### Out of VRAM
-Both the LLM and Forge share GPU memory. On 4–6 GB cards:
-- Use a Q4 GGUF (smallest quantisation that still works well)
-- Reduce `width`/`height` in `alice.json` to 512×512
-- Use `"auto_every": 2` or higher to reduce how often images generate
-
-### Images don't match the conversation
-- Raise `cfg_scale` in `alice.json` (try 9–12)
-- Edit the prompt in the textarea and click Regenerate
-- Use a larger LLM — the 3B model extracts poor scene tags compared to 7B+
-
-### Model still refuses explicit content
-The default 3B model has residual refusals. Alice strips trailing disclaimers automatically, but for best results use a 7B+ uncensored model (see Recommended Models table above).
 
 ---
 
@@ -387,20 +229,116 @@ The default 3B model has residual refusals. Alice strips trailing disclaimers au
 |------|---------|
 | 8000 | Alice (FastAPI) |
 | 7860 | Stable Diffusion Forge |
+| 8080 | llama-server (OpenAI-compatible API) |
 
 ---
 
-## Files Excluded from Git
+## Architecture
 
-```
-stable-diffusion-webui-forge/
-models/
-alice.json.mine
-personas.json
-history.json
-__pycache__/
-.claude/
-backups/
+```mermaid
+graph LR
+    Browser -->|HTTP + SSE| Alice["alice.py\nFastAPI :8000"]
+
+    Alice -->|OpenAI API| LlamaServer["llama-server\n:8080"]
+    Alice -->|REST API| Forge["SD Forge\n:7860"]
+    Alice -->|in-process| Kokoro["Kokoro TTS\nONNX"]
+    Alice -->|in-process| Whisper["faster-whisper\nSTT"]
+
+    LlamaServer --> GGUF["GGUF model\n(GPU)"]
+    Forge --> SD["Stable Diffusion\n(GPU)"]
+    Kokoro --> CPU1["CPU"]
+    Whisper --> CPU2["CPU"]
 ```
 
-`alice.json` (SFW defaults) is committed. Your personal settings live in `alice.json.mine` — copy it over `alice.json` to use them.
+### Request flow — chat turn
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant A as alice.py
+    participant L as llama-server
+    participant K as Kokoro TTS
+    participant F as SD Forge
+
+    U->>B: types message (or speaks via mic)
+    B->>A: POST /chat (SSE)
+    A->>L: POST /v1/chat/completions (stream)
+    L-->>A: token stream
+    A-->>B: SSE token stream
+    B-->>U: words appear live
+
+    A->>K: synthesise reply text
+    K-->>B: WAV audio (base64)
+    B-->>U: speaks reply
+
+    A->>L: extract SD prompt from last 6 messages
+    L-->>A: image prompt tags
+    A->>F: POST /sdapi/v1/txt2img
+    F-->>A: base64 image
+    A-->>B: image event
+    B-->>U: scene image shown
+```
+
+### Startup sequence
+
+```mermaid
+flowchart LR
+    A([python alice.py]) --> B[Load alice.json]
+    B --> C[Connect to\nllama-server]
+    C -->|not running| D[Start llama-server\nprocess]
+    D --> E[Retry until ready\nup to 2 min]
+    C -->|already up| E
+    E --> F[Load history.json]
+    F --> G[Load Kokoro TTS]
+    G --> H{Forge\nrunning?}
+    H -->|no| I[Start Forge\nwebui.bat]
+    H -->|yes| J
+    I --> J[Set checkpoint]
+    J --> K([Open browser\nlocalhost:8000])
+```
+
+### Memory compression
+
+```mermaid
+flowchart TD
+    M[New message arrives] --> C{history >\n16 msgs?}
+    C -->|no| R[Normal reply]
+    C -->|yes| S[Take oldest 8 messages]
+    S --> LLM[LLM summarises\ninto 2-4 sentences]
+    LLM --> MEM[Append to memory\nstring]
+    MEM --> CAP{memory >\n1500 chars?}
+    CAP -->|yes| TRIM[Trim to last\n1500 chars]
+    CAP -->|no| R
+    TRIM --> R
+    R --> SYS[Inject memory\ninto system prompt]
+```
+
+---
+
+## Troubleshooting
+
+### "Run install.py first" on startup
+Dependencies are missing. Run `python install.py`.
+
+### No sound / TTS disabled
+Look for `WARNING: TTS models not found — run install.py` in the terminal. Run `install.py` to download Kokoro files.
+
+### LLM server not connecting
+- Check that `llama_server_path` and `model_path` are set correctly in `alice.json`
+- Alice retries in the background for up to 2 minutes after startup
+- You can also start `llama-server` manually and set `LLAMA_URL` env var
+
+### Out of VRAM
+- Reduce `llama_server.n_gpu_layers` in `alice.json` (try 20 or lower)
+- Reduce image `width`/`height` to 512×512
+- Use a smaller quantised model (Q4_K_S instead of Q4_K_M)
+
+### Images not generating
+- Visit `http://localhost:7860` — Forge should be running
+- Forge starts in a separate console window; check it for errors
+- Forge auto-restarts on the next image request if it died
+
+### Whisper transcribes nothing / "Could not hear anything"
+- Check the mic device selector next to the Mic button
+- Ensure the correct input device is selected and not muted in Windows sound settings

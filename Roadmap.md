@@ -1,286 +1,169 @@
-\# Alice — Product Plan
+# Alice — Product Roadmap
 
+## What It Is
 
-
-\## What It Is
-
-
-
-Alice is a local-first AI companion with voice, chat, and image generation. It runs entirely on the user's hardware via Ollama and Stable Diffusion WebUI Forge. No data leaves the machine. No cloud subscription required.
-
-
+Alice is a local-first AI companion with voice, chat, and image generation. It runs entirely on the user's hardware. No data leaves the machine. No cloud subscription required.
 
 Key features:
+- Natural language conversation via llama.cpp (GGUF models, OpenAI-compatible API)
+- Real-time image generation from conversation context via Stable Diffusion Forge
+- Neural TTS (Kokoro ONNX) and STT (Whisper) — fully offline
+- NSFW capable — uncensored, fully local
+- Split UI: chat + voice on left, generated scene on right
+- Persona system — swap character, appearance, and system prompt at runtime
+- Configurable via `alice.json`
 
-\- Natural language conversation via Ollama (mistral-nemo based model)
+## Why It's Different
 
-\- Real-time image generation from conversation context via Forge
+- **Fully local** — nothing sent to any cloud API
+- **Privacy by design** — suitable for users who won't trust cloud providers
+- **One product** — chat, voice, STT, and image in a single interface
+- **No ongoing subscription to an AI provider**
+- **Works on NVIDIA and AMD GPUs** via Vulkan backend
 
-\- Voice output
+The target user is already running local AI tools. They understand LLMs and Stable Diffusion. They want an experience, not a chatbot.
 
-\- Video playback
+---
 
-\- NSFW capable — uncensored, fully local
+## Technical Stack
 
-\- Split UI: chat on left, generated scene on right
+```mermaid
+graph TD
+    subgraph Runtime ["Runtime (alice.py)"]
+        FastAPI["FastAPI :8000\n(chat, TTS, STT, image API)"]
+        Kokoro["Kokoro ONNX\nTTS — CPU"]
+        Whisper["faster-whisper\nSTT — CPU"]
+    end
 
+    subgraph GPU ["GPU Process"]
+        LlamaServer["llama-server :8080\nOpenAI-compatible API\nGGUF model — Vulkan/CUDA/Metal"]
+        Forge["SD Forge :7860\nStable Diffusion"]
+    end
 
+    subgraph Install ["install.py (run once)"]
+        Pip["pip packages"]
+        BinaryDl["llama-server binary\nVulkan/platform build"]
+        ModelDl["GGUF model download\nor scan existing"]
+        TTSDl["Kokoro model + voices"]
+        ForgeSetup["git clone Forge\n+ RV5 checkpoint"]
+    end
 
-\## Why It's Different
+    FastAPI --> LlamaServer
+    FastAPI --> Forge
+    FastAPI --> Kokoro
+    FastAPI --> Whisper
+```
 
+---
 
+## Roadmap
 
-\- \*\*Fully local\*\* — nothing sent to OpenAI, Anthropic, or any cloud API
+```mermaid
+gantt
+    dateFormat  YYYY-MM
+    title Alice Development Phases
 
-\- \*\*Privacy by design\*\* — suitable for users who won't trust cloud providers
+    section Phase 1 · Foundation
+    llama.cpp backend (Vulkan)     :done, 2025-11, 2026-01
+    STT mic input                  :done, 2026-01, 2026-02
+    Config / persona system        :done, 2026-01, 2026-02
+    install.py one-command setup   :done, 2026-02, 2026-03
 
-\- \*\*One product\*\* — chat, voice, and image in a single interface
+    section Phase 2 · Distribution
+    Packaging / release zip        :active, 2026-03, 2026-04
+    Landing page                   :2026-04, 2026-05
+    Gumroad listing                :2026-04, 2026-05
 
-\- \*\*No ongoing subscription to an AI provider\*\*
+    section Phase 3 · Performance
+    LCM / Lightning LoRA           :2026-05, 2026-06
+    Streaming image preview        :2026-05, 2026-06
 
+    section Phase 4 · UX
+    Mobile-friendly layout         :2026-06, 2026-07
+    LoRA / style picker            :2026-06, 2026-08
+```
 
+### Phase 1 — Foundation (complete)
 
-The target user is already running Ollama or Stable Diffusion. They understand local AI. They want an experience, not a chatbot.
+- [x] Switch LLM backend from Ollama to llama.cpp server (Vulkan, cross-GPU)
+- [x] OpenAI-compatible API (`/v1/chat/completions`, streaming SSE)
+- [x] STT push-to-talk with device selector, silence auto-stop, auto-send
+- [x] Config hygiene — `alice.json.example` in repo, personal config gitignored
+- [x] Persona system with runtime switching
+- [x] Rolling conversation memory with LLM-based compression
+- [x] `install.py` — one command sets up everything (llama-server, model, TTS, Forge)
+- [x] `alice.py` — assumes installed, just runs
 
+### Phase 2 — Distribution
 
+- [ ] Package as a zip with a `start.bat` / `start.sh` launcher
+- [ ] Gumroad listing under alias identity
+- [ ] Demo gif / short clip for Reddit launch (r/LocalLLaMA, r/StableDiffusion)
+- [ ] Simple landing page (single HTML, alias domain via Cloudflare)
 
-\---
+### Phase 3 — Performance
 
+Current image generation: ~30–60 s on RTX 2070 (8 GB VRAM).
 
+- [ ] Evaluate LCM or Lightning LoRA at ~0.6 weight — target sub-10 s generation
+- [ ] Streaming/progressive image preview during generation
+- [ ] Reduce default steps to 20, CFG to 5–6 for better responsiveness
 
-\## Identity / Alias Strategy
+### Phase 4 — UX
 
+- [ ] Mobile-friendly layout (portrait, swipeable panels)
+- [ ] LoRA / style picker in the UI
+- [ ] Persistent persona gallery with portrait thumbnails
+- [ ] Voice activity indicator (animated waveform during recording)
 
+---
+
+## Distribution
+
+```mermaid
+flowchart LR
+    Dev([Developer\nalias identity]) -->|upload zip| Gumroad
+    Gumroad -->|download link| Buyer
+    Buyer -->|python install.py| Local["Local machine\nno cloud"]
+    Dev -->|demo post| Reddit["r/LocalLLaMA\nr/StableDiffusion"]
+    Reddit -->|organic traffic| Gumroad
+```
+
+### Identity separation
 
 Alice must be developed, sold, and supported under a separate identity to protect the developer's professional profile.
 
+- Separate GitHub account (alias)
+- Separate email address
+- Separate Gumroad and SubscribeStar accounts
+- No cross-linking to real LinkedIn, GitHub, or professional identity
+- Alias Reddit account for community engagement
 
+The tech stack (llama.cpp, Forge, FastAPI, Python) is generic and leaves no fingerprints.
 
-\- Separate GitHub account (alias)
+---
 
-\- Separate email address
+## Pricing
 
-\- Separate Gumroad and/or SubscribeStar account
+- **One-time purchase: $25 USD**
+- Optional future tier: $5/month for updates and new personas
 
-\- Separate PayPal or Wise account for receiving payments
+Rationale: the target audience is accustomed to paying for this category of software. $25 is an impulse buy. Underpricing signals low quality.
 
-\- No cross-linking to real LinkedIn, GitHub (cschladetsch), or professional identity
+A free tier with limitations (capped personas, watermarked output) can drive paid conversions later.
 
-\- Alias Reddit account for community engagement
+---
 
-
-
-The tech stack (Ollama, Forge, FastAPI, Python) is generic and leaves no fingerprints.
-
-
-
-\---
-
-
-
-\## Distribution
-
-
-
-\### Platform: Gumroad
-
-
-
-Gumroad is a digital product sales platform. Upload a zip or installer, set a price, share the link. Buyer pays and gets access to the download. Gumroad takes \~10% cut. No storefront to build.
-
-
-
-\- Simple to set up under an alias
-
-\- Handles payments, delivery, and receipts
-
-\- Suitable for one-time purchases
-
-
-
-\### Secondary: SubscribeStar
-
-
-
-For recurring revenue once a user base exists. More permissive than Patreon for NSFW content.
-
-
-
-\---
-
-
-
-\## Pricing
-
-
-
-\- \*\*One-time purchase: $25 USD\*\*
-
-\- Optional future tier: $5/month for updates and new features
-
-
-
-Rationale: the target audience is accustomed to paying for this category of software. $25 is an impulse buy that doesn't require justification. Underpricing signals low quality.
-
-
-
-A free tier with limitations (capped usage, watermarked output) can drive paid conversions later.
-
-
-
-\---
-
-
-
-\## Technical Roadmap
-
-
-
-\### Phase 1 — Make It Distributable
-
-
-
-Current barrier to entry is high: requires manual setup of Ollama, Forge, Python 3.10, correct models, and configured endpoints.
-
-
-
-\*\*Goal:\*\* `docker-compose up` brings everything up.
-
-
-
-\- Single `docker-compose.yml` defining all services
-
-\- Wrapper shell script that checks for Docker and runs compose
-
-\- User pastes one command into terminal — that's the install
-
-
-
-The target user is comfortable with a terminal. Full GUI installer is out of scope for v1.
-
-
-
-\### Phase 2 — Performance
-
-
-
-Current image generation time: \~60 seconds on RTX 2070 (8GB VRAM).
-
-
-
-End users will typically have better hardware. However, for development experience and demos:
-
-
-
-\- Switch sampler to \*\*DPM++ 2M Karras\*\*
-
-\- Reduce steps to \*\*20\*\*
-
-\- Lower CFG to \*\*5-6\*\*
-
-\- Use 512x768 resolution for portraits instead of higher
-
-\- Evaluate \*\*LCM or Lightning LoRA\*\* at \~0.6 weight — can reduce to 6-8 steps, sub-10 second generation
-
-
-
-Text generation already runs first, image generates async in a second thread. This gives perceived responsiveness — the right architecture.
-
-
-
-\### Phase 3 — UX Polish
-
-
-
-\- Subtle loading animation on image panel during generation
-
-\- Progressive/preview image display if Forge supports it
-
-\- Ensure "Alice is thinking" indicator is consistent
-
-
-
-\---
-
-
-
-\## Launch Strategy
-
-
-
-\### No LinkedIn
-
-
-
-The developer's LinkedIn presence (\~800k impressions) must remain completely firewalled from Alice. Do not reference, link, or hint at Alice from any professional account.
-
-
-
-\### Reddit — Primary Channel
-
-
-
-The natural audience is already on:
-
-
-
-\- r/LocalLLaMA
-
-\- r/StableDiffusion
-
-\- r/AICompanion
-
-
-
-A demo gif or short clip posted to r/LocalLLaMA showing the full loop (chat → voice → image generation, all local) will reach the right audience organically. No ad spend required.
-
-
-
-Post under the alias account. Let the product speak.
-
-
-
-\### Landing Page (Phase 2)
-
-
-
-Not required for launch. When needed:
-
-\- Single HTML file
-
-\- Alias domain via Cloudflare
-
-\- Screenshots and demo gif
-
-\- One buy button linking to Gumroad
-
-
-
-\---
-
-
-
-\## Summary
-
-
+## Summary
 
 | Item | Detail |
-
 |---|---|
-
-| Product | Local AI companion, chat + voice + image |
-
-| Stack | Ollama, Stable Diffusion Forge, FastAPI, HTML/JS |
-
+| Product | Local AI companion — chat + voice + STT + image |
+| Stack | llama.cpp, Stable Diffusion Forge, FastAPI, HTML/JS |
+| GPU | NVIDIA and AMD via Vulkan |
 | Price | $25 one-time |
-
 | Platform | Gumroad (alias) |
-
 | Distribution | Reddit organic |
-
 | Identity | Fully separated alias |
-
-| Launch blocker | Docker compose packaging |
-
-| Current status | Working, demo-ready |
-
+| Current status | Working, install.py complete |
+| Launch blocker | Packaging + Gumroad listing |
