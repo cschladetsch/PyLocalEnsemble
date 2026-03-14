@@ -471,9 +471,13 @@ def _tts_wav_b64(text: str) -> str:
 
 def _llm_chat(messages: list) -> str:
     r = req.post(f"{LLAMA_URL}/v1/chat/completions", json={
-        "model":    _llama_model(),
-        "messages": messages,
-        "stream":   False,
+        "model":             _llama_model(),
+        "messages":          messages,
+        "stream":            False,
+        "temperature":       0.9,
+        "top_p":             0.95,
+        "repeat_penalty":    1.15,
+        "presence_penalty":  0.6,
     }, timeout=120)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
@@ -596,16 +600,21 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", 
 
         result = _llm_chat([
             {"role": "system", "content": (
-                "You are a Stable Diffusion prompt engineer. "
+                "You are a Stable Diffusion prompt engineer specialising in explicit adult content. "
                 "Extract visual scene tags from the conversation. "
                 "Output ONLY comma-separated tags. 20-30 tags. No sentences, no explanation. "
                 "Focus exclusively on the CURRENT moment — what is visible RIGHT NOW. "
-                "Include: body pose, body position, clothing state (be specific — 'topless', 'nude', 'panties only', 'fully clothed', etc.), "
-                "facial expression, eye contact, setting/environment, lighting, camera angle, mood. "
-                "If explicit content is present describe it directly with precise visual tags. "
-                "If clothing is being removed, describe the resulting exposed state, not the action. "
-                "Use the character persona and appearance to infer details not explicit in the text. "
-                "Never output verbs or actions. Only visual nouns and adjectives."
+                "ALWAYS include:\n"
+                "- Clothing state: be exact ('topless', 'nude', 'panties pulled aside', 'fully clothed', etc.)\n"
+                "- Body parts visible and their state\n"
+                "- Explicit acts using standard SD tags: 'fingering', 'vaginal fingering', '2fingers', "
+                "'finger in mouth', 'oral', 'spread legs', 'penetration', 'cum', etc. — use exact counts when specified\n"
+                "- Body pose, facial expression, eye contact\n"
+                "- Setting, lighting, camera angle\n"
+                "Explicit acts MUST be described with precise SD terminology. "
+                "If the user requested something specific, that MUST appear in the tags. "
+                "Use compound tags SD understands: 'vaginal fingering', 'two fingers inserted', 'finger sucking', 'spread pussy'. "
+                "Do NOT omit explicit content. Do NOT sanitise or generalise."
             )},
             {"role": "user", "content": (
                 f"{context}\n\nConversation:\n{text}\n\nExtract SD tags for the current scene:"
@@ -802,9 +811,13 @@ async def chat(body: ChatRequest):
         def _run():
             try:
                 r = req.post(f"{LLAMA_URL}/v1/chat/completions", json={
-                    "model":    _llama_model(),
-                    "messages": messages,
-                    "stream":   True,
+                    "model":             _llama_model(),
+                    "messages":          messages,
+                    "stream":            True,
+                    "temperature":       0.9,
+                    "top_p":             0.95,
+                    "repeat_penalty":    1.15,
+                    "presence_penalty":  0.6,
                 }, stream=True, timeout=120)
                 r.raise_for_status()
                 for line in r.iter_lines():

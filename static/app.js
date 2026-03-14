@@ -348,6 +348,8 @@ function updMsg(id, t) {
   const e = document.getElementById(id);
   if (!e) return;
   e.innerHTML = e.querySelector('.sndr').outerHTML + t;
+  const c = document.getElementById('msgs');
+  c.scrollTop = c.scrollHeight;
 }
 
 async function _sttTranscribe(webmBlob, btn) {
