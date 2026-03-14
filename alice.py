@@ -785,7 +785,7 @@ async def image_from_history(body: ImageRequest):
         prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
         prompt, extra_negative = _apply_exposure_rules(messages, prompt, extra_negative)
         image = generate_image(prompt, extra_negative=extra_negative)
-        return ALICE_APPEARANCE + ", " + prompt, image
+        return prompt, image
 
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _run)
