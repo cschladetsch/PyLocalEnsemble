@@ -8,14 +8,23 @@ import subprocess, sys, time, os, re, json, urllib.request, glob, webbrowser, th
 
 # -- Windows CUDA DLL loading fix --
 if os.name == "nt":
-    cuda_path = os.environ.get("CUDA_PATH")
-    if cuda_path:
-        bin_path = os.path.join(cuda_path, "bin")
-        if os.path.exists(bin_path):
-            try:
-                os.add_dll_directory(bin_path)
-            except AttributeError:
-                pass # Python < 3.8
+    _cuda_candidates = []
+    _cuda_env = os.environ.get("CUDA_PATH")
+    if _cuda_env:
+        _cuda_candidates.append(_cuda_env)
+    # Search standard install locations when CUDA_PATH is not set
+    _toolkit_root = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    if os.path.exists(_toolkit_root):
+        for _ver in sorted(os.listdir(_toolkit_root), reverse=True):
+            _cuda_candidates.append(os.path.join(_toolkit_root, _ver))
+    for _cuda_path in _cuda_candidates:
+        for _sub in ("bin", os.path.join("bin", "x64")):
+            _dll_dir = os.path.join(_cuda_path, _sub)
+            if os.path.exists(_dll_dir):
+                try:
+                    os.add_dll_directory(_dll_dir)
+                except (AttributeError, OSError):
+                    pass
 
 # ── Bootstrap pip deps ───────────────────────────────────────────────────────
 try:
