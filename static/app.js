@@ -31,13 +31,13 @@ function setLLMReady(ready) {
     inp.disabled = false;
     inp.placeholder = 'Say something... or /image';
     if (btn) btn.disabled = false;
-    if (mic) mic.disabled = false;
   } else {
     inp.disabled = true;
     inp.placeholder = 'Waiting for LLM server to start...';
     if (btn) btn.disabled = true;
-    if (mic) mic.disabled = true;
   }
+  // mic is always enabled — STT works independently of the LLM
+  if (mic) mic.disabled = false;
 }
 
 loadInfo();
@@ -379,57 +379,51 @@ async function _sttTranscribe(webmBlob, btn) {
   }
 }
 
+async function loadMicDevices() {
+  try {
+    // trigger permission prompt so labels are populated
+    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tmp.getTracks().forEach(t => t.stop());
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const sel = document.getElementById('mic-select');
+    const saved = localStorage.getItem('micDeviceId');
+    sel.innerHTML = devices
+      .filter(d => d.kind === 'audioinput')
+      .map(d => `<option value="${d.deviceId}" ${d.deviceId === saved ? 'selected' : ''}>${d.label || 'Mic ' + d.deviceId.slice(0,6)}</option>`)
+      .join('');
+    sel.onchange = () => localStorage.setItem('micDeviceId', sel.value);
+  } catch (e) { console.warn('Could not enumerate audio devices:', e); }
+}
+loadMicDevices();
+
 async function toggleMic() {
   const btn = document.getElementById('mic-btn');
+
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
     return;
   }
+
+  const deviceId = document.getElementById('mic-select')?.value;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true
+    });
     audioChunks = [];
-
-    // Silence detection: auto-stop after 1.5s of quiet
-    const actx = new AudioContext();
-    const analyser = actx.createAnalyser();
-    analyser.fftSize = 1024;
-    actx.createMediaStreamSource(stream).connect(analyser);
-    const buf = new Uint8Array(analyser.fftSize);
-    let silenceStart = null, hasSpeech = false, silenceTimer = null;
-
-    function stopRecording() {
-      clearTimeout(silenceTimer);
-      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-      actx.close();
-    }
-
-    function checkSilence() {
-      analyser.getByteTimeDomainData(buf);
-      // RMS deviation from 128 (silence = 0, speech = 20+)
-      const rms = Math.sqrt(buf.reduce((s, v) => s + (v - 128) ** 2, 0) / buf.length);
-      if (rms > 8) { hasSpeech = true; silenceStart = null; }
-      else if (hasSpeech) {
-        if (!silenceStart) silenceStart = Date.now();
-        if (Date.now() - silenceStart > 1500) { stopRecording(); return; }
-      }
-      silenceTimer = setTimeout(checkSilence, 80);
-    }
 
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = async () => {
-      clearTimeout(silenceTimer);
       stream.getTracks().forEach(t => t.stop());
-      btn.classList.remove('recording');
-      btn.disabled = true;
       btn.textContent = 'STT…';
+      btn.disabled = true;
+      btn.classList.remove('recording');
       await _sttTranscribe(new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }), btn);
     };
+
     mediaRecorder.start(100);
     btn.textContent = 'Stop';
     btn.classList.add('recording');
-    checkSilence();
-    setTimeout(stopRecording, 10000); // hard max 10s
   } catch (e) {
     console.warn('Mic error:', e);
     alert('Microphone access denied or unavailable.');

@@ -51,6 +51,13 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "faster-whisper"])
     import faster_whisper as _faster_whisper_pkg  # noqa: F401
 
+try:
+    import av as _av_pkg  # noqa: F401 — ensure installed
+except ImportError:
+    print("Installing av...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "av"])
+    import av as _av_pkg  # noqa: F401
+
 
 import queue as _queue
 from fastapi import FastAPI, Request
@@ -1057,7 +1064,10 @@ async def stt(request: Request):
                 _drain(resampler.resample(frame))
             _drain(resampler.resample(None))
             container.close()
-            print(f"        PyAV decoded {len(buf)} bytes of PCM")
+            import struct
+            samples = struct.unpack(f"{len(buf)//2}h", bytes(buf))
+            rms = (sum(s*s for s in samples) / len(samples)) ** 0.5
+            print(f"        PyAV decoded {len(buf)} bytes of PCM, RMS={rms:.1f}")
             with wave.open(dst, 'wb') as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
                 wf.writeframes(bytes(buf))
@@ -1069,8 +1079,17 @@ async def stt(request: Request):
             except Exception as e:
                 print(f"        Audio conversion failed: {e}, trying raw")
                 src = tmp
-            segments, _ = _WHISPER.transcribe(src, language="en", beam_size=5, vad_filter=False)
-            text = " ".join(s.text for s in segments).strip()
+            segments, _ = _WHISPER.transcribe(src, language="en", beam_size=5, vad_filter=False,
+                                               condition_on_previous_text=False)
+            raw = " ".join(s.text for s in segments).strip()
+            print(f"        STT raw: {repr(raw)}")
+            # Filter known Whisper hallucinations on silent/near-silent audio
+            _HALLUCINATIONS = {
+                "you", "you.", "bye", "bye.", "bye!", "thanks", "thank you",
+                "thank you.", "thank you!", "thanks for watching",
+                "thanks for watching!", ".", "..",
+            }
+            text = "" if raw.lower().rstrip(".! ") in _HALLUCINATIONS or len(raw) <= 2 else raw
             print(f"        STT: {repr(text)}")
             return text
 
