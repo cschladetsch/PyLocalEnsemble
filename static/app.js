@@ -129,8 +129,7 @@ async function triggerMedia(extra = '', auto = false) {
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (d.image) {
-      const caption = d.sd_prompt ? `<div class="img-caption">${d.sd_prompt.slice(0, 200)}${d.sd_prompt.length > 200 ? '…' : ''}</div>` : '';
-      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">${caption}`;
+      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
       setPrompt(d.sd_prompt);
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
