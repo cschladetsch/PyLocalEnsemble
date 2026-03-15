@@ -287,8 +287,8 @@ async def image_from_history(body: ImageRequest):
             recent    = llm.history[-8:]
             if not recent:
                 return None, None
-            messages  = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
-            last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+            last_user  = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+            messages   = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
             print("[image] extracting SD prompt via LLM...")
             base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
                                                    last_user_msg=last_user, persona=SYSTEM_PROMPT)
@@ -385,13 +385,22 @@ async def stt_endpoint(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _tts_clean(text: str) -> str:
+    """Strip markdown that TTS would read aloud."""
+    text = re.sub(r'\*+([^*]+)\*+', r'\1', text)   # *action* / **bold**
+    text = re.sub(r'_+([^_]+)_+',   r'\1', text)   # _italic_
+    text = re.sub(r'^#{1,6}\s+',    '',    text, flags=re.MULTILINE)  # # headers
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 @app.post("/tts")
 async def speak(body: TtsRequest):
     if tts.TTS is None:
         return JSONResponse({"error": "TTS not ready"}, status_code=503)
     try:
         audio = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: tts.tts_wav_b64(body.text)
+            None, lambda: tts.tts_wav_b64(_tts_clean(body.text))
         )
         return JSONResponse({"audio": audio})
     except Exception as e:

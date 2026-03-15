@@ -29,15 +29,15 @@ Powered by:
 
 ---
 
-## Installation
-
-Run once:
+## Installation &amp; Running
 
 ```
-python install.py
+python alice.py
 ```
 
-This performs 6 steps:
+That's it. On first run, `alice.py` detects missing dependencies and runs `install.py` automatically before starting.
+
+`install.py` performs 6 steps:
 
 | Step | What | Size |
 |------|------|------|
@@ -48,19 +48,9 @@ This performs 6 steps:
 | 5 | Kokoro TTS model and voices | ~80 MB |
 | 6 | Stable Diffusion Forge (git clone) + Realistic Vision V5.1 checkpoint | ~5 GB |
 
-**Total first-install time: 15–45 minutes** depending on connection and hardware.
+**Total first-install time: 15–45 minutes** depending on connection and hardware. Subsequent starts take ~30–60 seconds.
 
----
-
-## Running
-
-```
-python alice.py
-```
-
-Opens at `http://localhost:8000`. Subsequent starts take ~30–60 seconds.
-
-`alice.py` assumes `install.py` has been run. If dependencies are missing it exits with a clear message.
+You can also run `install.py` directly at any time to re-run setup or add missing components.
 
 ---
 

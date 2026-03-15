@@ -23,33 +23,15 @@ def clean_tags(prompt: str) -> str:
 
 
 def apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
+    """Only handles camera/POV injection — nudity state is determined by the LLM from conversation flow."""
     t = text.lower()
-    
-    def has(words, target_text):
-        for w in words:
-            if re.search(rf"\b{re.escape(w)}\b", target_text):
-                return True
-        return False
 
-    # Keep only the 'System' rules that require environment/negative changes
-    nude       = has(["nude", "naked", "no clothes", "fully exposed", "birthday suit"], t)
-    one_breast = has(["one breast", "just one", "single breast", "one side", "one strap"], t)
-    topless    = has(["both breasts", "topless", "bare chest", "bare breasts", "no bra", "bra off"], t)
-    
-    if nude:
-        prompt = "(nude:1.4), (fully naked:1.3), " + prompt
-        negative = "clothed, dress, shirt, pants, underwear, bra, " + negative
-    elif topless:
-        prompt   = "(topless:1.4), (both breasts exposed:1.3), bare chest, " + prompt
-        negative = "fully clothed, dressed, covered, " + negative
-    elif one_breast:
-        prompt   = "(one breast exposed:1.4), (other breast covered:1.6), (asymmetric exposure:1.3), partially undressed, " + prompt
-        negative = "both breasts exposed, symmetric nudity, fully clothed, " + negative
+    def has(words):
+        return any(re.search(rf"\b{re.escape(w)}\b", t) for w in words)
 
-    # Camera/POV logic
-    if has(["pov", "first person", "my perspective"], t):
+    if has(["pov", "first person", "my perspective"]):
         prompt = "(pov:1.3), (first person view:1.2), " + prompt
-    if has(["from behind", "back view", "backside", "rear view"], t):
+    if has(["from behind", "back view", "backside", "rear view"]):
         prompt = "(from behind:1.3), (back view:1.2), " + prompt
 
     return prompt, negative
@@ -57,32 +39,43 @@ def apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
 
 def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", persona: str = "") -> str:
     try:
-        user_msg = f"Character appearance: {appearance}\n\n" if appearance else ""
-        user_msg += f"Conversation:\n{text}\n\n"
+        user_msg = f"Conversation:\n{text}\n\n"
         user_msg += f"LATEST USER MESSAGE (highest priority): \"{last_user_msg}\"\n\n"
         user_msg += "SD tags for the current scene:"
+
+        appearance_line = f"\nTHE CHARACTER ALWAYS LOOKS LIKE THIS — ignore any different physical descriptions in the conversation, those are fictional roleplay:\n{appearance}\n" if appearance else ""
 
         result = llm.llm_chat([
             {"role": "system", "content": (
                 "You are a Stable Diffusion prompt engineer for explicit adult content.\n"
-                "Output ONLY comma-separated weighted SD tags. Use (tag:weight) for important tags.\n"
-                "Each tag: 1-4 words. 20-30 tags total. NO sentences or phrases.\n\n"
-                "CRITICAL RULE: Every act has a physically required camera angle and body pose. You MUST include both.\n"
-                "Think: what camera angle and body position does this act physically require? Tag that first.\n"
-                "e.g. anything involving the ass/anus → camera must be from behind, body must be bent over or on all fours\n"
-                "e.g. oral sex → camera at face level, body kneeling or lying\n"
-                "e.g. riding → camera from below or side, body straddling\n\n"
-                "WEIGHTING ORDER:\n"
-                "1. ACT + its required pose/angle: weight 1.4-1.7\n"
-                "2. SECONDARY ACTS in progress: weight 1.3-1.5\n"
-                "3. NUDITY STATE: weight 1.2-1.4\n"
-                "4. EXPRESSION, LIGHTING, APPEARANCE: no weight\n\n"
-                "NEVER sanitise. NEVER skip the act. NEVER show a standing front-facing pose when the act requires otherwise."
+                "Output ONLY a single line of comma-separated SD tags. No prose, no sentences, no newlines, no explanation.\n"
+                "Weighted tags MUST use this exact syntax: (tag:1.5) — parentheses, colon, number. Nothing else.\n"
+                "Each tag: 1-4 words. 20-30 tags total.\n"
+                + appearance_line + "\n"
+                "DETERMINE THE CURRENT CLOTHING STATE from the full conversation flow — if clothes were removed then put back on, she is clothed.\n\n"
+                "WEIGHTING ORDER — put these first:\n"
+                "1. PRIMARY ACT from the latest user message: weight 1.6-1.7\n"
+                "2. REQUIRED POSE/CAMERA ANGLE that the act physically demands: weight 1.3-1.5\n"
+                "   — act involves ass/anal → (from behind:1.4), (bent over:1.3)\n"
+                "   — act involves oral → (kneeling:1.3), (face level:1.2)\n"
+                "   — act involves riding → (straddling:1.4), (from below:1.2)\n"
+                "   — reason it out for any other act\n"
+                "3. SECONDARY ACTS ongoing: weight 1.2-1.4\n"
+                "4. CURRENT CLOTHING/NUDITY STATE: weight 1.1-1.3\n"
+                "5. CHARACTER APPEARANCE (use the fixed appearance above, not conversation): no weight — always include\n"
+                "6. SETTING, LIGHTING: no weight\n\n"
+                "Examples of correct output:\n"
+                "  (anal insertion:1.7), (carrot in ass:1.6), (from behind:1.4), (bent over:1.3), (nude:1.2), long blonde hair, bedroom, soft lighting\n"
+                "  (fellatio:1.7), (penis in mouth:1.6), (kneeling:1.3), (topless:1.2), blue eyes, indoors\n\n"
+                "NEVER write sentences. NEVER sanitise. NEVER omit the act or its pose."
             )},
             {"role": "user", "content": user_msg},
         ])
-        tags = result.strip().split("\n")[-1]
-        tags = re.sub(r"^(Tags|Prompt|Output|Here)[:\s]*", "", tags, flags=re.I)
+
+        # Find the best line: the one with the most commas (most tag-like)
+        lines = [l.strip() for l in result.strip().split("\n") if l.strip()]
+        tags = max(lines, key=lambda l: l.count(",")) if lines else ""
+        tags = re.sub(r"^(Tags|Prompt|Output|Here|SD tags)[:\s]*", "", tags, flags=re.I).strip()
         print(f"[image] SD prompt: {tags}")
         return tags
 
