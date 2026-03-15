@@ -46,7 +46,7 @@ That's it. On first run, `alice.py` detects missing dependencies and runs `insta
 | 3 | llama-server binary (platform-appropriate build) | ~50 MB |
 | 4 | LLM model — scans for existing GGUFs, or downloads default from HuggingFace | ~7 GB |
 | 5 | Kokoro TTS model and voices | ~80 MB |
-| 6 | Stable Diffusion Forge (git clone) + checkpoint | ~5 GB |
+| 6 | Stable Diffusion Forge (git clone) + checkpoint + ADetailer extension + hand model | ~5 GB |
 
 **Total first-install time: 15–45 minutes** depending on connection and hardware. Subsequent starts take ~30–60 seconds.
 
@@ -67,13 +67,19 @@ Key settings:
 | `llama_server_path` | `""` | Path to `llama-server` binary (set by `install.py`, auto-detected if blank) |
 | `system_prompt` | *(see example)* | LLM system prompt / personality |
 | `appearance` | *(see example)* | SD prompt fragment for consistent character appearance |
+| `negative_prompt` | *(see example)* | SD negative prompt — includes weighted hand/finger anatomy terms |
 | `stt_silence_seconds` | `3` | Seconds of mic silence before recording auto-stops |
 | `tts.voice` | `"af_nicole"` | Kokoro voice ID |
 | `tts.speed` | `0.85` | TTS speed multiplier |
-| `tts.chunk_chars` | `600` | Max characters per TTS synthesis chunk. Larger values produce more natural prosody but may cause intonation drift on long replies with small models. Set per-persona in `personas.json` to tune independently. |
+| `tts.chunk_chars` | `600` | Max characters per TTS synthesis chunk |
+| `image.steps` | `25` | Diffusion steps |
+| `image.suffix` | *(see example)* | Appended to every SD prompt — includes `(perfect hands:1.3), (five fingers:1.2)` |
 | `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
+| `image.adetailer_hands` | `false` | Run ADetailer hand-repair pass after each generation (requires ADetailer extension) |
+| `image.hires_fix` | `true` | Enable hires fix upscale pass |
+| `forge_args` | *(platform default)* | Override Forge launch flags (e.g. `"--api --xformers"`) |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
-| `llama_server.ctx_size` | `2048` | Context window in tokens |
+| `llama_server.ctx_size` | `4096` | Context window in tokens |
 | `llama_url` | `"http://127.0.0.1:8080"` | llama-server URL (override with `LLAMA_URL` env var) |
 | `memory.max_history` | `16` | Compress history after this many messages |
 | `memory.keep_recent` | `8` | Messages kept after compression |
@@ -96,10 +102,10 @@ Restart `alice.py` after editing `alice.json`.
 | Linux / WSL2 | NVIDIA CUDA | Ubuntu x64 |
 | Linux fallback | CPU only | Ubuntu x64 |
 
-Stable Diffusion Forge launch flags are set per-platform automatically:
-- **Windows** — `--cuda-malloc --xformers`
-- **macOS** — `--skip-torch-cuda-test` (Metal via MPS, auto-detected by Forge)
-- **Linux / WSL2** — `--xformers`
+Stable Diffusion Forge launch flags are set per-platform automatically and can be overridden via `forge_args` in `alice.json`:
+- **Windows** — `--api --cuda-malloc --xformers`
+- **macOS** — `--api --skip-torch-cuda-test` (Metal via MPS)
+- **Linux / WSL2** — `--api --xformers`
 
 Forge requires Python 3.10 or 3.11 for its virtualenv. `install.py` finds it automatically from PATH, Homebrew, or pyenv.
 
@@ -139,6 +145,8 @@ Four personas are included out of the box. Switch between them using the dropdow
 | Android | ARIA — synthetic, precise, curious |
 | Forest Witch | Morrigan — wild, primal, ancient |
 
+Alice's opening line is randomly chosen from a pool of 12 variations on each page load and after clearing history.
+
 Add your own in `personas.json` (created from `conf/personas.example.json` on first run):
 
 ```json
@@ -150,6 +158,8 @@ Add your own in `personas.json` (created from `conf/personas.example.json` on fi
 }
 ```
 
+Per-persona options: `system_prompt`, `appearance`, `negative_prompt` (appended to base), `tts` (`voice`, `speed`, `effects`), `image` (`suffix`, `steps`, `cfg_scale`, …), `sd_model`, `name`.
+
 ---
 
 ## Conversation Memory
@@ -159,9 +169,9 @@ Alice maintains a rolling memory so long conversations don't lose earlier contex
 - **History** is saved to `history.json` after each reply and reloaded on startup.
 - When history exceeds **16 messages**, the oldest 8 are summarised by the LLM into a brief paragraph stored as `memory`.
 - That memory paragraph is prepended to the system prompt on every subsequent request.
-- The memory buffer is capped at **1500 characters** by default.
+- The memory buffer is capped at **1500 characters** and trimmed at the nearest sentence boundary to avoid cutting mid-sentence.
 
-**Why 1500 characters?** The memory string is injected into every system prompt, counting against the context window. With the default `ctx_size = 2048` tokens, ~375 tokens (≈ 1500 chars) is a safe budget. If you increase `ctx_size`, raise `memory.max_chars` proportionally in `alice.json`.
+**Why 1500 characters?** The memory string is injected into every system prompt, counting against the context window. With the default `ctx_size = 4096` tokens, ~375 tokens (≈ 1500 chars) is a safe budget. If you increase `ctx_size`, raise `memory.max_chars` proportionally in `alice.json`.
 
 - **Clear** — the Clear button wipes history, memory, and `history.json`.
 - Memory is also cleared when switching personas or models.
@@ -174,7 +184,7 @@ Alice maintains a rolling memory so long conversations don't lose earlier contex
 
 Type a message and press **Enter**. Alice streams her reply word-by-word, speaks it aloud, then generates a contextual image.
 
-Press **ESC** or click **Stop** to interrupt at any time.
+Press **ESC** or click **Stop** to interrupt at any time. Messages are capped at 4000 characters.
 
 ### Microphone (push-to-talk)
 
@@ -186,17 +196,15 @@ After recording, Alice transcribes and sends automatically.
 
 ### Voice (TTS)
 
-Alice speaks every reply using Kokoro neural TTS.
+Alice speaks every reply using Kokoro neural TTS. Speech is streamed sentence-by-sentence — the first sentence plays while the rest is still being synthesised.
 
 | Control | Action |
 |---------|--------|
 | Voice dropdown | Switch TTS voice instantly |
 | Mute / **M** | Toggle voice on/off |
-| Re-say / **R** | Replay the last spoken reply |
+| Re-say / **R** | Replay the last spoken reply (instant — uses cached audio, no re-synthesis) |
 
-TTS is streamed sentence-by-sentence — speech starts within the first sentence, while the rest is still being synthesised.
-
-**Keyboard shortcuts** (when the text box is not focused):
+**Keyboard shortcuts** (when the text input is not focused):
 
 | Key | Action |
 |-----|--------|
@@ -209,13 +217,44 @@ Available voices: `af_nicole`, `af_bella`, `af_sarah`, `af_sky` (American female
 
 ### Image panel
 
-The right panel shows the generated scene. Click **+** to open the prompt editor — edit the extracted SD prompt, adjust Steps/CFG sliders, and click **Regenerate**.
+The right panel shows the generated scene image. Below the image a **prompt caption** shows the SD tags that produced the current image. Click the caption (or the **+** button) to open the prompt editor — edit the extracted prompt, adjust Steps/CFG sliders, and click **Regenerate**.
 
-Press **Delete** while an image is displayed to remove it from disk and history.
+Press **Delete** while an image is active to remove it from disk and history.
 
-Thumbnail strips at the bottom show the image history for the session. Click any thumbnail to view it. Hovering shows the SD prompt and timestamp.
+Thumbnail strip at the side shows the session's image history. Click any thumbnail to view it and load its prompt. Hover for the SD prompt and timestamp.
 
-Click **+** to expand the prompt editor. At the bottom of the editor, expand **Negative prompt** to see what the current negative prompt is.
+Expand **Negative prompt** at the bottom of the editor to inspect the active negative prompt.
+
+### Image quality — hands and fingers
+
+The default negative prompt includes explicit wrong-count penalties (`(six fingers:1.9)`, `(seven fingers:1.9)`, etc.) and the image suffix includes `(perfect hands:1.3), (five fingers:1.2)`.
+
+For the best hand quality, enable ADetailer post-processing in `alice.json`:
+
+```json
+"image": {
+    "adetailer_hands": true
+}
+```
+
+ADetailer runs a second inpaint pass targeting detected hands using `hand_yolov8n.pt`. The extension and model are installed automatically by `install.py`.
+
+### Accessories
+
+Alice will wear accessories mentioned in your message. Recognised terms:
+
+| Mentioned | SD tag added |
+|-----------|-------------|
+| glasses / spectacles | `(wearing glasses:1.3)` |
+| sunglasses | `(wearing sunglasses:1.3)` |
+| hat / cap / beret | `(wearing hat:1.3)` |
+| choker / collar | `(choker necklace:1.3)` |
+| stockings / thigh-highs | `(thigh-high stockings:1.3)` |
+| heels / stilettos | `(high heels:1.3)` |
+
+### Seed pinning
+
+The 🔒 button pins the current seed, locking the face/character design across subsequent generations. Click again or use `/seed/unpin` to return to random seeds.
 
 ### Manual image generation
 
@@ -224,11 +263,14 @@ Use the **Image** button or type a command:
 ```
 /image
 /image candlelight, close up, warm glow
+/image no blur, no shadows
 ```
+
+Prefix a token with `no ` to push it to the negative prompt. All other tokens are prepended to the positive prompt.
 
 ### Model switcher
 
-The leftmost dropdown lists models available from the llama-server. To add models, set `model_path` in `alice.json` and restart.
+The leftmost dropdown lists models available from the llama-server. Switching clears history and forces model re-detection on the next request.
 
 ---
 
@@ -239,15 +281,23 @@ alice/
 ├── alice.py                  ← entry point — FastAPI app + startup
 ├── config.py                 ← paths, defaults, load/save config, personas
 ├── llm.py                    ← llama-server lifecycle, chat, history, memory
-├── tts.py                    ← Kokoro TTS load + synthesis
+├── state.py                  ← shared mutable runtime state (nudity, seed, etc.)
+├── tts.py                    ← Kokoro TTS load + synthesis + effects
 ├── stt.py                    ← Whisper STT load + transcription
 ├── utils.py                  ← step/ok/warn, http_ok, wait_for, is_wsl
 ├── install.py                ← installer entry point (thin orchestrator)
 │
+├── routes/                   ← FastAPI route modules
+│   ├── chat.py               ← POST /chat (SSE streaming)
+│   ├── audio.py              ← GET /voices · POST /voice · /tts · /tts/stream · /stt
+│   ├── image_api.py          ← POST /image · /reroll · /generate · /interrupt · /seed
+│   ├── persona.py            ← GET /personas · POST /persona/{name}
+│   └── system.py             ← GET /info · /history · /negative · POST /model · DELETE /image
+│
 ├── image/                    ← image generation package
-│   ├── prompt.py             ← SD tag utilities + LLM prompt extraction
+│   ├── prompt.py             ← SD tag utilities, LLM prompt extraction, accessory detection
 │   ├── forge.py              ← Forge process lifecycle + Python detection
-│   └── generate.py           ← txt2img API call, nudity/clothing handling
+│   └── generate.py           ← txt2img API call, nudity/clothing handling, ADetailer
 │
 ├── installer/                ← installer steps package
 │   ├── helpers.py            ← Spinner, download utils, shared constants
@@ -255,7 +305,7 @@ alice/
 │   ├── llama.py              ← step 3: llama-server download
 │   ├── model.py              ← step 4: GGUF model selection + download
 │   ├── tts_install.py        ← step 5: Kokoro TTS model download
-│   └── forge_install.py      ← step 6: Forge clone + checkpoint download
+│   └── forge_install.py      ← step 6: Forge clone + checkpoint + ADetailer
 │
 ├── conf/                     ← example / template config files (committed)
 │   ├── alice.example.json
@@ -267,12 +317,17 @@ alice/
 │   ├── style.css
 │   └── outputs/              ← generated images (gitignored)
 │
-├── tests/                    ← pytest test suite
+├── tests/                    ← pytest test suite (247 tests)
 │   ├── conftest.py
-│   ├── test_api.py
-│   ├── test_config.py
-│   ├── test_image_utils.py
-│   └── test_install.py
+│   ├── test_api.py           ← API endpoint tests
+│   ├── test_audio.py         ← _tts_clean, _emotion_speed
+│   ├── test_config.py        ← config loading and persona merging
+│   ├── test_image_utils.py   ← clean_tags, exposure rules, nudity keywords
+│   ├── test_install.py       ← llama-server asset selection
+│   ├── test_llm.py           ← history ops, memory compression
+│   ├── test_prompt.py        ← SD prompt extraction, action/accessory detection
+│   ├── test_state.py         ← image saving, RE_CLOTHE, nudity patterns
+│   └── test_tts.py           ← TTS effects, chunking, crossfade
 │
 ├── alice.json                ← your personal config (gitignored)
 ├── personas.json             ← your personas (gitignored)
@@ -281,6 +336,8 @@ alice/
 │   └── tts/                  ← Kokoro model files
 ├── llama-cpp/                ← llama-server binary (gitignored)
 └── stable-diffusion-webui-forge/  ← auto-cloned by install.py (gitignored)
+    ├── extensions/adetailer/ ← ADetailer extension (auto-cloned)
+    └── models/adetailer/     ← hand_yolov8n.pt (auto-downloaded)
 ```
 
 ---
@@ -308,15 +365,16 @@ graph TD
     subgraph Core ["Core modules"]
         Config["config.py — paths · defaults · personas"]
         LLM["llm.py — llama-server · chat · history · memory"]
-        TTS["tts.py — Kokoro load + synthesis"]
+        State["state.py — nudity state · seed · appearance"]
+        TTS["tts.py — Kokoro load + synthesis + effects"]
         STT["stt.py — Whisper load + transcription"]
         Utils["utils.py — step · ok · warn · http_ok · is_wsl"]
     end
 
     subgraph ImagePkg ["image/ package"]
-        Prompt["prompt.py — clean_tags · extract_sd_prompt"]
+        Prompt["prompt.py — extract_sd_prompt · accessory detection"]
         Forge["forge.py — start_forge · set_forge_model"]
-        Generate["generate.py — generate_image · nudity handling"]
+        Generate["generate.py — generate_image · ADetailer · nudity handling"]
     end
 
     subgraph InstallPkg ["installer/ package"]
@@ -331,10 +389,12 @@ graph TD
 
     Routes --> Config
     Routes --> LLM
+    Routes --> State
     Routes --> TTS
     Routes --> STT
     Routes --> ImagePkg
     ImagePkg --> LLM
+    ImagePkg --> State
     ImagePkg --> Utils
     LLM --> Utils
     LLM --> LlamaServer
@@ -361,16 +421,17 @@ sequenceDiagram
     A-->>B: SSE token stream
     B-->>U: words appear live
 
-    A->>K: synthesise reply text
-    K-->>B: WAV audio (base64)
-    B-->>U: speaks reply
+    B->>A: POST /tts/stream
+    A->>K: synthesise sentence by sentence
+    K-->>B: WAV chunks (base64 SSE)
+    B-->>U: speech plays as chunks arrive
 
     A->>L: extract SD prompt from last 8 messages
-    L-->>A: image prompt tags
-    A->>F: POST /sdapi/v1/txt2img
+    L-->>A: structured scene fields
+    A->>F: POST /sdapi/v1/txt2img (+ ADetailer if enabled)
     F-->>A: base64 image
     A-->>B: image URL
-    B-->>U: scene image shown
+    B-->>U: scene image shown + prompt caption
 ```
 
 ### Startup sequence
@@ -401,7 +462,7 @@ flowchart TD
     S --> LLM[LLM summarises into 2-4 sentences]
     LLM --> MEM[Append to memory string]
     MEM --> CAP{memory > max_chars?}
-    CAP -->|yes| TRIM[Trim to last N chars]
+    CAP -->|yes| TRIM[Trim to last N chars at sentence boundary]
     CAP -->|no| R
     TRIM --> R
     R --> SYS[Inject memory into system prompt]
@@ -415,7 +476,7 @@ flowchart TD
 python -m pytest tests/ -v
 ```
 
-153 tests covering config loading, image tag utilities, SD prompt extraction, installer asset selection, TTS effects (android, cathedral, crossfade), and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
+247 tests covering: config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects (android, cathedral, crossfade, emotion speed), audio markdown cleaning, LLM history operations and memory compression, state utilities, and API endpoints (chat history, personas, voices, seeds, model switching). No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
 
 ---
 
@@ -442,9 +503,15 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 - Forge starts in a separate console window; check it for errors
 - Forge auto-restarts on the next image request if it died
 
+### ADetailer error on image generation
+- Ensure the ADetailer extension is present in `stable-diffusion-webui-forge/extensions/adetailer/`
+- Run `python install.py` to clone it automatically
+- If the error persists, set `"adetailer_hands": false` in `alice.json` to disable it
+
 ### Forge fails to start (macOS / Linux)
 - Forge requires Python 3.10 or 3.11 — install via `brew install python@3.11` or `apt install python3.11`
 - On macOS, Forge uses Metal (MPS) automatically — no CUDA needed
+- Override launch flags via `forge_args` in `alice.json` if needed
 
 ### WSL2 (Windows Subsystem for Linux)
 - The browser opens automatically via `explorer.exe`
