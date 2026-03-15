@@ -46,6 +46,11 @@ _DEFAULT_CONFIG = {
         "sampler_name": "DPM++ SDE Karras",
         "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2)",
         "auto_every":   1,
+        "hires_fix":    True,
+        "hires_scale":  1.5,
+        "hires_steps":  15,
+        "hires_denoising": 0.45,
+        "hires_upscaler": "R-ESRGAN 4x+",
     },
     "memory": {
         "max_history": 16,   # compress when history exceeds this many messages

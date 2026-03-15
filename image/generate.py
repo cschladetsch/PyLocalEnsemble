@@ -58,6 +58,14 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             "sampler_name":    img_cfg["sampler_name"],
             "seed":            seed,
         }
+        if img_cfg.get("hires_fix"):
+            payload.update({
+                "enable_hr":            True,
+                "hr_scale":             img_cfg.get("hires_scale",    1.5),
+                "hr_second_pass_steps": img_cfg.get("hires_steps",    15),
+                "denoising_strength":   img_cfg.get("hires_denoising", 0.45),
+                "hr_upscaler":          img_cfg.get("hires_upscaler", "R-ESRGAN 4x+"),
+            })
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
             payload["override_settings"] = {"CLIP_stop_at_last_layers": clip_skip}
