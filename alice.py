@@ -435,8 +435,15 @@ async def info():
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    with open(os.path.join(config.ALICE_DIR, "static", "index.html"), encoding="utf-8") as f:
-        return f.read()
+    static_dir = os.path.join(config.ALICE_DIR, "static")
+    with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    # Inject mtime-based cache busters so browsers always load fresh JS/CSS
+    for asset in ("app.js", "style.css"):
+        path = os.path.join(static_dir, asset)
+        v = int(os.path.getmtime(path)) if os.path.exists(path) else 0
+        html = re.sub(rf'(/static/{re.escape(asset)})\?v=\d+', rf'\g<1>?v={v}', html)
+    return html
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -469,6 +476,14 @@ if __name__ == "__main__":
             print(f"        WSL2 detected. If localhost doesn't work, try http://{wsl_ip}:8000")
         except Exception:
             pass
+
+    import socket as _sock
+    with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as _s:
+        if _s.connect_ex(("127.0.0.1", 8000)) == 0:
+            print(f"\n[{config.NAME}] Port 8000 is already in use.")
+            print(f"        Alice may already be running — check {config.ALICE_URL}")
+            print(f"        If not, kill the process holding port 8000 and retry.")
+            sys.exit(1)
 
     threading.Thread(target=_startup, daemon=True).start()
 
