@@ -288,8 +288,24 @@ async function switchModel(sel) {
 
 loadModels();
 
+const _PERSONA_FONTS = {
+  'android':          { family: "'Share Tech Mono', monospace", style: 'normal', size: '.85rem', weight: '400', spacing: '.04em' },
+  'victorian-lady':   { family: "'Pinyon Script', cursive",     style: 'normal', size: '1.3rem',  weight: '400', spacing: 'normal' },
+  'egyptian-goddess': { family: "'Cinzel Decorative', serif",   style: 'normal', size: '.82rem', weight: '400', spacing: '.06em' },
+  'forest-witch':     { family: "'Almendra', serif",            style: 'italic', size: '1rem',   weight: '400', spacing: 'normal' },
+};
+const _DEFAULT_FONT = { family: "'Cormorant Garamond', serif", style: 'italic', size: '1rem', weight: '300', spacing: 'normal' };
+
 function _applyPersonaFont(name) {
-  document.body.dataset.persona = name.toLowerCase().replace(/\s+/g, '-');
+  const key = name.toLowerCase().replace(/\s+/g, '-');
+  const f = _PERSONA_FONTS[key] || _DEFAULT_FONT;
+  const b = document.body;
+  b.style.setProperty('--alice-font',    f.family);
+  b.style.setProperty('--alice-fstyle',  f.style);
+  b.style.setProperty('--alice-fsize',   f.size);
+  b.style.setProperty('--alice-fweight', f.weight);
+  b.style.setProperty('--alice-spacing', f.spacing);
+  b.dataset.persona = key;
 }
 
 async function loadPersonas() {
