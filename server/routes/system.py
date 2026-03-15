@@ -156,8 +156,10 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
         f"## TASK:\n"
         f"Write ONE short message (1–2 sentences) that {user_name} says next to {persona_name}.\n"
         f"Conversation stage: {stage_label}. {stage_hint}\n"
-        f"Build on what {persona_name} just said — reference something specific from her last reply.\n"
-        f"Vary form: sometimes a question, sometimes an observation, statement, or compliment.\n"
+        f"Pick up on something specific from her last reply and respond naturally.\n"
+        f"Vary form: question, observation, statement, or compliment.\n"
+        f"CRITICAL: Use plain, direct language. No invented place names, no elaborate metaphors, "
+        f"no poetic flourishes. Write as a real person speaks in conversation — not as a novelist.\n"
         f"Output ONLY {user_name}'s message — no name prefix, no quotes, no explanation."
     )
 
@@ -173,7 +175,7 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
             "messages":    messages,
             "stream":      False,
             "max_tokens":  80,
-            "temperature": 1.1,
+            "temperature": 0.85,
         }, timeout=30)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip().strip('"\'')
