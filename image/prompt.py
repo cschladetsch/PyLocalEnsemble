@@ -115,6 +115,63 @@ def _clean_raw(raw: str) -> list:
 
 _FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "EXTRA", "SETTING", "LIGHTING"]
 
+# Pattern → (action_tags_list, body_tag, camera_hint)
+# Multiple action tags reinforce the same pose from different angles in training data.
+# Checked against the user's command; first match wins.
+# Bypasses the LLM for ACTION to avoid hallucination from Alice's prose.
+_ACTION_PATTERNS = [
+    (r'\bcup(?:ping)?\b.{0,30}\bbreast',
+        ["cupping own breasts", "hands on own breasts", "holding own breasts", "breast grab"],
+        "breasts", "front view"),
+    (r'\bhold(?:ing)?\b.{0,30}\bbreast',
+        ["holding own breasts", "cupping own breasts", "hands on own breasts"],
+        "breasts", "front view"),
+    (r'\bsqueez\w*\b.{0,30}\bbreast',
+        ["squeezing own breasts", "hands on own breasts", "breast grab"],
+        "breasts", "front view"),
+    (r'\btouch\w*\b.{0,30}\bbreast',
+        ["hands on own breasts", "cupping own breasts"],
+        "breasts", "front view"),
+    (r'\bsuck\b|\bblowjob\b|\bfellatio\b',
+        ["fellatio", "penis in mouth", "oral sex"],
+        "mouth", "face level"),
+    (r'\banal\b|\bbutt plug\b',
+        ["anal insertion", "ass penetration"],
+        "ass", "from behind"),
+    (r'\bfinger\w*\b',
+        ["fingering", "fingers in pussy"],
+        "pussy", "from below"),
+    (r'\bride\b|\briding\b|\bsit on\b',
+        ["riding", "cowgirl position", "straddling"],
+        "pussy", "from below"),
+    (r'\bbend\w*\s+over\b',
+        ["bent over", "doggy style position"],
+        "ass", "from behind"),
+    (r'\bspread\w*\s+(?:(?:her|your|my)\s+)?legs?\b',
+        ["spreading legs", "legs spread wide"],
+        "pussy", "from below"),
+    (r'\bkneel\b|\bkneeling\b',
+        ["kneeling"],
+        "body", "front view"),
+    (r'\bstroke\b|\bstroking\b',
+        ["stroking penis", "handjob"],
+        "cock", "front view"),
+    (r'\bkiss\w*\b',
+        ["kissing", "lips touching"],
+        "lips", "face level"),
+    (r'\bstrip\b|\bstripping\b|\bundress\b',
+        ["disrobing", "removing clothes"],
+        "body", "front view"),
+]
+
+
+def _detect_action(msg: str):
+    """Return (actions_list, body, camera) from pattern match, or None if no match."""
+    for pattern, actions, body, camera in _ACTION_PATTERNS:
+        if re.search(pattern, msg, re.I):
+            return actions, body, camera
+    return None
+
 # Maps structured CAMERA field values to SD tag pairs
 _CAMERA_MAP = {
     "front view":    ["front view", "close-up torso"],
@@ -163,13 +220,15 @@ def _build_tags(fields: dict, appearance: str) -> str:
             return
         tags.append(f"({val}:{weight})" if weight else val)
 
-    # Primary action — highest weight
-    action = fields.get("ACTION", "")
-    if action:
-        add(action, 1.7)
-        body = fields.get("BODY", "")
-        if body and body.lower() not in action.lower():
-            add(body, 1.5)
+    # Primary action — one or more tags, descending weights from 1.7
+    action_val = fields.get("ACTION", "")
+    action_list = action_val if isinstance(action_val, list) else ([action_val] if action_val else [])
+    action_weights = [1.7, 1.6, 1.5, 1.4]
+    for act, w in zip(action_list, action_weights):
+        add(act, w)
+    body = fields.get("BODY", "")
+    if body and not any(body.lower() in a.lower() for a in action_list):
+        add(body, 1.3)
 
     # Camera angle
     camera_raw = fields.get("CAMERA", "front view").lower()
@@ -253,17 +312,25 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
         ])
 
         fields = _parse_template(raw)
-        print(f"[image] scene fields: {fields}")
 
-        if "ACTION" not in fields:
-            # Fallback: retry with a simpler prompt
+        # Override ACTION/BODY/CAMERA with pattern match from user command —
+        # the LLM reliably misreads Alice's prose response for these fields.
+        detected = _detect_action(last_user_msg)
+        if detected:
+            action, body, camera = detected
+            fields["ACTION"] = action
+            fields.setdefault("BODY",   body)
+            fields.setdefault("CAMERA", camera)
+            print(f"[image] action detected from user msg: {action!r}")
+        elif "ACTION" not in fields:
             print("[image] no ACTION field, retrying…")
             raw = llm.llm_chat([
                 {"role": "system", "content": system_msg},
                 {"role": "user",   "content": user_msg + "\nIMPORTANT: you MUST output the ACTION field first."},
             ])
             fields = _parse_template(raw)
-            print(f"[image] scene fields (retry): {fields}")
+
+        print(f"[image] scene fields: {fields}")
 
         tags = _build_tags(fields, appearance)
         print(f"[image] SD prompt: {tags}")

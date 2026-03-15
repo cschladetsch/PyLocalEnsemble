@@ -1,6 +1,6 @@
 """Tests for image/prompt.py: structured template parsing and tag building."""
 import pytest
-from image.prompt import _parse_template, _build_tags, _NUDITY_MAP, _CAMERA_MAP
+from image.prompt import _parse_template, _build_tags, _detect_action, _NUDITY_MAP, _CAMERA_MAP
 
 
 # ── _parse_template ───────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ def test_body_not_repeated_if_in_action():
 
 def test_body_added_when_not_in_action():
     tags = _tags({"ACTION": "kneeling", "BODY": "mouth"})
-    assert "(mouth:1.5)" in tags
+    assert "(mouth:1.3)" in tags
 
 
 def test_camera_front_view_adds_close_up():
@@ -186,6 +186,57 @@ def test_last_clause_multiple_ands():
     assert result.startswith("squeeze your breasts")
     assert "remove top" in result
     assert "look at me" in result
+
+
+# ── _detect_action ────────────────────────────────────────────────────────────
+
+def test_detect_cup_breasts():
+    actions, body, camera = _detect_action("cup your breasts in your hands")
+    assert actions[0] == "cupping own breasts"
+    assert body   == "breasts"
+    assert camera == "front view"
+
+
+def test_detect_hold_breasts():
+    actions, body, _ = _detect_action("hold your breasts up for me")
+    assert actions[0] == "holding own breasts"
+    assert "cupping own breasts" in actions
+    assert body   == "breasts"
+
+
+def test_detect_fellatio():
+    actions, body, camera = _detect_action("get on your knees and suck it")
+    assert actions[0] == "fellatio"
+    assert camera == "face level"
+
+
+def test_detect_bend_over():
+    actions, body, camera = _detect_action("bend over and show me")
+    assert actions[0] == "bent over"
+    assert camera == "from behind"
+
+
+def test_detect_spread_legs():
+    actions, body, camera = _detect_action("spread your legs wide")
+    assert actions[0] == "spreading legs"
+    assert camera == "from below"
+
+
+def test_detect_riding():
+    actions, _, camera = _detect_action("sit on me and ride")
+    assert actions[0] == "riding"
+    assert camera == "from below"
+
+
+def test_detect_no_match_returns_none():
+    assert _detect_action("hello how are you") is None
+
+
+def test_detect_compound_picks_last_matching():
+    # "take off your top and cup your breasts" — after clause reorder,
+    # last_user_msg = "cup your breasts in your hands, take off your top"
+    actions, _, _ = _detect_action("cup your breasts in your hands, take off your top")
+    assert actions[0] == "cupping own breasts"
 
 
 def test_last_clause_preserves_all_context():
