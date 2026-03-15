@@ -97,6 +97,22 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
             payload["override_settings"] = {"CLIP_stop_at_last_layers": clip_skip}
+        if img_cfg.get("adetailer_hands"):
+            payload["alwayson_scripts"] = {
+                "ADetailer": {
+                    "args": [
+                        True,   # enabled
+                        False,  # skip img2img
+                        {
+                            "ad_model":                    "hand_yolov8n.pt",
+                            "ad_confidence":               0.3,
+                            "ad_denoising_strength":       0.4,
+                            "ad_inpaint_only_masked":      True,
+                            "ad_inpaint_only_masked_padding": 32,
+                        },
+                    ]
+                }
+            }
         r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         data = r.json()
         if "images" not in data:

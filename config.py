@@ -18,7 +18,7 @@ _DEFAULT_CONFIG = {
     "llama_model":        "mistral-nemo",
     "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "(worst quality:2), (low quality:2), lowres, (bad anatomy:1.5), (bad hands:1.7), (mutated hands:1.6), (extra fingers:1.6), (missing fingers:1.5), (fused fingers:1.6), (too many fingers:1.6), (malformed fingers:1.6), (deformed fingers:1.6), (poorly drawn fingers:1.5), poorly drawn hands, poorly drawn face, (deformed iris:1.4), (deformed pupils:1.4), mutation, deformed, blurry, bad proportions, (extra limbs:1.4), disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, floating limbs, disconnected limbs, out of frame, cropped, duplicate, morbid, mutilated, cloned face, long neck, text, signature, watermark, username, jpeg artifacts, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime",
+    "negative_prompt": "(worst quality:2), (low quality:2), lowres, (bad anatomy:1.5), (bad hands:1.8), (mutated hands:1.7), (extra fingers:1.8), (missing fingers:1.7), (fused fingers:1.8), (too many fingers:1.8), (malformed fingers:1.7), (deformed fingers:1.7), (poorly drawn fingers:1.6), poorly drawn hands, (six fingers:1.9), (seven fingers:1.9), (eight fingers:1.9), (four fingers:1.6), (three fingers:1.6), (wrong number of fingers:1.8), poorly drawn face, (deformed iris:1.4), (deformed pupils:1.4), mutation, deformed, blurry, bad proportions, (extra limbs:1.4), disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, floating limbs, disconnected limbs, out of frame, cropped, duplicate, morbid, mutilated, cloned face, long neck, text, signature, watermark, username, jpeg artifacts, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime",
     "system_prompt": (
         "You are Alice. Respond always in first person as Alice — never narrate in third person.\n"
         "You are enigmatic, sensual, intelligent, and fully present.\n"
@@ -45,7 +45,7 @@ _DEFAULT_CONFIG = {
         "height":       768,
         "cfg_scale":    7,
         "sampler_name": "DPM++ SDE Karras",
-        "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2)",
+        "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2), (perfect hands:1.3), (five fingers:1.2)",
         "auto_every":   1,
         "hires_fix":    True,
         "hires_scale":  1.5,
