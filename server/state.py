@@ -19,6 +19,11 @@ _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
 last_seed        = -1          # seed used by the most recent successful generation
 
+# Pre-extracted SD prompt — populated by chat route, consumed by /image
+_pre_sd_prompt:    str | None = None   # positive prompt
+_pre_sd_negative:  str        = ""     # extra negative tags
+_pre_sd_nudity:    str | None = None   # nudity state at extraction time
+
 # Nudity decay — returns toward "clothed" after N consecutive non-sexual turns
 _NUDITY_ORDER   = ["clothed", "topless", "bottomless", "fully nude"]
 _nudity_turns_since_keyword = 0

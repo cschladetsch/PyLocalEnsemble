@@ -49,13 +49,22 @@ async def image_from_history(body: ImageRequest):
                 state.decay_nudity_state(last_user)
 
             messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
-            print("[image] extracting SD prompt via LLM...")
-            base_prompt, new_nudity = image.extract_sd_prompt(
-                messages, appearance=state.ALICE_APPEARANCE,
-                last_user_msg=last_user, persona=state.SYSTEM_PROMPT,
-                nudity_floor=state._nudity_state,
-            )
-            state._nudity_state = new_nudity
+            used_pre = bool(state._pre_sd_prompt and not body.extra)
+            if used_pre:
+                print("[image] using pre-extracted SD prompt (skipping LLM call)")
+                prompt         = state._pre_sd_prompt
+                extra_negative = state._pre_sd_negative
+                if state._pre_sd_nudity:
+                    state._nudity_state = state._pre_sd_nudity
+                state._pre_sd_prompt = None
+            else:
+                print("[image] extracting SD prompt via LLM...")
+                base_prompt, new_nudity = image.extract_sd_prompt(
+                    messages, appearance=state.ALICE_APPEARANCE,
+                    last_user_msg=last_user, persona=state.SYSTEM_PROMPT,
+                    nudity_floor=state._nudity_state,
+                )
+                state._nudity_state = new_nudity
 
             if image._gen_cancel.is_set():
                 print("[image] cancelled before Forge call")
@@ -68,11 +77,14 @@ async def image_from_history(body: ImageRequest):
                 else:
                     positive_parts.append(token)
 
-            base_prompt    = image.clean_tags(base_prompt)
-            positive_extra = ", ".join(positive_parts)
-            extra_negative = ", ".join(negative_parts)
-            prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-            prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
+            if not used_pre:
+                base_prompt    = image.clean_tags(base_prompt)
+                positive_extra = ", ".join(positive_parts)
+                extra_negative = ", ".join(negative_parts)
+                prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+                prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
+            elif positive_parts:
+                prompt = ", ".join(positive_parts) + ", " + prompt
 
             state.last_sd_prompt = prompt
             img = image.generate_image(

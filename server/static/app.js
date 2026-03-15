@@ -124,7 +124,7 @@ async function loadInfo() {
     charName = d.name || 'Alice';
     document.title = charName;
     const h1 = document.querySelector('h1');
-    if (h1) h1.textContent = charName;
+    if (h1) h1.textContent = charName.toUpperCase();
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
     const firstBody = document.querySelector('#msgs .msg.alice');
@@ -241,8 +241,9 @@ function enableAll() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') interrupt('user ESC');
-  if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-  if (e.key === 'Delete') deleteActiveImage();
+  const inText = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+  if (e.key === 'Delete') { if (!inText || !e.target.value) deleteActiveImage(); return; }
+  if (inText) return;
   if (e.key === 'm' || e.key === 'M') toggleMute();
   if (e.key === 'r' || e.key === 'R') resay();
 });

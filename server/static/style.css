@@ -2,7 +2,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Montserrat',sans-serif;font-weight:300;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 header{padding:1rem 2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--panel)}
-h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;letter-spacing:.15em;color:var(--accent);font-style:italic;text-transform:uppercase}
+h1{font-family:'Cormorant Garamond',serif;font-weight:700;font-size:1.8rem;letter-spacing:.15em;color:var(--accent);font-style:normal;text-transform:uppercase}
 .cb{background:none;border:1px solid var(--border);color:var(--muted);padding:.3rem .8rem;cursor:pointer;font-family:'Montserrat',sans-serif;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;transition:all .2s}
 .cb:hover{border-color:var(--accent2);color:var(--accent)}
 .stop-btn{border-color:#6b2a2a;color:#c08080}.stop-btn:not(:disabled):hover{border-color:#c05050;color:#e08080}.stop-btn:disabled{opacity:.25;cursor:default}

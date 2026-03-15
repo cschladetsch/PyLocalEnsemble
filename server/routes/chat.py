@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 import config
 import llm
 import state
+import image as image_mod
 
 router = APIRouter()
 
@@ -106,6 +107,39 @@ async def chat(body: ChatRequest):
             auto_img = state.should_auto_image(body.message)
             print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
             yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
+
+            if auto_img:
+                # Pre-extract SD prompt in background so /image can skip the LLM call
+                state._pre_sd_prompt   = None
+                state._pre_sd_negative = ""
+                state._pre_sd_nudity   = None
+                recent    = llm.history[-8:]
+                last_user = body.message.strip()
+                msgs_text = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
+                nudity_floor = state._nudity_state
+
+                async def _pre_extract():
+                    try:
+                        base_prompt, new_nudity = await loop.run_in_executor(
+                            None,
+                            lambda: image_mod.extract_sd_prompt(
+                                msgs_text,
+                                appearance=state.ALICE_APPEARANCE,
+                                last_user_msg=last_user,
+                                persona=state.SYSTEM_PROMPT,
+                                nudity_floor=nudity_floor,
+                            )
+                        )
+                        prompt = image_mod.clean_tags(base_prompt)
+                        prompt, extra_neg = image_mod.apply_exposure_rules(msgs_text, prompt, "")
+                        state._pre_sd_prompt   = prompt
+                        state._pre_sd_negative = extra_neg
+                        state._pre_sd_nudity   = new_nudity
+                        print(f"[chat] pre-extracted SD prompt ({len(prompt)} chars)")
+                    except Exception as e:
+                        print(f"[chat] SD prompt pre-extraction failed: {e}")
+
+                asyncio.create_task(_pre_extract())
 
         return StreamingResponse(generate(), media_type="text/event-stream")
     except Exception as e:
