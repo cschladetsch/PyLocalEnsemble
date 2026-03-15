@@ -1,7 +1,7 @@
 """Tests for tts.py utilities."""
 import numpy as np
 import pytest
-from tts import _android_effect, _cathedral_effect
+from tts import _android_effect, _cathedral_effect, _sentence_chunks
 
 
 def _sine(sr=24000, freq=440, duration=0.5):
@@ -79,3 +79,39 @@ def test_cathedral_changes_signal():
     samples = _sine()
     result = _cathedral_effect(samples, 24000)
     assert not np.allclose(samples, result)
+
+
+# ── _sentence_chunks ──────────────────────────────────────────────────────────
+
+def test_chunks_short_text_single_chunk():
+    result = _sentence_chunks("Hello there.", max_chars=300)
+    assert result == ["Hello there."]
+
+def test_chunks_splits_on_sentence_boundary():
+    text = "First sentence. Second sentence. Third sentence."
+    result = _sentence_chunks(text, max_chars=30)
+    assert len(result) > 1
+    assert all(len(c) <= 30 for c in result)
+
+def test_chunks_joins_short_sentences():
+    text = "Hi. Yes. No. Maybe."
+    result = _sentence_chunks(text, max_chars=300)
+    assert len(result) == 1
+    assert "Hi" in result[0] and "Maybe" in result[0]
+
+def test_chunks_hard_splits_overlong_sentence():
+    long_sentence = "a" * 400
+    result = _sentence_chunks(long_sentence, max_chars=300)
+    assert all(len(c) <= 300 for c in result)
+    assert "".join(result) == long_sentence
+
+def test_chunks_empty_string():
+    result = _sentence_chunks("", max_chars=300)
+    assert result == [""]
+
+def test_chunks_preserves_all_content():
+    text = "One. Two. Three. Four. Five."
+    result = _sentence_chunks(text, max_chars=15)
+    joined = " ".join(result)
+    for word in ["One", "Two", "Three", "Four", "Five"]:
+        assert word in joined

@@ -80,14 +80,49 @@ def _cathedral_effect(samples, sr):
     return blended.astype(samples.dtype)
 
 
+def _sentence_chunks(text: str, max_chars: int) -> list:
+    """Split text at sentence boundaries into chunks ≤ max_chars each."""
+    text = text.strip()
+    sentences = re.split(r'(?<=[.!?…])\s+', text)
+    chunks, current = [], ""
+    for s in sentences:
+        if not s:
+            continue
+        if len(current) + len(s) + 1 <= max_chars:
+            current = (current + " " + s).strip()
+        else:
+            if current:
+                chunks.append(current)
+            # sentence itself longer than max_chars — hard-split on commas then chars
+            while len(s) > max_chars:
+                cut = s.rfind(",", 0, max_chars)
+                cut = cut + 1 if cut > 0 else max_chars
+                chunks.append(s[:cut].strip())
+                s = s[cut:].strip()
+            current = s
+    if current:
+        chunks.append(current)
+    return chunks or [text[:max_chars]]
+
+
 def tts_wav_b64(text: str) -> str:
     import numpy as np
-    tts_cfg = config.CFG.get("tts", {})
-    voice   = tts_cfg.get("voice", "af_nicole")
-    speed   = _emotion_speed(text, tts_cfg.get("speed", 0.85))
-    effects = tts_cfg.get("effects", "")
-    print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars: {text[:60]!r}{'...' if len(text)>60 else ''}")
-    samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")
+    tts_cfg  = config.CFG.get("tts", {})
+    voice    = tts_cfg.get("voice", "af_nicole")
+    speed    = _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    effects  = tts_cfg.get("effects", "")
+    max_chars = tts_cfg.get("max_chars", 1800)
+
+    text = text[:max_chars]
+    print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars")
+
+    chunks = _sentence_chunks(text, max_chars=300)
+    parts, sr = [], None
+    for chunk in chunks:
+        s, sr = TTS.create(chunk, voice=voice, speed=speed, lang="en-us")
+        parts.append(s)
+    samples = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
     if effects == "android":
         samples = _android_effect(samples, sr)
     elif effects == "cathedral":
