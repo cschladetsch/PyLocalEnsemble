@@ -116,11 +116,18 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         data = r.json()
         if "images" not in data:
-            err_type = data.get("error", "")
-            err_msg  = data.get("errors") or data.get("message") or ""
-            forge_err = f"{err_type}: {err_msg}".strip(": ") or str(data)[:300]
-            print(f"[image] Forge error response: {forge_err}")
-            raise RuntimeError(f"Forge: {forge_err}")
+            detail = data.get("detail", "")
+            if "ADetailer" in str(detail) and "alwayson_scripts" in payload:
+                print("[image] ADetailer not found — retrying without it")
+                payload.pop("alwayson_scripts")
+                r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
+                data = r.json()
+            if "images" not in data:
+                err_type  = data.get("error", "")
+                err_msg   = data.get("errors") or data.get("message") or ""
+                forge_err = f"{err_type}: {err_msg}".strip(": ") or str(data)[:300]
+                print(f"[image] Forge error response: {forge_err}")
+                raise RuntimeError(f"Forge: {forge_err}")
         imgs = data.get("images", [])
         if imgs:
             try:
