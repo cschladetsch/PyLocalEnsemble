@@ -60,7 +60,28 @@ SYSTEM_PROMPT      = config.CFG["system_prompt"]
 BASE_NEGATIVE      = config.CFG["negative_prompt"]
 IMAGE_SUFFIX       = config.CFG.get("image", {}).get("suffix", "")
 _BASE_IMAGE_CFG    = {**config.CFG.get("image", {})}   # snapshot before any persona mutates it
-_auto_image_counter = 0
+_BASE_NEGATIVE     = config.CFG["negative_prompt"]     # snapshot for persona reset
+_nudity_state      = "clothed"   # persists across turns; floor for image nudity
+_character_seed    = -1          # -1 = random; set when seed is pinned
+_seed_pinned       = False
+
+# Words that signal the user wants to re-clothe the character
+_RE_CLOTHE = re.compile(
+    r'\b(get dressed|put on|cover up|dress|put your clothes|clothe yourself)\b', re.I
+)
+
+# Words that signal a physical/visual action warranting an auto-image
+_AUTO_IMAGE_RE = re.compile(
+    r'\b(take off|strip|undress|remove|show me|show your|spread|bend|kneel|cup|hold|touch|'
+    r'finger|ride|suck|stroke|kiss|insert|stuff|fuck|naked|nude|topless|undressed|'
+    r'lie down|sit on|get on|turn around|open|expose|reveal|clothes off|get off|'
+    r'pull down|pull up|pull off|lift|spread)\b',
+    re.I
+)
+
+
+def _should_auto_image(user_msg: str) -> bool:
+    return bool(_AUTO_IMAGE_RE.search(user_msg))
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 NO_SPEECH   = "--no-speech" in sys.argv
@@ -259,9 +280,7 @@ async def chat(body: ChatRequest):
             await loop.run_in_executor(None, llm.compress_history)
             llm.save_history()
 
-            _auto_image_counter += 1
-            auto_every = config.CFG.get("image", {}).get("auto_every", 1)
-            auto_img   = (_auto_image_counter % auto_every == 0)
+            auto_img = _should_auto_image(msg)
             print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
             yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
 
@@ -315,18 +334,25 @@ async def image_from_history(body: ImageRequest):
 
     try:
         def _run():
+            global _nudity_state
             image._gen_cancel.clear()
             recent    = llm.history[-8:]
             last_user_full = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "") if recent else body.extra
-            # Reorder clauses so the last (end-state) act comes first for ACTION priority,
-            # keeping all earlier context appended so the LLM has full information.
-            # e.g. "take off top and cup breasts" → "cup breasts, take off top"
+            # Reorder clauses so the last (end-state) act comes first for ACTION priority
             _parts = [p.strip() for p in re.split(r'\b(?:and|then)\b|[;]', last_user_full, flags=re.I) if p.strip()]
             last_user = ", ".join([_parts[-1]] + _parts[:-1]) if len(_parts) > 1 else last_user_full
+            # Re-clothing detection resets nudity state
+            if _RE_CLOTHE.search(last_user):
+                _nudity_state = "clothed"
+                print("[image] re-clothing detected — nudity state reset")
             messages   = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
             print("[image] extracting SD prompt via LLM...")
-            base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
-                                                   last_user_msg=last_user, persona=SYSTEM_PROMPT)
+            base_prompt, new_nudity = image.extract_sd_prompt(
+                messages, appearance=ALICE_APPEARANCE,
+                last_user_msg=last_user, persona=SYSTEM_PROMPT,
+                nudity_floor=_nudity_state,
+            )
+            _nudity_state = new_nudity
             if image._gen_cancel.is_set():
                 print("[image] cancelled before Forge call")
                 return None, None
@@ -341,7 +367,11 @@ async def image_from_history(body: ImageRequest):
             extra_negative = ", ".join(negative_parts)
             prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
             prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
-            img = image.generate_image(prompt, ALICE_APPEARANCE, BASE_NEGATIVE, extra_negative=extra_negative)
+            img = image.generate_image(
+                prompt, ALICE_APPEARANCE, BASE_NEGATIVE,
+                extra_negative=extra_negative,
+                seed=_character_seed,
+            )
             url = save_generated_image(img) if img else None
             return prompt, url
 
@@ -383,7 +413,7 @@ async def switch_persona(name: str):
     global ALICE_APPEARANCE, SYSTEM_PROMPT
     if name not in config.PERSONAS:
         return JSONResponse({"error": f"Persona '{name}' not found."}, status_code=404)
-    global ALICE_APPEARANCE, SYSTEM_PROMPT, IMAGE_SUFFIX
+    global ALICE_APPEARANCE, SYSTEM_PROMPT, IMAGE_SUFFIX, BASE_NEGATIVE, _nudity_state, _character_seed, _seed_pinned
     p = config.PERSONAS[name]
     ALICE_APPEARANCE = p.get("appearance", config.CFG["appearance"])
     SYSTEM_PROMPT    = p.get("system_prompt", config.CFG["system_prompt"])
@@ -392,11 +422,17 @@ async def switch_persona(name: str):
     img_cfg.update(p.get("image", {}))
     config.CFG["image"] = img_cfg
     IMAGE_SUFFIX = img_cfg.get("suffix", "")
+    # Per-persona negative prompt (falls back to original base)
+    BASE_NEGATIVE = p.get("negative_prompt", _BASE_NEGATIVE)
     # Apply persona TTS overrides (e.g. effects), then reset keys not in this persona
     tts_base = {**config.CFG.get("tts", {})}
     tts_base.pop("effects", None)          # clear any effect from previous persona
     tts_base.update(p.get("tts", {}))
     config.CFG["tts"] = tts_base
+    # Reset session state
+    _nudity_state   = "clothed"
+    _character_seed = -1
+    _seed_pinned    = False
     llm.clear_history()
     print(f"\n[{config.NAME}] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name})
@@ -414,6 +450,29 @@ async def set_voice(body: VoiceRequest):
         return JSONResponse({"error": "Unknown voice"}, status_code=400)
     config.CFG.setdefault("tts", {})["voice"] = body.voice
     return JSONResponse({"status": "ok", "voice": body.voice})
+
+
+@app.get("/seed")
+async def get_seed():
+    return JSONResponse({"seed": image._last_seed, "pinned": _seed_pinned})
+
+
+@app.post("/seed/pin")
+async def pin_seed():
+    global _seed_pinned, _character_seed
+    _seed_pinned    = True
+    _character_seed = image._last_seed
+    print(f"[seed] pinned seed {_character_seed}")
+    return JSONResponse({"pinned": True, "seed": _character_seed})
+
+
+@app.post("/seed/unpin")
+async def unpin_seed():
+    global _seed_pinned, _character_seed
+    _seed_pinned    = False
+    _character_seed = -1
+    print("[seed] unpinned — using random seed")
+    return JSONResponse({"pinned": False})
 
 
 @app.post("/stt")

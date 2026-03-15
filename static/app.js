@@ -40,7 +40,7 @@ function showHistImg(index) {
   document.querySelectorAll('.is img').forEach((img, i) => {
     img.classList.toggle('active', i === index);
   });
-  document.getElementById('ic').innerHTML = `<img src="${item.url}">`;
+  document.getElementById('ic').innerHTML = `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
   setPrompt(item.prompt);
 }
 
@@ -238,7 +238,7 @@ async function triggerMedia(extra = '', auto = false) {
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (d.url) {
-      document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final">`;
+      document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
     } else {
@@ -449,6 +449,12 @@ async function send() {
   inp.focus();
 }
 
+function renderMd(text) {
+  return text
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+}
+
 function addMsg(cls, sndr, html) {
   const id = 'm' + (mid++), d = document.createElement('div');
   d.className = 'msg ' + cls;
@@ -463,9 +469,28 @@ function addMsg(cls, sndr, html) {
 function updMsg(id, t) {
   const e = document.getElementById(id);
   if (!e) return;
-  e.innerHTML = e.querySelector('.sndr').outerHTML + t;
+  const content = e.classList.contains('alice') ? renderMd(t) : t;
+  e.innerHTML = e.querySelector('.sndr').outerHTML + content;
   const c = document.getElementById('msgs');
   c.scrollTop = c.scrollHeight;
+}
+
+function openFullscreen(src) {
+  document.getElementById('fullscreen-img').src = src;
+  document.getElementById('fullscreen-overlay').classList.add('open');
+}
+function closeFullscreen() {
+  document.getElementById('fullscreen-overlay').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFullscreen(); });
+
+async function toggleSeedPin() {
+  const btn = document.getElementById('seed-btn');
+  const pinned = btn.classList.contains('pinned');
+  const res = await fetch(pinned ? '/seed/unpin' : '/seed/pin', { method: 'POST' });
+  const d = await res.json();
+  btn.classList.toggle('pinned', d.pinned);
+  btn.title = d.pinned ? `Seed ${d.seed} pinned — face consistent` : 'Pin seed for face consistency';
 }
 
 async function _sttTranscribe(webmBlob, btn) {

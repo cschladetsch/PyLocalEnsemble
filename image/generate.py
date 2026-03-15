@@ -1,15 +1,18 @@
 """Image generation via the Forge/SD API."""
-import os, re, threading
+import json, os, re, threading
 import requests as req
 import config
 from utils import http_ok
 from image.forge import start_forge
 
 _gen_cancel = threading.Event()
+_last_seed  = -1   # seed used by the most recent successful generation
 
 
 def generate_image(prompt: str, appearance: str, negative_base: str,
-                   extra_negative: str = "", steps: int = None, cfg_scale: float = None):
+                   extra_negative: str = "", steps: int = None, cfg_scale: float = None,
+                   seed: int = -1):
+    global _last_seed
     forge_url = config.CFG["forge_url"]
     img_cfg   = config.CFG["image"]
     if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
@@ -43,7 +46,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + used_appearance + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
-    print(f"[image] steps={_steps}, cfg={_cfg}, size={img_cfg['width']}x{img_cfg['height']}")
+    print(f"[image] steps={_steps}, cfg={_cfg}, size={img_cfg['width']}x{img_cfg['height']}, seed={seed}")
 
     try:
         payload = {
@@ -54,6 +57,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             "height":          img_cfg["height"],
             "cfg_scale":       _cfg,
             "sampler_name":    img_cfg["sampler_name"],
+            "seed":            seed,
         }
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
@@ -64,7 +68,12 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             print(f"[image] Forge response (no images key): {str(data)[:300]}")
         imgs = data.get("images", [])
         if imgs:
-            print(f"[image] done — got image ({len(imgs[0])} b64 chars)")
+            try:
+                info = json.loads(data.get("info", "{}"))
+                _last_seed = info.get("seed", -1)
+            except Exception:
+                _last_seed = -1
+            print(f"[image] done — got image ({len(imgs[0])} b64 chars), seed={_last_seed}")
         else:
             print("[image] Forge returned no images")
         return imgs[0] if imgs else None

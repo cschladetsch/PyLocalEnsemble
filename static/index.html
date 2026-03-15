@@ -36,6 +36,7 @@
     <div class="ih">
       <span id="ih">Generated Scene</span>
       <div style="display:flex;gap:.4rem;align-items:center">
+        <button id="seed-btn" class="pd-toggle" onclick="toggleSeedPin()" title="Pin seed for face consistency">&#128274;</button>
         <button class="pd-toggle" onclick="clearImageHistory()" title="Clear image history" style="font-size:.6rem">Clear</button>
         <button id="pd-toggle" class="pd-toggle" onclick="togglePromptPanel()" title="Toggle prompt editor">+</button>
       </div>
@@ -57,6 +58,9 @@
       <button onclick="regenFromPrompt()">Regenerate</button>
     </div>
   </div>
+</div>
+<div id="fullscreen-overlay" onclick="closeFullscreen()">
+  <img id="fullscreen-img" alt="">
 </div>
 <script src="/static/app.js?v=9"></script>
 </body>

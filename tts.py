@@ -1,7 +1,21 @@
-import os, io, wave, base64
+import os, io, re, wave, base64
 from kokoro_onnx import Kokoro as _Kokoro
 import config
 from utils import step, ok, warn
+
+_SLOW_RE = re.compile(r'\b(whisper|murmur|softly|gently|slowly|breathe|hush|quiet)\b|\.{3}', re.I)
+_FAST_RE = re.compile(r'\b(gasp|scream|cry out|moan|desperately|urgently|panting)\b|!{2,}', re.I)
+
+
+def _emotion_speed(text: str, base: float) -> float:
+    """Adjust TTS speed based on mood signals in the reply text."""
+    slow = len(_SLOW_RE.findall(text))
+    fast = len(_FAST_RE.findall(text))
+    if slow > fast and slow >= 1:
+        return max(base * 0.82, 0.5)
+    if fast > slow and fast >= 2:
+        return min(base * 1.15, 1.4)
+    return base
 
 TTS    = None
 VOICES = ["af_nicole", "af_bella", "af_sky", "bf_emma", "bf_isabella"]
@@ -49,7 +63,7 @@ def tts_wav_b64(text: str) -> str:
     import numpy as np
     tts_cfg = config.CFG.get("tts", {})
     voice   = tts_cfg.get("voice", "af_nicole")
-    speed   = tts_cfg.get("speed", 0.85)
+    speed   = _emotion_speed(text, tts_cfg.get("speed", 0.85))
     effects = tts_cfg.get("effects", "")
     print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars: {text[:60]!r}{'...' if len(text)>60 else ''}")
     samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")

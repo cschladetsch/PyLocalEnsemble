@@ -115,6 +115,9 @@ def _clean_raw(raw: str) -> list:
 
 _FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "PROP", "EXTRA", "SETTING", "LIGHTING"]
 
+# Nudity states ordered from least to most undressed; used for floor logic
+_NUDITY_ORDER = ["clothed", "topless", "bottomless", "fully nude"]
+
 # Pattern → (action_tags_list, body_tag, camera_hint)
 # Multiple action tags reinforce the same pose from different angles in training data.
 # Checked against the user's command; first match wins.
@@ -277,7 +280,7 @@ def _build_tags(fields: dict, appearance: str) -> str:
 
 
 def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
-                      persona: str = "") -> str:
+                      persona: str = "", nudity_floor: str = "clothed") -> tuple:
     try:
         appearance_hint = (
             f"Character appearance (always include these): {appearance}"
@@ -358,12 +361,24 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             ])
             fields = _parse_template(raw)
 
+        # Apply nudity floor — never go less undressed than the current session state
+        nudity_key = fields.get("NUDITY", "clothed").lower()
+        try:
+            floor_idx   = _NUDITY_ORDER.index(nudity_floor.lower())
+            current_idx = _NUDITY_ORDER.index(nudity_key)
+            if current_idx < floor_idx:
+                print(f"[image] nudity floor: {nudity_key!r} → {nudity_floor!r}")
+                fields["NUDITY"] = nudity_floor
+                nudity_key = nudity_floor
+        except ValueError:
+            pass
+
         print(f"[image] scene fields: {fields}")
 
         tags = _build_tags(fields, appearance)
         print(f"[image] SD prompt: {tags}")
-        return tags
+        return tags, fields.get("NUDITY", "clothed")
 
     except Exception as e:
         print(f"[image] prompt extraction error: {e}")
-        return ""
+        return "", nudity_floor
