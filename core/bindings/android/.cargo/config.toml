@@ -1,0 +1,10 @@
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android26-clang"
+rustflags = ["-C", "link-arg=-L./prebuilt/arm64-v8a", "-C", "link-arg=-lonnxruntime"]
+
+[env]
+ORT_LIB_LOCATION = { value = "prebuilt/arm64-v8a", relative = true }
+ORT_STRATEGY = "system"
+
+[build]
+target = "aarch64-linux-android"

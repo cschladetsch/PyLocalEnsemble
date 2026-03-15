@@ -13,6 +13,10 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -37,6 +41,8 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
     }
+
+    sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 }
 
 dependencies {
@@ -52,9 +58,18 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
 
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
+    // sherpa-onnx AAR (STT) and Qualcomm QNN AAR (image gen) — place .aar/.jar files
+    // in app/libs/ and they will be picked up automatically.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
     debugImplementation("androidx.compose.ui:ui-tooling")
+}
+
+// Ensure the Rust core is built before the Android preBuild task so that
+// libalice_core.so is present in jniLibs when the APK is assembled.
+tasks.named("preBuild") {
+    dependsOn(":core-android:cargoBuildRelease")
 }

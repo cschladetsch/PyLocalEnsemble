@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "alice"
 include(":app")
+include(":core-android")
+project(":core-android").projectDir = File("../core/bindings/android")

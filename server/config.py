@@ -1,6 +1,6 @@
 import os, re, json, shutil
 
-ALICE_DIR     = os.path.dirname(os.path.abspath(__file__))
+ALICE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FORGE_DIR     = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
 FORGE_BAT     = os.path.join(FORGE_DIR, "webui.bat" if os.name == "nt" else "webui.sh")
 MODEL_DIR     = os.path.join(ALICE_DIR, "models")

@@ -1,0 +1,13 @@
+[package]
+name = "alice-core-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "alice_core_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+alice-core = { path = "../.." }
+pyo3 = { version = "0.21", features = ["extension-module"] }
+parking_lot = "0.12"

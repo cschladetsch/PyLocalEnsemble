@@ -1,0 +1,18 @@
+[workspace]
+members = [".", "bindings/python", "bindings/android"]
+resolver = "2"
+
+[package]
+name = "alice-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+llama-cpp-2 = "0.1"
+ort = { version = "2.0", features = ["load-dynamic"] }
+log = "0.4"
+parking_lot = "0.12"
+thiserror = "1"
