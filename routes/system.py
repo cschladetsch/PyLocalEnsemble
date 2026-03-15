@@ -47,12 +47,22 @@ async def delete_image(filename: str):
     return JSONResponse({"status": "deleted"})
 
 
+@router.get("/history")
+async def export_history():
+    return JSONResponse({"history": llm.history, "memory": llm.memory})
+
+
 @router.get("/info")
 async def info():
+    mem_cfg  = config.CFG.get("memory", config._DEFAULT_CONFIG["memory"])
+    max_hist = mem_cfg["max_history"]
+    n_msgs   = len(llm.history)
     return JSONResponse({
-        "name":        config.NAME,
-        "llm_ready":   llm.LLM_READY,
-        "stt_silence": config.CFG.get("stt_silence_seconds", 3),
+        "name":          config.NAME,
+        "llm_ready":     llm.LLM_READY,
+        "stt_silence":   config.CFG.get("stt_silence_seconds", 3),
+        "history_msgs":  n_msgs,
+        "history_max":   max_hist,
     })
 
 

@@ -16,6 +16,7 @@ _BASE_NEGATIVE   = config.CFG["negative_prompt"]
 _nudity_state    = "clothed"   # floor for SD nudity; persists across turns
 _character_seed  = -1          # -1 = random; set when seed is pinned
 _seed_pinned     = False
+last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
 
 
 # ── Auto-image heuristic ──────────────────────────────────────────────────────

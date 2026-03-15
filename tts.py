@@ -18,7 +18,10 @@ def _emotion_speed(text: str, base: float) -> float:
     return base
 
 TTS    = None
-VOICES = ["af_nicole", "af_bella", "af_sky", "bf_emma", "bf_isabella"]
+VOICES = ["af_nicole", "af_bella", "af_sarah", "af_sky",
+          "am_adam", "am_michael",
+          "bf_emma", "bf_isabella",
+          "bm_george", "bm_lewis"]
 
 
 def load_tts():
@@ -59,6 +62,24 @@ def _android_effect(samples, sr):
     return blended.astype(samples.dtype)
 
 
+def _cathedral_effect(samples, sr):
+    """Synthetic reverb — long exponential decay for a temple/cathedral resonance."""
+    import numpy as np
+    duration = 2.5          # seconds of tail
+    decay    = 5.0          # higher = shorter tail
+    n        = int(sr * duration)
+    t        = np.linspace(0, duration, n, dtype=np.float32)
+    rng      = np.random.default_rng(42)
+    ir       = (rng.standard_normal(n).astype(np.float32) * np.exp(-decay * t))
+    ir[0]    = 1.0          # preserve direct sound
+    reverb   = np.convolve(samples, ir, mode='full')[:len(samples)].astype(np.float32)
+    blended  = 0.55 * samples + 0.45 * reverb
+    peak = np.max(np.abs(samples))
+    if peak > 0:
+        blended *= peak / max(np.max(np.abs(blended)), 1e-6)
+    return blended.astype(samples.dtype)
+
+
 def tts_wav_b64(text: str) -> str:
     import numpy as np
     tts_cfg = config.CFG.get("tts", {})
@@ -69,6 +90,8 @@ def tts_wav_b64(text: str) -> str:
     samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")
     if effects == "android":
         samples = _android_effect(samples, sr)
+    elif effects == "cathedral":
+        samples = _cathedral_effect(samples, sr)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)

@@ -17,7 +17,9 @@
     <select id="voice-select" class="cb" onchange="switchVoice(this.value)" style="cursor:pointer" title="TTS voice"></select>
     <button class="cb" id="resay-btn" onclick="resay()" disabled>Re-say</button>
     <button class="cb" id="mute-btn" onclick="toggleMute()">Mute</button>
+    <button class="cb" onclick="exportHistory()" title="Export conversation as text">Export</button>
     <button class="cb" onclick="clearHistory()">Clear</button>
+    <span id="ctx-meter" style="font-size:.7rem;color:#888;min-width:3rem;text-align:right" title="Context usage">0/20</span>
   </div>
 </header>
 <div class="main">
@@ -37,6 +39,7 @@
       <span id="ih">Generated Scene</span>
       <div style="display:flex;gap:.4rem;align-items:center">
         <button id="seed-btn" class="pd-toggle" onclick="toggleSeedPin()" title="Pin seed for face consistency">&#128274;</button>
+        <button class="pd-toggle" onclick="reroll()" title="Re-roll: same prompt, new seed">&#8635;</button>
         <button class="pd-toggle" onclick="clearImageHistory()" title="Clear image history" style="font-size:.6rem">Clear</button>
         <button id="pd-toggle" class="pd-toggle" onclick="togglePromptPanel()" title="Toggle prompt editor">+</button>
       </div>

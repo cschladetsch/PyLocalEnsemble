@@ -71,6 +71,7 @@ async def image_from_history(body: ImageRequest):
             prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
             prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
 
+            state.last_sd_prompt = prompt
             img = image.generate_image(
                 prompt, state.ALICE_APPEARANCE, state.BASE_NEGATIVE,
                 extra_negative=extra_negative,
@@ -90,6 +91,26 @@ async def image_from_history(body: ImageRequest):
         import traceback
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/reroll")
+async def reroll():
+    """Re-generate with the same last prompt but a new random seed."""
+    if not state.last_sd_prompt:
+        return JSONResponse({"error": "No prompt to re-roll."}, status_code=400)
+    loop = asyncio.get_running_loop()
+    prompt = state.last_sd_prompt
+    def _do():
+        image._gen_cancel.clear()
+        img = image.generate_image(
+            prompt, state.ALICE_APPEARANCE, state.BASE_NEGATIVE,
+            seed=-1,
+        )
+        return state.save_generated_image(img) if img else None
+    url = await loop.run_in_executor(None, _do)
+    if url:
+        return JSONResponse({"url": url, "sd_prompt": prompt})
+    return JSONResponse({"error": "Generation failed."}, status_code=500)
 
 
 @router.post("/generate")

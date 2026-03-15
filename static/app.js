@@ -71,6 +71,7 @@ async function loadInfo() {
       setLLMReady(false);
       setTimeout(loadInfo, 2000); // poll until ready
     }
+    _updateContextMeter(d.history_msgs || 0, d.history_max || 20);
   } catch (e) { console.warn('Could not load info:', e); setTimeout(loadInfo, 2000); }
 }
 
@@ -89,6 +90,15 @@ function setLLMReady(ready) {
   }
   // mic is always enabled — STT works independently of the LLM
   if (mic) mic.disabled = false;
+}
+
+function _updateContextMeter(msgs, max) {
+  const el = document.getElementById('ctx-meter');
+  if (!el) return;
+  const pct = max > 0 ? Math.min(100, Math.round(msgs / max * 100)) : 0;
+  el.textContent = `${msgs}/${max}`;
+  el.title = `${pct}% of context used`;
+  el.style.color = pct >= 90 ? '#c08080' : pct >= 70 ? '#c0a060' : '#888';
 }
 
 loadInfo();
@@ -193,7 +203,11 @@ function startProgress() {
       const status = document.getElementById('img-status');
       if (fill)   fill.style.width = pct + '%';
       if (status) {
-        if (pct > 0)           status.textContent = `Generating... ${pct}%`;
+        const st = d.state || {};
+        const step = st.sampling_step || 0;
+        const total = st.sampling_steps || 0;
+        const stepStr = total > 0 ? ` (${step}/${total})` : '';
+        if (pct > 0)           status.textContent = `Generating... ${pct}%${stepStr}`;
         else if (_lastPct > 0) status.textContent = 'Finishing...';
       }
       _lastPct = pct;
@@ -436,6 +450,7 @@ async function _chatWith(msg) {
   chatAbort = null;
   enableAll();
   if (reply) { lastReplyText = reply; speak(reply); if (autoImage) triggerMedia('', true); }
+  loadInfo();
 }
 
 async function send() {
@@ -590,6 +605,44 @@ async function toggleMic() {
     console.warn('Mic error:', e);
     alert('Microphone access denied or unavailable.');
   }
+}
+
+async function reroll() {
+  await interrupt('reroll');
+  imgAbort = new AbortController();
+  disableAll();
+  document.getElementById('ic').innerHTML =
+    '<div class="ph gen" id="img-status">Re-rolling...</div>' +
+    '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
+  startProgress();
+  try {
+    const res = await fetch('/reroll', { method: 'POST', signal: imgAbort.signal });
+    const d = await res.json();
+    if (d.url) {
+      document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
+      setPrompt(d.sd_prompt);
+      saveImg(d.url, d.sd_prompt);
+    } else {
+      document.getElementById('ic').innerHTML = `<div class="ph">${d.error || 'No output.'}</div>`;
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError')
+      document.getElementById('ic').innerHTML = '<div class="ph">Error.</div>';
+  }
+  stopProgress();
+  imgAbort = null;
+  enableAll();
+}
+
+async function exportHistory() {
+  const res = await fetch('/history');
+  const d = await res.json();
+  const text = d.history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n') +
+    (d.memory ? `\n\n--- MEMORY ---\n${d.memory}` : '');
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(text);
+  a.download = `alice_chat_${new Date().toISOString().slice(0,16).replace('T','_')}.txt`;
+  a.click();
 }
 
 async function clearHistory() {
