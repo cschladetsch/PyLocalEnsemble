@@ -48,7 +48,7 @@ _DEFAULT_CONFIG = {
         "cfg_scale":    7,
         "sampler_name": "DPM++ SDE Karras",
         "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2), (perfect hands:1.3), (five fingers:1.2)",
-        "auto_every":   1,
+        "auto_every":   0,   # 0 = manual only; 1 = auto-generate on every turn
         "hires_fix":    True,
         "hires_scale":  1.5,
         "hires_steps":  15,

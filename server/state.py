@@ -67,7 +67,8 @@ def decay_nudity_state(user_msg: str) -> None:
 
 
 def should_auto_image(user_msg: str) -> bool:
-    return True  # generate a scene image on every chat turn
+    import config
+    return config.CFG.get("image", {}).get("auto_every", 0) > 0
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
