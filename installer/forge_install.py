@@ -49,6 +49,41 @@ def _find_forge_python() -> str:
     return ""
 
 
+_ADETAILER_REPO  = "https://github.com/Bing-su/adetailer"
+_HAND_MODEL_URL  = "https://huggingface.co/Bingsu/adetailer/resolve/main/hand_yolov8n.pt"
+_HAND_MODEL_NAME = "hand_yolov8n.pt"
+
+
+def install_adetailer():
+    """Clone the ADetailer extension and download the hand detection model."""
+    ext_dir   = os.path.join(FORGE_DIR, "extensions", "adetailer")
+    model_dir = os.path.join(FORGE_DIR, "models", "adetailer")
+    os.makedirs(model_dir, exist_ok=True)
+
+    if os.path.isdir(ext_dir):
+        ok("ADetailer extension already present")
+    else:
+        info("cloning ADetailer extension ...")
+        result = subprocess.run(["git", "clone", "--depth", "1", _ADETAILER_REPO, ext_dir])
+        if result.returncode != 0:
+            warn("Failed to clone ADetailer — hand repair will be unavailable.")
+            return
+        ok("ADetailer extension cloned")
+
+    dest = os.path.join(model_dir, _HAND_MODEL_NAME)
+    if os.path.exists(dest):
+        ok(f"ADetailer hand model already present: {_HAND_MODEL_NAME}")
+    else:
+        info(f"downloading ADetailer hand model ({_HAND_MODEL_NAME}, ~6 MB) ...")
+        try:
+            _download(_HAND_MODEL_URL, dest, _HAND_MODEL_NAME)
+            ok(f"ADetailer hand model ready: {_HAND_MODEL_NAME}")
+        except Exception as e:
+            warn(f"Failed to download hand model: {e}")
+            warn("Download manually from: " + _HAND_MODEL_URL)
+            warn(f"Place it in: {model_dir}")
+
+
 def install_forge(cfg: dict):
     heading("6/6", "Stable Diffusion Forge")
 
@@ -122,3 +157,5 @@ def install_forge(cfg: dict):
             _download(_RV_URL, dest, _RV_FILENAME)
             ok(f"checkpoint ready: {_RV_FILENAME}")
         cfg.setdefault("sd_checkpoint", _RV_FILENAME)
+
+    install_adetailer()
