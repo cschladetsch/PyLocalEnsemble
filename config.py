@@ -66,7 +66,7 @@ def resolve_path(p: str) -> str:
 
 
 def load_config() -> dict:
-    example = os.path.join(ALICE_DIR, "alice.example.json")
+    example = os.path.join(ALICE_DIR, "conf", "alice.example.json")
     if not os.path.exists(CONFIG_FILE) and os.path.exists(example):
         shutil.copy(example, CONFIG_FILE)
         print(f"        config: created {CONFIG_FILE} from example")
@@ -109,7 +109,7 @@ def load_personas(cfg: dict) -> dict:
         }
     }
     if not os.path.exists(PERSONAS_FILE):
-        example = os.path.join(ALICE_DIR, "personas.example.json")
+        example = os.path.join(ALICE_DIR, "conf", "personas.example.json")
         if os.path.exists(example):
             shutil.copy(example, PERSONAS_FILE)
             print(f"        config: created {PERSONAS_FILE} from example")

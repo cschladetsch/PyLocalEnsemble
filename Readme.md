@@ -7,7 +7,6 @@ A local AI companion with streaming chat, voice, mic input, and contextual image
 Powered by:
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) — local LLM inference via OpenAI-compatible server (GGUF, GPU-accelerated)
 - [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) — image generation
-- [Realistic Vision V5.1](https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE) — default image checkpoint (auto-downloaded)
 - [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx) — offline neural TTS
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — offline STT (Whisper small.en)
 
@@ -17,19 +16,20 @@ Powered by:
 
 | | Minimum | Recommended |
 |---|---------|-------------|
-| **OS** | Windows 10 | Windows 11 |
+| **OS** | Windows 10 / macOS 12 / Ubuntu 22.04 | Windows 11 / macOS 14 / Ubuntu 24.04 |
 | **Python** | 3.10 | 3.11–3.13 |
 | **Git** | Any | Latest |
 | **RAM** | 16 GB | 32 GB |
 | **VRAM** | 4 GB | 8 GB+ |
 | **Disk** | 20 GB free | 40 GB free |
-| **GPU** | NVIDIA or AMD (Vulkan) | RTX 2070 / RX 6700 or better |
+| **GPU** | NVIDIA or AMD (Vulkan) / Apple Silicon (Metal) | RTX 2070 / RX 6700 / M2 or better |
 
 > CPU-only mode works but LLM inference will be slow.
+> WSL2 on Windows 11 is also supported.
 
 ---
 
-## Installation &amp; Running
+## Installation & Running
 
 ```
 python alice.py
@@ -43,10 +43,10 @@ That's it. On first run, `alice.py` detects missing dependencies and runs `insta
 |------|------|------|
 | 1 | Python version check | — |
 | 2 | pip packages (`fastapi`, `uvicorn`, `kokoro-onnx`, `faster-whisper`, `av`, …) | ~500 MB |
-| 3 | llama-server binary (Vulkan build on Windows) | ~50 MB |
+| 3 | llama-server binary (platform-appropriate build) | ~50 MB |
 | 4 | LLM model — scans for existing GGUFs, or downloads default from HuggingFace | ~7 GB |
 | 5 | Kokoro TTS model and voices | ~80 MB |
-| 6 | Stable Diffusion Forge (git clone) + Realistic Vision V5.1 checkpoint | ~5 GB |
+| 6 | Stable Diffusion Forge (git clone) + checkpoint | ~5 GB |
 
 **Total first-install time: 15–45 minutes** depending on connection and hardware. Subsequent starts take ~30–60 seconds.
 
@@ -56,7 +56,7 @@ You can also run `install.py` directly at any time to re-run setup or add missin
 
 ## Configuration
 
-`install.py` creates `alice.json` from `alice.example.json` on first run. `alice.json` is gitignored — it is your personal config.
+`install.py` creates `alice.json` from `conf/alice.example.json` on first run. `alice.json` is gitignored — it is your personal config.
 
 Key settings:
 
@@ -72,11 +72,11 @@ Key settings:
 | `tts.speed` | `0.85` | TTS speed multiplier |
 | `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
-| `llama_server.ctx_size` | `2048` | Context window in tokens — increase for longer memory |
+| `llama_server.ctx_size` | `2048` | Context window in tokens |
 | `llama_url` | `"http://127.0.0.1:8080"` | llama-server URL (override with `LLAMA_URL` env var) |
 | `memory.max_history` | `16` | Compress history after this many messages |
 | `memory.keep_recent` | `8` | Messages kept after compression |
-| `memory.max_chars` | `1500` | Max chars in rolling memory summary — scale with `ctx_size` |
+| `memory.max_chars` | `1500` | Max chars in rolling memory summary |
 
 Restart `alice.py` after editing `alice.json`.
 
@@ -90,9 +90,17 @@ Restart `alice.py` after editing `alice.json`.
 |----------|-----|-------|
 | Windows | NVIDIA or AMD | Vulkan (universal) |
 | Windows fallback | CPU only | AVX2 |
-| macOS Apple Silicon | Metal | arm64 |
-| macOS Intel | Metal | x64 |
-| Linux | NVIDIA/CPU | Ubuntu x64 |
+| macOS Apple Silicon | Metal (auto) | arm64 |
+| macOS Intel | Metal (auto) | x64 |
+| Linux / WSL2 | NVIDIA CUDA | Ubuntu x64 |
+| Linux fallback | CPU only | Ubuntu x64 |
+
+Stable Diffusion Forge launch flags are set per-platform automatically:
+- **Windows** — `--cuda-malloc --xformers`
+- **macOS** — `--skip-torch-cuda-test` (Metal via MPS, auto-detected by Forge)
+- **Linux / WSL2** — `--xformers`
+
+Forge requires Python 3.10 or 3.11 for its virtualenv. `install.py` finds it automatically from PATH, Homebrew, or pyenv.
 
 ---
 
@@ -120,7 +128,17 @@ To use a different model: set `model_path` in `alice.json` and restart.
 
 ## Personas
 
-Create a `personas.json` file to define named personas. Switch between them using the dropdown in the header. Switching clears history and memory.
+Four personas are included out of the box. Switch between them using the dropdown in the header — switching clears history and memory.
+
+| Persona | Character |
+|---------|-----------|
+| Default | Alice — enigmatic, sensual, literary |
+| Egyptian Goddess | Nefertari — ancient, regal, divine |
+| Victorian Lady | Isabelle — aristocratic, wickedly composed |
+| Android | ARIA — synthetic, precise, curious |
+| Forest Witch | Morrigan — wild, primal, ancient |
+
+Add your own in `personas.json` (created from `conf/personas.example.json` on first run):
 
 ```json
 {
@@ -138,11 +156,11 @@ Create a `personas.json` file to define named personas. Switch between them usin
 Alice maintains a rolling memory so long conversations don't lose earlier context:
 
 - **History** is saved to `history.json` after each reply and reloaded on startup.
-- When history exceeds **16 messages**, the oldest 8 are summarised by the LLM into a brief paragraph and stored as `memory`.
+- When history exceeds **16 messages**, the oldest 8 are summarised by the LLM into a brief paragraph stored as `memory`.
 - That memory paragraph is prepended to the system prompt on every subsequent request.
 - The memory buffer is capped at **1500 characters** by default.
 
-**Why 1500 characters?** The memory string is injected directly into every system prompt, which counts against the context window. With the default `ctx_size = 2048` tokens, roughly 375 tokens (≈ 1500 chars at 4 chars/token) is a safe budget that leaves room for the system prompt itself, recent history, and the user's message. If you increase `ctx_size` — e.g. to 4096 or 8192 — raise `memory.max_chars` proportionally in `alice.json`.
+**Why 1500 characters?** The memory string is injected into every system prompt, counting against the context window. With the default `ctx_size = 2048` tokens, ~375 tokens (≈ 1500 chars) is a safe budget. If you increase `ctx_size`, raise `memory.max_chars` proportionally in `alice.json`.
 
 - **Clear** — the Clear button wipes history, memory, and `history.json`.
 - Memory is also cleared when switching personas or models.
@@ -159,7 +177,7 @@ Press **ESC** or click **Stop** to interrupt at any time.
 
 ### Microphone (push-to-talk)
 
-Click **Mic** to start recording. Click again to stop manually, or wait for the silence auto-stop (default 3 seconds, configurable via `stt_silence_seconds` in `alice.json`).
+Click **Mic** to start recording. Click again to stop manually, or wait for the silence auto-stop (default 3 seconds, configurable via `stt_silence_seconds`).
 
 The small arrow next to the Mic button opens a device selector — your chosen device is remembered across sessions.
 
@@ -181,6 +199,10 @@ Available voices: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (Britis
 
 The right panel shows the generated scene. Click **+** to open the prompt editor — edit the extracted SD prompt, adjust Steps/CFG sliders, and click **Regenerate**.
 
+Press **Delete** while an image is displayed to remove it from disk and history.
+
+Thumbnail strips at the bottom show the image history for the session. Click any thumbnail to view it.
+
 ### Manual image generation
 
 Use the **Image** button or type a command:
@@ -200,25 +222,51 @@ The leftmost dropdown lists models available from the llama-server. To add model
 
 ```
 alice/
-├── alice.py          ← FastAPI routes + startup (imports modules below)
-├── config.py         ← paths, defaults, load/save config, personas
-├── llm.py            ← llama-server lifecycle, chat, history, memory
-├── tts.py            ← Kokoro TTS load + synthesis
-├── stt.py            ← Whisper STT load + transcription pipeline
-├── image.py          ← SD Forge lifecycle, prompt extraction, generation
-├── utils.py          ← step/ok/warn, http_ok, wait_for
-├── install.py        ← one-time installer (run once before alice.py)
-├── alice.json        ← your personal config (gitignored)
-├── alice.example.json             ← SFW reference config (committed)
-├── personas.json                  ← your personas (gitignored)
-├── history.json                   ← conversation history (auto-created, gitignored)
-├── models/                        ← GGUF models (gitignored)
-│   └── tts/                       ← Kokoro model files (auto-downloaded by install.py)
-├── llama-cpp/                     ← llama-server binary (gitignored)
+├── alice.py                  ← entry point — FastAPI app + startup
+├── config.py                 ← paths, defaults, load/save config, personas
+├── llm.py                    ← llama-server lifecycle, chat, history, memory
+├── tts.py                    ← Kokoro TTS load + synthesis
+├── stt.py                    ← Whisper STT load + transcription
+├── utils.py                  ← step/ok/warn, http_ok, wait_for, is_wsl
+├── install.py                ← installer entry point (thin orchestrator)
+│
+├── image/                    ← image generation package
+│   ├── prompt.py             ← SD tag utilities + LLM prompt extraction
+│   ├── forge.py              ← Forge process lifecycle + Python detection
+│   └── generate.py           ← txt2img API call, nudity/clothing handling
+│
+├── installer/                ← installer steps package
+│   ├── helpers.py            ← Spinner, download utils, shared constants
+│   ├── packages.py           ← step 1-2: Python check + pip install
+│   ├── llama.py              ← step 3: llama-server download
+│   ├── model.py              ← step 4: GGUF model selection + download
+│   ├── tts_install.py        ← step 5: Kokoro TTS model download
+│   └── forge_install.py      ← step 6: Forge clone + checkpoint download
+│
+├── conf/                     ← example / template config files (committed)
+│   ├── alice.example.json
+│   └── personas.example.json
+│
+├── static/                   ← web UI
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── outputs/              ← generated images (gitignored)
+│
+├── tests/                    ← pytest test suite
+│   ├── conftest.py
+│   ├── test_api.py
+│   ├── test_config.py
+│   ├── test_image_utils.py
+│   └── test_install.py
+│
+├── alice.json                ← your personal config (gitignored)
+├── personas.json             ← your personas (gitignored)
+├── history.json              ← conversation history (auto-created, gitignored)
+├── models/                   ← GGUF models (gitignored)
+│   └── tts/                  ← Kokoro model files
+├── llama-cpp/                ← llama-server binary (gitignored)
 └── stable-diffusion-webui-forge/  ← auto-cloned by install.py (gitignored)
-    └── models/
-        └── Stable-diffusion/
-            └── Realistic_Vision_V5.1_fp16-no-ema.safetensors
 ```
 
 ---
@@ -239,36 +287,46 @@ alice/
 
 ```mermaid
 graph TD
-    subgraph App ["alice.py — routes + startup"]
+    subgraph App ["alice.py — entry point"]
         Routes["FastAPI routes\n/chat /image /tts /stt …"]
     end
 
-    subgraph Modules ["Python modules"]
+    subgraph Core ["Core modules"]
         Config["config.py\npaths · defaults · load/save · personas"]
         LLM["llm.py\nllama-server · chat · history · memory"]
         TTS["tts.py\nKokoro load + synthesis"]
         STT["stt.py\nWhisper load + transcription"]
-        Image["image.py\nForge · prompt extraction · generation"]
-        Utils["utils.py\nstep · ok · warn · http_ok · wait_for"]
+        Utils["utils.py\nstep · ok · warn · http_ok · is_wsl"]
+    end
+
+    subgraph ImagePkg ["image/ package"]
+        Prompt["prompt.py\nclean_tags · extract_sd_prompt"]
+        Forge["forge.py\nstart_forge · set_forge_model"]
+        Generate["generate.py\ngenerate_image · nudity handling"]
+    end
+
+    subgraph InstallPkg ["installer/ package"]
+        Helpers["helpers.py\nSpinner · _download · constants"]
+        Steps["packages · llama · model\ntts_install · forge_install"]
     end
 
     subgraph External ["External processes (GPU)"]
         LlamaServer["llama-server :8080\nOpenAI-compatible API"]
-        Forge["SD Forge :7860\nStable Diffusion"]
+        ForgeProc["SD Forge :7860\nStable Diffusion"]
     end
 
     Routes --> Config
     Routes --> LLM
     Routes --> TTS
     Routes --> STT
-    Routes --> Image
+    Routes --> ImagePkg
+    ImagePkg --> LLM
+    ImagePkg --> Utils
     LLM --> Utils
-    TTS --> Utils
-    STT --> Utils
-    Image --> Utils
-    Image --> LLM
     LLM --> LlamaServer
-    Image --> Forge
+    Forge --> ForgeProc
+    Generate --> ForgeProc
+    Steps --> Helpers
 ```
 
 ### Request flow — chat turn
@@ -293,11 +351,11 @@ sequenceDiagram
     K-->>B: WAV audio (base64)
     B-->>U: speaks reply
 
-    A->>L: extract SD prompt from last 6 messages
+    A->>L: extract SD prompt from last 8 messages
     L-->>A: image prompt tags
     A->>F: POST /sdapi/v1/txt2img
     F-->>A: base64 image
-    A-->>B: image event
+    A-->>B: image URL
     B-->>U: scene image shown
 ```
 
@@ -337,6 +395,16 @@ flowchart TD
 
 ---
 
+## Testing
+
+```
+python -m pytest tests/ -v
+```
+
+39 tests covering config loading, image tag utilities, installer asset selection, and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
+
+---
+
 ## Troubleshooting
 
 ### "Run install.py first" on startup
@@ -360,6 +428,15 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 - Forge starts in a separate console window; check it for errors
 - Forge auto-restarts on the next image request if it died
 
+### Forge fails to start (macOS / Linux)
+- Forge requires Python 3.10 or 3.11 — install via `brew install python@3.11` or `apt install python3.11`
+- On macOS, Forge uses Metal (MPS) automatically — no CUDA needed
+
+### WSL2 (Windows Subsystem for Linux)
+- The browser opens automatically via `explorer.exe`
+- If `localhost:8000` doesn't load in your Windows browser, use the WSL2 IP printed at startup
+- For GPU acceleration, install the [NVIDIA CUDA WSL2 driver](https://developer.nvidia.com/cuda/wsl) on the Windows host
+
 ### Whisper transcribes nothing / "Could not hear anything"
 - Check the mic device selector next to the Mic button
-- Ensure the correct input device is selected and not muted in Windows sound settings
+- Ensure the correct input device is selected and not muted in system sound settings

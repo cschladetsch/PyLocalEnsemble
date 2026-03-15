@@ -12,6 +12,7 @@ Key features:
 - Split UI: chat + voice on left, generated scene on right
 - Persona system — swap character, appearance, and system prompt at runtime
 - Configurable via `alice.json`
+- Cross-platform: Windows 10/11, macOS, Linux, WSL2
 
 ## Why It's Different
 
@@ -19,7 +20,7 @@ Key features:
 - **Privacy by design** — suitable for users who won't trust cloud providers
 - **One product** — chat, voice, STT, and image in a single interface
 - **No ongoing subscription to an AI provider**
-- **Works on NVIDIA and AMD GPUs** via Vulkan backend
+- **Works on NVIDIA, AMD (Vulkan), and Apple Silicon (Metal)**
 
 The target user is already running local AI tools. They understand LLMs and Stable Diffusion. They want an experience, not a chatbot.
 
@@ -29,17 +30,27 @@ The target user is already running local AI tools. They understand LLMs and Stab
 
 ```mermaid
 graph TD
-    subgraph App ["alice.py — routes + startup"]
+    subgraph App ["alice.py — entry point"]
         Routes["FastAPI :8000\nroutes + startup"]
     end
 
-    subgraph Modules ["Python modules"]
+    subgraph Core ["Core modules"]
         Config["config.py"]
         LLM["llm.py"]
         TTS_M["tts.py"]
         STT_M["stt.py"]
-        Image_M["image.py"]
         Utils["utils.py"]
+    end
+
+    subgraph ImagePkg ["image/ package"]
+        Prompt["prompt.py"]
+        Forge_["forge.py"]
+        Generate["generate.py"]
+    end
+
+    subgraph InstallPkg ["installer/ package"]
+        Helpers["helpers.py"]
+        Steps["packages · llama · model\ntts_install · forge_install"]
     end
 
     subgraph GPU ["External GPU Processes"]
@@ -52,23 +63,15 @@ graph TD
         Whisper["faster-whisper\nSTT"]
     end
 
-    subgraph Install ["install.py (run once)"]
-        Pip["pip packages"]
-        BinaryDl["llama-server binary"]
-        ModelDl["GGUF model"]
-        TTSDl["Kokoro models"]
-        ForgeSetup["git clone Forge\n+ checkpoint"]
-    end
-
-    Routes --> Config
-    Routes --> LLM
-    Routes --> TTS_M
-    Routes --> STT_M
-    Routes --> Image_M
+    Routes --> Core
+    Routes --> ImagePkg
+    ImagePkg --> LLM
     LLM --> LlamaServer
-    Image_M --> Forge
+    Forge_ --> Forge
+    Generate --> Forge
     TTS_M --> Kokoro
     STT_M --> Whisper
+    Steps --> Helpers
 ```
 
 ---
@@ -81,24 +84,30 @@ gantt
     title Alice Development Phases
 
     section Phase 1 · Foundation
-    llama.cpp backend (Vulkan)     :done, 2025-11, 2026-01
-    STT mic input                  :done, 2026-01, 2026-02
-    Config / persona system        :done, 2026-01, 2026-02
-    install.py one-command setup   :done, 2026-02, 2026-03
+    llama.cpp backend (Vulkan)          :done, 2025-11, 2026-01
+    STT mic input                       :done, 2026-01, 2026-02
+    Config / persona system             :done, 2026-01, 2026-02
+    install.py one-command setup        :done, 2026-02, 2026-03
     Module split + config-driven memory :done, 2026-03, 2026-03
 
+    section Phase 1b · Quality
+    Cross-platform (macOS, Linux, WSL2) :done, 2026-03, 2026-03
+    Refactor image/ + installer/ pkgs   :done, 2026-03, 2026-03
+    Test suite (39 tests)               :done, 2026-03, 2026-03
+    Built-in personas + image fixes     :done, 2026-03, 2026-03
+
     section Phase 2 · Distribution
-    Packaging / release zip        :active, 2026-03, 2026-04
-    Landing page                   :2026-04, 2026-05
-    Gumroad listing                :2026-04, 2026-05
+    Packaging / release zip             :active, 2026-03, 2026-04
+    Landing page                        :2026-04, 2026-05
+    Gumroad listing                     :2026-04, 2026-05
 
     section Phase 3 · Performance
-    LCM / Lightning LoRA           :2026-05, 2026-06
-    Streaming image preview        :2026-05, 2026-06
+    LCM / Lightning LoRA                :2026-05, 2026-06
+    Streaming image preview             :2026-05, 2026-06
 
     section Phase 4 · UX
-    Mobile-friendly layout         :2026-06, 2026-07
-    LoRA / style picker            :2026-06, 2026-08
+    Mobile-friendly layout              :2026-06, 2026-07
+    LoRA / style picker                 :2026-06, 2026-08
 ```
 
 ### Phase 1 — Foundation (complete)
@@ -106,13 +115,29 @@ gantt
 - [x] Switch LLM backend from Ollama to llama.cpp server (Vulkan, cross-GPU)
 - [x] OpenAI-compatible API (`/v1/chat/completions`, streaming SSE)
 - [x] STT push-to-talk with device selector, silence auto-stop, auto-send
-- [x] Config hygiene — `alice.example.json` in repo, personal config gitignored
+- [x] Config hygiene — `conf/alice.example.json` in repo, personal config gitignored
 - [x] Persona system with runtime switching
 - [x] Rolling conversation memory with LLM-based compression
 - [x] `install.py` — one command sets up everything (llama-server, model, TTS, Forge)
 - [x] `alice.py` — assumes installed, just runs
 - [x] Module split — `config`, `llm`, `tts`, `stt`, `image`, `utils`
-- [x] Memory limits configurable in `alice.json` (`memory.max_history`, `memory.keep_recent`, `memory.max_chars`)
+- [x] Memory limits configurable in `alice.json`
+
+### Phase 1b — Quality (complete)
+
+- [x] Cross-platform support — macOS (Metal/MPS), Linux, WSL2, Windows
+- [x] Forge launch flags per platform (`--cuda-malloc` Windows, `--skip-torch-cuda-test` macOS, `--xformers` Linux)
+- [x] Forge Python detection: 3.10 or 3.11 from PATH / Homebrew / pyenv on all platforms
+- [x] WSL2: browser opens via `explorer.exe`/`wslview`, IP hint printed at startup, `chmod +x` on llama-server
+- [x] `image/` package — split into `prompt.py`, `forge.py`, `generate.py`
+- [x] `installer/` package — split into `helpers`, `packages`, `llama`, `model`, `tts_install`, `forge_install`
+- [x] `conf/` directory — example configs out of root
+- [x] Test suite — 39 tests across config, image utils, installer, and API endpoints
+- [x] 4 built-in personas: Egyptian Goddess, Victorian Lady, Android, Forest Witch
+- [x] Image fix: nude characters no longer render clothed (clothing stripped from appearance when nudity detected)
+- [x] Image fix: `/image` no longer returns 400 after persona switch (history cleared)
+- [x] Delete key removes current image from disk and session history
+- [x] `clean_tags` correctly prefers weighted SD tags over plain duplicates
 
 ### Phase 2 — Distribution
 
@@ -144,7 +169,7 @@ Current image generation: ~30–60 s on RTX 2070 (8 GB VRAM).
 flowchart LR
     Dev([Developer\nalias identity]) -->|upload zip| Gumroad
     Gumroad -->|download link| Buyer
-    Buyer -->|python install.py| Local["Local machine\nno cloud"]
+    Buyer -->|python alice.py| Local["Local machine\nno cloud"]
     Dev -->|demo post| Reddit["r/LocalLLaMA\nr/StableDiffusion"]
     Reddit -->|organic traffic| Gumroad
 ```
@@ -159,8 +184,6 @@ Alice must be developed, sold, and supported under a separate identity to protec
 - No cross-linking to real LinkedIn, GitHub, or professional identity
 - Alias Reddit account for community engagement
 
-The tech stack (llama.cpp, Forge, FastAPI, Python) is generic and leaves no fingerprints.
-
 ---
 
 ## Pricing
@@ -170,8 +193,6 @@ The tech stack (llama.cpp, Forge, FastAPI, Python) is generic and leaves no fing
 
 Rationale: the target audience is accustomed to paying for this category of software. $25 is an impulse buy. Underpricing signals low quality.
 
-A free tier with limitations (capped personas, watermarked output) can drive paid conversions later.
-
 ---
 
 ## Summary
@@ -180,10 +201,11 @@ A free tier with limitations (capped personas, watermarked output) can drive pai
 |---|---|
 | Product | Local AI companion — chat + voice + STT + image |
 | Stack | llama.cpp, Stable Diffusion Forge, FastAPI, HTML/JS |
-| GPU | NVIDIA and AMD via Vulkan |
+| GPU | NVIDIA and AMD (Vulkan), Apple Silicon (Metal) |
+| Platform | Windows, macOS, Linux, WSL2 |
 | Price | $25 one-time |
 | Platform | Gumroad (alias) |
 | Distribution | Reddit organic |
 | Identity | Fully separated alias |
-| Current status | Working — modular, install.py complete |
+| Current status | Working — cross-platform, modular, tested |
 | Launch blocker | Packaging + Gumroad listing |
