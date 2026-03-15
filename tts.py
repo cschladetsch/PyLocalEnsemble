@@ -28,13 +28,33 @@ def load_tts():
         warn(f"TTS failed to load: {e} — audio will be disabled.")
 
 
+def _android_effect(samples, sr):
+    """Ring modulation + mild overdrive for a robotic voice character."""
+    import numpy as np
+    t        = np.arange(len(samples)) / sr
+    carrier  = np.sin(2 * np.pi * 60 * t)   # 60 Hz buzz
+    ring_mod = samples * carrier
+    # Blend: 40% dry + 60% ring-modulated
+    blended  = 0.4 * samples + 0.6 * ring_mod
+    # Mild overdrive — soft-clip to add harmonics
+    blended  = np.tanh(blended * 1.8) / np.tanh(np.float32(1.8))
+    # Normalise to original peak
+    peak = np.max(np.abs(samples))
+    if peak > 0:
+        blended *= peak / max(np.max(np.abs(blended)), 1e-6)
+    return blended.astype(samples.dtype)
+
+
 def tts_wav_b64(text: str) -> str:
     import numpy as np
     tts_cfg = config.CFG.get("tts", {})
     voice   = tts_cfg.get("voice", "af_nicole")
     speed   = tts_cfg.get("speed", 0.85)
-    print(f"[tts] voice={voice}, speed={speed}, {len(text)} chars: {text[:60]!r}{'...' if len(text)>60 else ''}")
+    effects = tts_cfg.get("effects", "")
+    print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars: {text[:60]!r}{'...' if len(text)>60 else ''}")
     samples, sr = TTS.create(text[:600], voice=voice, speed=speed, lang="en-us")
+    if effects == "android":
+        samples = _android_effect(samples, sr)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)

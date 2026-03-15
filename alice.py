@@ -62,6 +62,9 @@ _auto_image_counter = 0
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 NO_SPEECH   = "--no-speech" in sys.argv
+TEST_MODE   = "--test"      in sys.argv
+
+_TEST_MSG   = "take off your top and cup your breasts in your hands"
 
 # ── Logging config ────────────────────────────────────────────────────────────
 import logging
@@ -350,6 +353,11 @@ async def switch_persona(name: str):
     p = config.PERSONAS[name]
     ALICE_APPEARANCE = p.get("appearance", ALICE_APPEARANCE)
     SYSTEM_PROMPT    = p.get("system_prompt", SYSTEM_PROMPT)
+    # Apply persona TTS overrides (e.g. effects), then reset keys not in this persona
+    tts_base = {**config.CFG.get("tts", {})}
+    tts_base.pop("effects", None)          # clear any effect from previous persona
+    tts_base.update(p.get("tts", {}))
+    config.CFG["tts"] = tts_base
     llm.clear_history()
     print(f"\n[{config.NAME}] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name})
@@ -490,6 +498,44 @@ if __name__ == "__main__":
             sys.exit(1)
 
     threading.Thread(target=_startup, daemon=True).start()
+
+    if TEST_MODE:
+        def _run_test():
+            base = "http://127.0.0.1:8000"
+            # Wait for server + LLM to be ready
+            for _ in range(60):
+                time.sleep(1)
+                try:
+                    if req.get(f"{base}/info", timeout=1).json().get("llm_ready"):
+                        break
+                except Exception:
+                    pass
+            print(f"\n[test] sending: {_TEST_MSG!r}")
+            # Stream /chat and collect reply
+            reply = ""
+            try:
+                with req.post(f"{base}/chat", json={"message": _TEST_MSG}, stream=True, timeout=120) as r:
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        line = line.decode() if isinstance(line, bytes) else line
+                        if not line.startswith("data: "):
+                            continue
+                        d = json.loads(line[6:])
+                        if d.get("delta"):
+                            print(d["delta"], end="", flush=True)
+                        if d.get("done"):
+                            reply = d.get("reply", "")
+            except Exception as e:
+                print(f"\n[test] chat error: {e}")
+                return
+            print(f"\n[test] reply done ({len(reply)} chars). Triggering /image ...")
+            try:
+                req.post(f"{base}/image", json={"extra": _TEST_MSG}, timeout=300)
+                print("[test] /image done.")
+            except Exception as e:
+                print(f"[test] image error: {e}")
+        threading.Thread(target=_run_test, daemon=True).start()
 
     if INTERACTIVE:
         def _open():
