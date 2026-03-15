@@ -68,7 +68,9 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                     "covered chest, fabric on chest, " + negative)
 
     used_appearance = clean_appearance if is_explicit else appearance
-    full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + used_appearance + ", " + img_cfg["suffix"]
+    # Appearance first — SD attention weights earlier tokens more heavily, so character
+    # features (face, hair, eyes) must lead the prompt to stay consistent across turns.
+    full_prompt = ("nsfw, " if is_explicit else "") + used_appearance + ", " + prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
     print(f"[image] steps={_steps}, cfg={_cfg}, size={img_cfg['width']}x{img_cfg['height']}, seed={seed}")
@@ -97,21 +99,26 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
             payload["override_settings"] = {"CLIP_stop_at_last_layers": clip_skip}
+        ad_models = []
+        if img_cfg.get("adetailer_face"):
+            ad_models.append({
+                "ad_model":                       "face_yolov8n.pt",
+                "ad_confidence":                  0.3,
+                "ad_denoising_strength":          0.35,
+                "ad_inpaint_only_masked":         True,
+                "ad_inpaint_only_masked_padding": 32,
+            })
         if img_cfg.get("adetailer_hands"):
+            ad_models.append({
+                "ad_model":                       "hand_yolov8n.pt",
+                "ad_confidence":                  0.3,
+                "ad_denoising_strength":          0.4,
+                "ad_inpaint_only_masked":         True,
+                "ad_inpaint_only_masked_padding": 32,
+            })
+        if ad_models:
             payload["alwayson_scripts"] = {
-                "ADetailer": {
-                    "args": [
-                        True,   # enabled
-                        False,  # skip img2img
-                        {
-                            "ad_model":                    "hand_yolov8n.pt",
-                            "ad_confidence":               0.3,
-                            "ad_denoising_strength":       0.4,
-                            "ad_inpaint_only_masked":      True,
-                            "ad_inpaint_only_masked_padding": 32,
-                        },
-                    ]
-                }
+                "ADetailer": {"args": [True, False] + ad_models}
             }
         r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         data = r.json()

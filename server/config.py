@@ -54,6 +54,8 @@ _DEFAULT_CONFIG = {
         "hires_steps":  15,
         "hires_denoising": 0.45,
         "hires_upscaler": "Latent",
+        "auto_pin_seed":  True,   # pin seed after first gen so the face stays consistent
+        "adetailer_face": True,   # run ADetailer face pass for sharper consistent faces
     },
     "demo": {
         "user_name":    "Christian",

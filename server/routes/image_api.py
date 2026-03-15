@@ -92,6 +92,12 @@ async def image_from_history(body: ImageRequest):
                 extra_negative=extra_negative,
                 seed=state._character_seed,
             )
+            # Auto-pin seed after first generation so the character face stays consistent
+            if img and config.CFG["image"].get("auto_pin_seed", True):
+                if not state._seed_pinned and state.last_seed > 0:
+                    state._character_seed = state.last_seed
+                    state._seed_pinned    = True
+                    print(f"[seed] auto-pinned {state._character_seed} for character consistency")
             url = state.save_generated_image(img) if img else None
             return prompt, url
 
