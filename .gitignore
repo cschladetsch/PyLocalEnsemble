@@ -8,6 +8,7 @@ personas.json
 /models
 history.json
 /static/outputs/
+/server/static/outputs/
 __pycache__/
 *.pyc
 /llama-cpp
