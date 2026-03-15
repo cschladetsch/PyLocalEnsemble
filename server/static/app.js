@@ -301,7 +301,7 @@ async function deleteActiveImage() {
 }
 
 async function interrupt(reason) {
-  if (reason === 'user' && _demoMode) stopDemo();
+  if (reason === 'user' && _demoMode) { _demoSkip = true; }  // Skip current turn, don't stop demo
   _stopTts();
   if (chatAbort) {
     console.log('Aborting chat:', reason);
@@ -729,9 +729,15 @@ async function demoLoop() {
     const r = await fetch(`/demo/prompt?turn=${_demoTurn}`);
     const d = await r.json();
     if (!_demoMode) return;
-    if (d.error) { console.warn('[demo] prompt error:', d.error); stopDemo(); return; }
+    if (_demoPaused) { demoLoop(); return; }
+    if (d.error) {
+      console.warn('[demo] prompt error:', d.error);
+      // Retry after a short delay rather than stopping demo entirely
+      await new Promise(r => setTimeout(r, 3000));
+      demoLoop(); return;
+    }
     const msg = d.prompt;
-    if (!msg) { stopDemo(); return; }
+    if (!msg) { demoLoop(); return; }
 
     // Typing indicator — brief pause then reveal message
     const typingId = addMsg('user', DEMO_USER_NAME, '<span class="gen dots">typing</span>');
@@ -740,6 +746,7 @@ async function demoLoop() {
       await new Promise(r => setTimeout(r, typingDelay));
     }
     if (!_demoMode) return;
+    if (_demoPaused) { updMsg(typingId, '…'); demoLoop(); return; }
     updMsg(typingId, msg);
     lastUserMsg = msg;
 
@@ -750,11 +757,14 @@ async function demoLoop() {
     await _waitForTts(userTtsGen);
 
     if (!_demoMode) return;
+    // Don't start a new LLM call while user's message is being processed
+    if (_demoPaused) { demoLoop(); return; }
 
     // Send through the full chat pipeline (LLM reply + Alice TTS + image)
     await _chatWith(msg);
 
     if (!_demoMode) return;
+    if (_demoPaused) { demoLoop(); return; }
 
     // _chatWith fires speak(reply) synchronously calling _stopTts() → _ttsGen++
     const aliceTtsGen = _ttsGen;
@@ -768,15 +778,21 @@ async function demoLoop() {
     _updateDemoBtn();
 
     // Variable pause 1.5–4s before next turn (skipped if user pressed Skip)
-    if (!_demoSkip) {
+    if (!_demoSkip && !_demoPaused) {
       const pause = 1500 + Math.random() * 2500;
       await new Promise(resolve => { _demoTimer = setTimeout(resolve, pause); });
       _demoTimer = null;
     }
     demoLoop();
   } catch (e) {
-    console.warn('[demo] loop error:', e);
-    stopDemo();
+    // AbortError is expected when a turn is interrupted — just restart the loop
+    if (e.name === 'AbortError' || e.name === 'TypeError') {
+      console.log('[demo] turn interrupted, restarting loop');
+      if (_demoMode) setTimeout(demoLoop, 500);
+    } else {
+      console.warn('[demo] loop error:', e);
+      stopDemo();
+    }
   }
 }
 
