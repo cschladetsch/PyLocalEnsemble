@@ -111,9 +111,6 @@ def tts_wav_b64(text: str) -> str:
     voice    = tts_cfg.get("voice", "af_nicole")
     speed    = _emotion_speed(text, tts_cfg.get("speed", 0.85))
     effects  = tts_cfg.get("effects", "")
-    max_chars = tts_cfg.get("max_chars", 1800)
-
-    text = text[:max_chars]
     print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars")
 
     chunks = _sentence_chunks(text, max_chars=300)

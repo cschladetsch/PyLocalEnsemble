@@ -35,9 +35,8 @@ _DEFAULT_CONFIG = {
         "threads":      8,
     },
     "tts": {
-        "voice":     "af_nicole",
-        "speed":     0.85,
-        "max_chars": 1800,
+        "voice": "af_nicole",
+        "speed": 0.85,
     },
     "image": {
         "steps":        25,
