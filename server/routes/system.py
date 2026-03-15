@@ -133,28 +133,34 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
     )
     stage_label, stage_hint = _demo_stage(turn)
 
-    # Lead with the authoritative persona definitions so history can't override them
-    her_persona  = state.SYSTEM_PROMPT[:800]
-    last_reply   = next((m["content"] for m in reversed(recent) if m["role"] == "assistant"), None)
+    # Lead with authoritative persona definitions — these override anything in history
+    her_persona = state.SYSTEM_PROMPT[:800]
+
+    # Label history with real names so the model understands who said what
+    def _label(m):
+        name = user_name if m["role"] == "user" else persona_name
+        return f"{name}: {m['content']}"
+
+    context = "\n".join(_label(m) for m in recent) if recent else "(no conversation yet)"
+
+    last_reply = next((m["content"] for m in reversed(recent) if m["role"] == "assistant"), None)
     last_reply_anchor = (
-        f'\n\nHer last reply (react to this directly):\n"{last_reply[:600]}"'
+        f'\n\n{persona_name} just said:\n"{last_reply[:600]}"\nReact to this directly.'
         if last_reply else ""
     )
 
     system = (
-        f"## WHO SHE IS — treat this as ground truth, overriding anything in the conversation history:\n"
-        f"{her_persona}\n\n"
-        f"## WHO {user_name.upper()} IS:\n"
-        f"{user_persona_desc}\n\n"
-        f"## YOUR TASK:\n"
-        f"Write ONE short message (1–2 sentences) that {user_name} would say next to {persona_name}.\n"
+        f"## CURRENT PERSONA — treat this as ground truth; ignore any conflicting character "
+        f"traits from the conversation history:\n{her_persona}\n\n"
+        f"## {user_name.upper()}:\n{user_persona_desc}\n\n"
+        f"## TASK:\n"
+        f"Write ONE short message (1–2 sentences) that {user_name} says next to {persona_name}.\n"
         f"Conversation stage: {stage_label}. {stage_hint}\n"
-        f"React to what {persona_name} just said — pick up a specific word, image, or feeling.\n"
-        f"Sometimes ask a question; sometimes make a statement, observation, or compliment.\n"
-        f"Output ONLY the message — no quotes, no name prefix, no explanation."
+        f"Build on what {persona_name} just said — reference something specific from her last reply.\n"
+        f"Vary form: sometimes a question, sometimes an observation, statement, or compliment.\n"
+        f"Output ONLY {user_name}'s message — no name prefix, no quotes, no explanation."
     )
 
-    context = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else "(no conversation yet)"
     messages = [
         {"role": "system", "content": system},
         {"role": "user",   "content": f"Conversation so far:\n{context}{last_reply_anchor}\n\nWrite {user_name}'s next message:"},
