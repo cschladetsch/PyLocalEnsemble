@@ -46,6 +46,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import llm
+import state
 import tts
 import image
 
@@ -123,6 +124,9 @@ app.include_router(system_router)
 def _startup():
     try:
         llm.load_llm()
+        # Initialise persona key so history mismatch detection works on first load
+        if not state._active_persona_key:
+            state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
         llm.load_history()
         if not NO_SPEECH:
             tts.load_tts()

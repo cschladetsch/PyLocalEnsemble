@@ -1,6 +1,7 @@
 import os, json, re, time, threading, subprocess, shutil
 import requests as req
 import config
+import state
 from utils import step, ok, warn, http_ok
 
 LLM_READY = False
@@ -139,7 +140,11 @@ def llm_chat(messages: list) -> str:
 def save_history():
     try:
         with open(config.HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump({"history": history, "memory": memory}, f, ensure_ascii=False)
+            json.dump({
+                "history":      history,
+                "memory":       memory,
+                "persona_key":  state._active_persona_key,
+            }, f, ensure_ascii=False)
     except Exception as e:
         warn(f"Could not save history: {e}")
 
@@ -151,6 +156,12 @@ def load_history():
     try:
         with open(config.HISTORY_FILE, encoding="utf-8") as f:
             data = json.load(f)
+        saved_persona = data.get("persona_key", "")
+        current_persona = state._active_persona_key
+        if saved_persona and current_persona and saved_persona != current_persona:
+            warn(f"History was for persona '{saved_persona}', current is '{current_persona}' — discarding.")
+            os.remove(config.HISTORY_FILE)
+            return
         history.extend(data.get("history", []))
         memory = data.get("memory", "")
         ok(f"History loaded ({len(history)} messages, memory: {bool(memory)})")

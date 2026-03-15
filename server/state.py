@@ -19,6 +19,9 @@ _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
 last_seed        = -1          # seed used by the most recent successful generation
 
+# Active persona key — used to detect cross-session persona mismatch in history
+_active_persona_key: str = ""
+
 # Demo mode — active user persona (name + description)
 _demo_user_persona_name: str = ""
 _demo_user_persona_desc: str = ""
