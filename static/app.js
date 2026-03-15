@@ -112,8 +112,6 @@ function clearImageHistory() {
   renderHistory();
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd').value = '';
-  const cap = document.getElementById('img-caption');
-  cap.textContent = ''; cap.classList.remove('has-prompt');
 }
 
 async function loadInfo() {
@@ -492,9 +490,6 @@ loadVoices();
 function setPrompt(text) {
   if (!text) return;
   document.getElementById('pd').value = text;
-  const cap = document.getElementById('img-caption');
-  cap.textContent = text;
-  cap.classList.add('has-prompt');
 }
 
 function togglePromptPanel() {
@@ -806,8 +801,6 @@ async function clearHistory() {
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
-  const cap = document.getElementById('img-caption');
-  cap.textContent = ''; cap.classList.remove('has-prompt');
   lastReplyText = '';
   _stopTts();
   _lastChunks = [];

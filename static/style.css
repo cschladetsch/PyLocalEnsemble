@@ -63,8 +63,4 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .ic{position:relative}
 .finalizing-overlay{position:absolute;bottom:.5rem;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:var(--accent2);font-size:.7rem;letter-spacing:.12em;padding:.2rem .7rem;border-radius:.3rem;pointer-events:none;white-space:nowrap}
 #seed-btn.pinned{border-color:var(--accent);color:var(--accent)}
-#img-caption{display:none;padding:.4rem 1.2rem;font-size:.65rem;color:var(--muted);font-family:'Montserrat',sans-serif;line-height:1.5;word-break:break-word;border-top:1px solid var(--border);max-height:4.5rem;overflow-y:auto;cursor:pointer;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
-#img-caption:hover{color:var(--text)}
-#img-caption.has-prompt{display:block}
-
 .persona-switch-divider{text-align:center;font-size:.65rem;letter-spacing:.2em;color:var(--accent2);padding:.4rem 0;margin:.2rem 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-family:'Montserrat',sans-serif;text-transform:uppercase;opacity:.7}
