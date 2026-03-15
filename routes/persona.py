@@ -21,6 +21,7 @@ async def switch_persona(name: str):
         return JSONResponse({"error": f"Persona '{name}' not found."}, status_code=404)
 
     p = config.PERSONAS[name]
+    config.NAME            = p.get("name", config.CFG["name"])
     state.ALICE_APPEARANCE = p.get("appearance", config.CFG["appearance"])
     state.SYSTEM_PROMPT    = p.get("system_prompt", config.CFG["system_prompt"])
 

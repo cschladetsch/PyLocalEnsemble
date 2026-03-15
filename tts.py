@@ -73,7 +73,7 @@ def _cathedral_effect(samples, sr):
     ir       = (rng.standard_normal(n).astype(np.float32) * np.exp(-decay * t))
     ir[0]    = 1.0          # preserve direct sound
     reverb   = np.convolve(samples, ir, mode='full')[:len(samples)].astype(np.float32)
-    blended  = 0.55 * samples + 0.45 * reverb
+    blended  = 0.75 * samples + 0.25 * reverb
     peak = np.max(np.abs(samples))
     if peak > 0:
         blended *= peak / max(np.max(np.abs(blended)), 1e-6)

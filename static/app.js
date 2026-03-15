@@ -335,6 +335,7 @@ async function loadPersonas() {
 async function switchPersona(name) {
   await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
   _applyPersonaFont(name);
+  await loadInfo();
   document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';

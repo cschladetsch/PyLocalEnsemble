@@ -1,7 +1,7 @@
 """Tests for tts.py utilities."""
 import numpy as np
 import pytest
-from tts import _android_effect
+from tts import _android_effect, _cathedral_effect
 
 
 def _sine(sr=24000, freq=440, duration=0.5):
@@ -41,4 +41,41 @@ def test_android_effect_changes_signal():
     samples = _sine()
     result = _android_effect(samples, 24000)
     # The signal should be different (ring mod changes the waveform)
+    assert not np.allclose(samples, result)
+
+
+# ── _cathedral_effect ─────────────────────────────────────────────────────────
+
+def test_cathedral_preserves_shape():
+    samples = _sine()
+    result = _cathedral_effect(samples, 24000)
+    assert result.shape == samples.shape
+
+
+def test_cathedral_preserves_dtype():
+    samples = _sine()
+    result = _cathedral_effect(samples, 24000)
+    assert result.dtype == samples.dtype
+
+
+def test_cathedral_on_silence():
+    silence = np.zeros(1000, dtype=np.float32)
+    result = _cathedral_effect(silence, 24000)
+    assert result.shape == silence.shape
+    assert np.max(np.abs(result)) < 1e-5
+
+
+def test_cathedral_normalises_peak():
+    """Output peak should stay close to input peak."""
+    samples = _sine() * 0.6
+    result = _cathedral_effect(samples, 24000)
+    original_peak = np.max(np.abs(samples))
+    result_peak   = np.max(np.abs(result))
+    assert abs(result_peak - original_peak) < 0.05
+
+
+def test_cathedral_changes_signal():
+    """Reverb should alter the waveform."""
+    samples = _sine()
+    result = _cathedral_effect(samples, 24000)
     assert not np.allclose(samples, result)

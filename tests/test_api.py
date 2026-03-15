@@ -174,3 +174,76 @@ def test_switch_persona_clears_effects_on_non_android():
     non_android = next(n for n in config.PERSONAS if n != "Android")
     client.post(f"/persona/{non_android}")
     assert config.CFG["tts"].get("effects", "") == ""
+
+
+def test_switch_persona_updates_config_name():
+    """Switching to a named persona updates config.NAME."""
+    named = next((n for n, p in config.PERSONAS.items() if "name" in p), None)
+    if named is None:
+        pytest.skip("No persona with a name field")
+    client.post(f"/persona/{named}")
+    assert config.NAME == config.PERSONAS[named]["name"]
+
+
+def test_switch_persona_response_includes_sd_model():
+    persona_name = list(config.PERSONAS.keys())[0]
+    res = client.post(f"/persona/{persona_name}")
+    assert "sd_model" in res.json()
+
+
+def test_switch_persona_resets_nudity_state():
+    import state
+    state._nudity_state = "fully nude"
+    persona_name = list(config.PERSONAS.keys())[0]
+    client.post(f"/persona/{persona_name}")
+    assert state._nudity_state == "clothed"
+
+
+def test_switch_persona_resets_seed():
+    import state
+    state._character_seed = 12345
+    state._seed_pinned    = True
+    persona_name = list(config.PERSONAS.keys())[0]
+    client.post(f"/persona/{persona_name}")
+    assert state._character_seed == -1
+    assert state._seed_pinned is False
+
+
+def test_info_returns_history_fields():
+    res = client.get("/info")
+    data = res.json()
+    assert "history_msgs" in data
+    assert "history_max" in data
+    assert isinstance(data["history_msgs"], int)
+    assert isinstance(data["history_max"], int)
+
+
+def test_export_history_structure():
+    res = client.get("/history")
+    assert res.status_code == 200
+    data = res.json()
+    assert "history" in data
+    assert "memory" in data
+    assert isinstance(data["history"], list)
+
+
+def test_export_history_reflects_messages():
+    import llm
+    llm.clear_history()
+    llm.history.append({"role": "user", "content": "hello"})
+    res = client.get("/history")
+    data = res.json()
+    assert any(m["content"] == "hello" for m in data["history"])
+    llm.clear_history()
+
+
+def test_info_name_matches_config():
+    res = client.get("/info")
+    assert res.json()["name"] == config.NAME
+
+
+def test_personas_list_includes_known_personas():
+    res = client.get("/personas")
+    names = res.json()["personas"]
+    for key in config.PERSONAS:
+        assert key in names
