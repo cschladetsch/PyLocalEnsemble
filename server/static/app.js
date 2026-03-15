@@ -5,7 +5,7 @@ let charName = 'Alice';
 let llmReady = false;
 let _activePersona = '';
 let imgHistory = [];
-let _demoMode = false, _demoTimer = null;
+let _demoMode = false, _demoTimer = null, _demoSkip = false;
 
 const ENTRANCE_LINES = [
   "Hello. I've been waiting for you...",
@@ -41,7 +41,11 @@ function _stopTts() {
 }
 
 function skipVoice() {
+  _demoSkip = true;
   _stopTts();
+  if (chatAbort) { chatAbort.abort(); chatAbort = null; }
+  if (imgAbort)  { imgAbort.abort();  imgAbort  = null; }
+  fetch('/interrupt', { method: 'POST' }).catch(() => {});
 }
 
 function _ensureAudioCtx() {
@@ -705,6 +709,7 @@ let _demoTurn = 0;
 
 async function demoLoop() {
   if (!_demoMode) return;
+  _demoSkip = false;
   try {
     // Fetch the next user-side prompt, passing turn for mood-arc
     const r = await fetch(`/demo/prompt?turn=${_demoTurn}`);
@@ -716,8 +721,10 @@ async function demoLoop() {
 
     // Typing indicator — brief pause then reveal message
     const typingId = addMsg('user', DEMO_USER_NAME, '<span class="gen dots">typing</span>');
-    const typingDelay = 600 + Math.random() * 900;
-    await new Promise(r => setTimeout(r, typingDelay));
+    if (!_demoSkip) {
+      const typingDelay = 600 + Math.random() * 900;
+      await new Promise(r => setTimeout(r, typingDelay));
+    }
     if (!_demoMode) return;
     updMsg(typingId, msg);
     lastUserMsg = msg;
@@ -746,10 +753,12 @@ async function demoLoop() {
     _demoTurn++;
     _updateDemoBtn();
 
-    // Variable pause 1.5–4s before next turn
-    const pause = 1500 + Math.random() * 2500;
-    await new Promise(resolve => { _demoTimer = setTimeout(resolve, pause); });
-    _demoTimer = null;
+    // Variable pause 1.5–4s before next turn (skipped if user pressed Skip)
+    if (!_demoSkip) {
+      const pause = 1500 + Math.random() * 2500;
+      await new Promise(resolve => { _demoTimer = setTimeout(resolve, pause); });
+      _demoTimer = null;
+    }
     demoLoop();
   } catch (e) {
     console.warn('[demo] loop error:', e);
@@ -762,7 +771,7 @@ async function _waitForTts(gen, timeoutMs = 90000) {
   // Phase 1: wait up to 8s for speak() to start scheduling audio
   const p1End = Date.now() + 8000;
   while (Date.now() < p1End) {
-    if (_ttsGen !== gen || !_demoMode) return;
+    if (_ttsGen !== gen || !_demoMode || _demoSkip) return;
     if (_audioCtx && _nextStart > (_audioCtx.currentTime + 0.2)) break;
     await new Promise(r => setTimeout(r, 100));
   }
@@ -770,7 +779,7 @@ async function _waitForTts(gen, timeoutMs = 90000) {
   if (!_audioCtx || _nextStart <= 0.1) return;
   // Phase 2: wait for scheduled audio to finish playing
   while (Date.now() < deadline) {
-    if (_ttsGen !== gen || !_demoMode) return;
+    if (_ttsGen !== gen || !_demoMode || _demoSkip) return;
     if (_audioCtx.currentTime >= _nextStart - 0.1) return;
     await new Promise(r => setTimeout(r, 300));
   }
@@ -780,13 +789,13 @@ async function _waitForImage(timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs;
   // Wait for triggerMedia to start (imgAbort becomes non-null)
   while (Date.now() < deadline) {
-    if (!_demoMode) return;
+    if (!_demoMode || _demoSkip) return;
     if (imgAbort) break;
     await new Promise(r => setTimeout(r, 100));
   }
   // Wait for image gen to finish (imgAbort cleared)
   while (Date.now() < deadline) {
-    if (!_demoMode) return;
+    if (!_demoMode || _demoSkip) return;
     if (!imgAbort) return;
     await new Promise(r => setTimeout(r, 500));
   }
