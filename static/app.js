@@ -3,6 +3,7 @@ let mediaRecorder = null, audioChunks = [];
 let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
 let llmReady = false;
+let _activePersona = '';
 let imgHistory = [];
 
 const ENTRANCE_LINES = [
@@ -71,7 +72,7 @@ try {
 
 function saveImg(url, prompt) {
   if (!url) return;
-  imgHistory.unshift({ url, prompt, ts: Date.now() });
+  imgHistory.unshift({ url, prompt, ts: Date.now(), persona: _activePersona });
   if (imgHistory.length > 100) imgHistory.pop();
   try {
     localStorage.setItem('alice_img_history_urls', JSON.stringify(imgHistory));
@@ -90,7 +91,7 @@ function renderHistory() {
   if (!container) return;
   container.innerHTML = imgHistory.map((item, i) => {
     const ts  = item.ts ? new Date(item.ts).toLocaleString() : '';
-    const tip = [ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
+    const tip = [item.persona, ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
     return `<img src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`;
   }).join('');
 }
@@ -103,6 +104,7 @@ function showHistImg(index) {
   });
   document.getElementById('ic').innerHTML = `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
   setPrompt(item.prompt);
+  if (item.persona) _applyPersonaFont(item.persona);
 }
 
 function clearImageHistory() {
@@ -432,6 +434,7 @@ const _DEFAULT_FONT = _PERSONA_FONTS['default'];
 const _personaFontKeys = {};
 
 function _applyPersonaFont(name) {
+  _activePersona = name;
   const key = _personaFontKeys[name] || name.toLowerCase().replace(/\s+/g, '-');
   const f = _PERSONA_FONTS[key] || _DEFAULT_FONT;
   const b = document.body;
