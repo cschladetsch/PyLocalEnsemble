@@ -310,7 +310,15 @@ function startProgress() {
       if (d.current_image) {
         const ic = document.getElementById('ic');
         if (ic && !ic.querySelector('img.final')) {
-          ic.innerHTML = `<img src="data:image/png;base64,${d.current_image}" class="preview">`;
+          let prev = ic.querySelector('img.preview');
+          if (prev) {
+            prev.src = `data:image/png;base64,${d.current_image}`;
+          } else {
+            const img = document.createElement('img');
+            img.className = 'preview';
+            img.src = `data:image/png;base64,${d.current_image}`;
+            ic.insertBefore(img, ic.firstChild);
+          }
         }
       }
     } catch {}
@@ -331,8 +339,10 @@ async function triggerMedia(extra = '', auto = false) {
   if (extra && !auto) addMsg('user', 'You', extra);
 
   document.getElementById('ic').innerHTML =
-    '<div class="ph gen" id="img-status">Analyzing scene...</div>' +
-    '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
+    '<div id="img-progress-wrap">' +
+      '<div class="ph gen" id="img-status">Analyzing scene...</div>' +
+      '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>' +
+    '</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
 
