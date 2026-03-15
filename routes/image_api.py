@@ -150,13 +150,13 @@ async def get_progress():
 
 @router.get("/seed")
 async def get_seed():
-    return JSONResponse({"seed": image._last_seed, "pinned": state._seed_pinned})
+    return JSONResponse({"seed": state.last_seed, "pinned": state._seed_pinned})
 
 
 @router.post("/seed/pin")
 async def pin_seed():
-    state._seed_pinned   = True
-    state._character_seed = image._last_seed
+    state._seed_pinned    = True
+    state._character_seed = state.last_seed
     print(f"[seed] pinned seed {state._character_seed}")
     return JSONResponse({"pinned": True, "seed": state._character_seed})
 

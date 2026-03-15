@@ -2,17 +2,16 @@
 import json, os, re, threading
 import requests as req
 import config
+import state
 from utils import http_ok
 from image.forge import start_forge
 
 _gen_cancel = threading.Event()
-_last_seed  = -1   # seed used by the most recent successful generation
 
 
 def generate_image(prompt: str, appearance: str, negative_base: str,
                    extra_negative: str = "", steps: int = None, cfg_scale: float = None,
                    seed: int = -1):
-    global _last_seed
     forge_url = config.CFG["forge_url"]
     img_cfg   = config.CFG["image"]
     if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
@@ -70,10 +69,10 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         if imgs:
             try:
                 info = json.loads(data.get("info", "{}"))
-                _last_seed = info.get("seed", -1)
+                state.last_seed = info.get("seed", -1)
             except Exception:
-                _last_seed = -1
-            print(f"[image] done — got image ({len(imgs[0])} b64 chars), seed={_last_seed}")
+                state.last_seed = -1
+            print(f"[image] done — got image ({len(imgs[0])} b64 chars), seed={state.last_seed}")
         else:
             print("[image] Forge returned no images")
         return imgs[0] if imgs else None

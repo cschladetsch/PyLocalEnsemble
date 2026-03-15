@@ -17,6 +17,7 @@ _nudity_state    = "clothed"   # floor for SD nudity; persists across turns
 _character_seed  = -1          # -1 = random; set when seed is pinned
 _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
+last_seed        = -1          # seed used by the most recent successful generation
 
 
 # ── Auto-image heuristic ──────────────────────────────────────────────────────
