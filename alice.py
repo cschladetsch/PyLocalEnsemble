@@ -278,17 +278,15 @@ async def get_progress():
 @app.post("/image")
 async def image_from_history(body: ImageRequest):
     print(f"\n[backend] Received /image request, extra='{body.extra}'")
-    if not llm.history:
+    if not llm.history and not body.extra.strip():
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
 
     try:
         def _run():
             image._gen_cancel.clear()
             recent    = llm.history[-8:]
-            if not recent:
-                return None, None
-            last_user  = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-            messages   = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
+            last_user  = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "") if recent else body.extra
+            messages   = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
             print("[image] extracting SD prompt via LLM...")
             base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
                                                    last_user_msg=last_user, persona=SYSTEM_PROMPT)

@@ -106,7 +106,7 @@ gantt
 - [x] Switch LLM backend from Ollama to llama.cpp server (Vulkan, cross-GPU)
 - [x] OpenAI-compatible API (`/v1/chat/completions`, streaming SSE)
 - [x] STT push-to-talk with device selector, silence auto-stop, auto-send
-- [x] Config hygiene — `alice.json.example` in repo, personal config gitignored
+- [x] Config hygiene — `alice.example.json` in repo, personal config gitignored
 - [x] Persona system with runtime switching
 - [x] Rolling conversation memory with LLM-based compression
 - [x] `install.py` — one command sets up everything (llama-server, model, TTS, Forge)

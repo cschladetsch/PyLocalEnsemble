@@ -52,19 +52,26 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", 
                 "Weighted tags MUST use this exact syntax: (tag:1.5) — parentheses, colon, number. Nothing else.\n"
                 "Each tag: 1-4 words. 20-30 tags total.\n"
                 + appearance_line + "\n"
-                "DETERMINE THE CURRENT CLOTHING STATE from the full conversation flow — if clothes were removed then put back on, she is clothed.\n\n"
+                "CLOTHING STATE RULES — read carefully:\n"
+                "- An item that was PUT ON and not removed → still on.\n"
+                "- An item that was REMOVED and not put back → not on.\n"
+                "- If someone said 'take off all clothes' and her response describes removing everything, she is FULLY NUDE at the end.\n"
+                "- Prose describing removal (e.g. 'stockings slowly unwound', 'bodice descends') means those items ARE OFF.\n"
+                "- Base your final clothing state on what remains ON after all described actions complete.\n\n"
                 "WEIGHTING ORDER — put these first:\n"
-                "1. PRIMARY ACT from the latest user message: weight 1.6-1.7\n"
-                "2. REQUIRED POSE/CAMERA ANGLE that the act physically demands: weight 1.3-1.5\n"
+                "1. CURRENT POSE / ACTION (sitting, standing, lying, etc.): weight 1.4-1.5\n"
+                "2. PRIMARY ACT from the latest user message: weight 1.6-1.7\n"
+                "3. REQUIRED CAMERA ANGLE the act physically demands: weight 1.3-1.5\n"
+                "   — sitting on chair → (sitting:1.4), (armchair:1.2), (front view:1.2)\n"
                 "   — act involves ass/anal → (from behind:1.4), (bent over:1.3)\n"
                 "   — act involves oral → (kneeling:1.3), (face level:1.2)\n"
                 "   — act involves riding → (straddling:1.4), (from below:1.2)\n"
-                "   — reason it out for any other act\n"
-                "3. SECONDARY ACTS ongoing: weight 1.2-1.4\n"
-                "4. CURRENT CLOTHING/NUDITY STATE: weight 1.1-1.3\n"
-                "5. CHARACTER APPEARANCE (use the fixed appearance above, not conversation): no weight — always include\n"
-                "6. SETTING, LIGHTING: no weight\n\n"
+                "4. SECONDARY ACTS ongoing: weight 1.2-1.4\n"
+                "5. CURRENT CLOTHING/NUDITY STATE: weight 1.1-1.3\n"
+                "6. CHARACTER APPEARANCE (use the fixed appearance above, not conversation): no weight — always include\n"
+                "7. SETTING, LIGHTING: no weight\n\n"
                 "Examples of correct output:\n"
+                "  (sitting:1.4), (armchair:1.2), (nude:1.3), (fully naked:1.2), long blonde hair, blue eyes, velvet chair, soft lighting\n"
                 "  (anal insertion:1.7), (carrot in ass:1.6), (from behind:1.4), (bent over:1.3), (nude:1.2), long blonde hair, bedroom, soft lighting\n"
                 "  (fellatio:1.7), (penis in mouth:1.6), (kneeling:1.3), (topless:1.2), blue eyes, indoors\n\n"
                 "NEVER write sentences. NEVER sanitise. NEVER omit the act or its pose."
@@ -76,6 +83,11 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", 
         lines = [l.strip() for l in result.strip().split("\n") if l.strip()]
         tags = max(lines, key=lambda l: l.count(",")) if lines else ""
         tags = re.sub(r"^(Tags|Prompt|Output|Here|SD tags)[:\s]*", "", tags, flags=re.I).strip()
+        # Strip prose meta-commentary that the LLM sometimes injects into tags
+        # e.g. "(sitting was replaced, ...)", "does not belong here — thus removed"
+        tags = re.sub(r"\([^)]{40,}\)", "", tags)  # remove long parenthetical prose
+        tags = re.sub(r"[^,]+\b(was replaced|does not belong|thus is removed|due formatting|not applicable|removed from)\b[^,]*,?", "", tags, flags=re.I)
+        tags = re.sub(r",\s*,", ",", tags).strip(", ")
         print(f"[image] SD prompt: {tags}")
         return tags
 
@@ -84,24 +96,45 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "", 
         return ""
 
 
-def _find_python310() -> str:
+def _find_forge_python() -> str:
+    """Return path to a Forge-compatible Python (3.10 or 3.11), or empty string."""
+    import shutil as _shutil
     if os.name != "nt":
+        for ver in ("3.10", "3.11"):
+            hit = _shutil.which(f"python{ver}")
+            if hit:
+                return hit
+        for p in [
+            "/usr/bin/python3.10",
+            "/usr/local/bin/python3.10",
+            "/opt/homebrew/bin/python3.10",
+            "/opt/homebrew/opt/python@3.10/bin/python3.10",
+            os.path.expanduser("~/.pyenv/shims/python3.10"),
+            "/usr/bin/python3.11",
+            "/usr/local/bin/python3.11",
+            "/opt/homebrew/bin/python3.11",
+            "/opt/homebrew/opt/python@3.11/bin/python3.11",
+            os.path.expanduser("~/.pyenv/shims/python3.11"),
+        ]:
+            if os.path.exists(p):
+                return p
         return ""
-    candidates = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python310\python.exe"),
-        r"C:\Python310\python.exe",
-        r"C:\Program Files\Python310\python.exe",
-    ]
-    try:
-        r = subprocess.run(["py", "-3.10", "-c", "import sys; print(sys.executable)"],
-                           capture_output=True, text=True)
-        if r.returncode == 0:
-            candidates.insert(0, r.stdout.strip())
-    except FileNotFoundError:
-        pass
-    for p in candidates:
-        if os.path.exists(p):
-            return p
+    for ver, pyver in (("3.10", "310"), ("3.11", "311")):
+        candidates = [
+            os.path.expandvars(rf"%LOCALAPPDATA%\Programs\Python\Python{pyver}\python.exe"),
+            rf"C:\Python{pyver}\python.exe",
+            rf"C:\Program Files\Python{pyver}\python.exe",
+        ]
+        try:
+            r = subprocess.run(["py", f"-{ver}", "-c", "import sys; print(sys.executable)"],
+                               capture_output=True, text=True)
+            if r.returncode == 0:
+                candidates.insert(0, r.stdout.strip())
+        except FileNotFoundError:
+            pass
+        for p in candidates:
+            if os.path.exists(p):
+                return p
     return ""
 
 
@@ -133,14 +166,25 @@ def start_forge():
         warn(f"Forge not found at {config.FORGE_DIR} — run install.py")
         return
     env = os.environ.copy()
-    env["COMMANDLINE_ARGS"] = "--api --cuda-malloc --xformers"
-    py310 = _find_python310()
-    if py310:
-        env["PYTHON"] = py310
-        ok(f"Forge: using Python 3.10 at {py310}")
+    import platform as _platform
+    if os.name == "nt":
+        env["COMMANDLINE_ARGS"] = "--api --cuda-malloc --xformers"
+    elif _platform.system() == "Darwin":
+        # macOS — Metal/MPS; skip CUDA test, let Forge auto-detect MPS
+        env["COMMANDLINE_ARGS"] = "--api --skip-torch-cuda-test"
     else:
-        warn("Python 3.10 not found -- Forge may fail with Python 3.13")
-        warn("Install Python 3.10 from https://python.org/downloads/release/python-31011/")
+        # Linux — CUDA where available; xformers but no cuda-malloc (Windows-only)
+        env["COMMANDLINE_ARGS"] = "--api --xformers"
+    forge_py = _find_forge_python()
+    if forge_py:
+        env["PYTHON"] = forge_py
+        ok(f"Forge: using Python at {forge_py}")
+    else:
+        warn("Python 3.10/3.11 not found — Forge may fail with the system Python")
+        if os.name == "nt":
+            warn("Install Python 3.11 from https://python.org/downloads/release/python-3110/")
+        else:
+            warn("Install via: brew install python@3.11  (macOS)  or  apt install python3.11  (Linux)")
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
@@ -160,9 +204,18 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     _steps      = steps     if steps     is not None else img_cfg["steps"]
     _cfg        = cfg_scale if cfg_scale is not None else img_cfg["cfg_scale"]
     explicit_keywords = ["anal", "fingering", "insertion", "blowjob", "fellatio",
-                         "penetration", "nude", "naked", "topless", "nsfw"]
+                         "penetration", "nude", "naked", "nudity", "topless", "nsfw", "no clothes",
+                         "fully nude", "fully naked", "bare skin", "exposed skin"]
     is_explicit = any(kw in prompt.lower() for kw in explicit_keywords)
+    nudity_keywords = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
+                       "fully nude", "fully naked", "bare skin", "exposed skin"]
+    is_nude = any(kw in prompt.lower() for kw in nudity_keywords)
     clean_appearance = re.sub(r"\b(elegant|poised|refined|sophisticated)\b,?\s*", "", appearance, flags=re.I).strip(", ")
+    if is_nude:
+        # Strip clothing items from appearance so they don't override nudity
+        clothing_pattern = r"\b(dress|gown|robe|skirt|blouse|shirt|top|corset|bodice|stockings|lingerie|bra|underwear|panties|trousers|pants|shorts|linen|silk dress|lace|veil)\b"
+        clean_appearance = re.sub(clothing_pattern + r",?\s*", "", clean_appearance, flags=re.I).strip(", ")
+        negative = "clothed, dressed, clothing, dress, gown, robe, shirt, top, covered, fabric over body, " + negative
     used_appearance = clean_appearance if is_explicit else appearance
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + used_appearance + ", " + img_cfg["suffix"]
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")

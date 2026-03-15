@@ -14,7 +14,7 @@ LLAMA_DIR    = os.path.join(SCRIPT_DIR, "llama-cpp")
 MODELS_DIR   = os.path.join(SCRIPT_DIR, "models")
 TTS_DIR      = os.path.join(SCRIPT_DIR, "models", "tts")
 FORGE_DIR    = os.path.join(SCRIPT_DIR, "stable-diffusion-webui-forge")
-FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat")
+FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat" if os.name == "nt" else "webui.sh")
 
 # Default NSFW model (uncensored Mistral-Nemo fine-tune, Q4_K_M ~7 GB)
 _DEFAULT_MODEL_REPO = "bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF"
@@ -325,22 +325,46 @@ def install_tts_models():
         ok("Kokoro voices already present")
 
 
-def _find_python310() -> str:
-    candidates = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python310\python.exe"),
-        r"C:\Python310\python.exe",
-        r"C:\Program Files\Python310\python.exe",
-    ]
-    try:
-        r = subprocess.run(["py", "-3.10", "-c", "import sys; print(sys.executable)"],
-                           capture_output=True, text=True)
-        if r.returncode == 0:
-            candidates.insert(0, r.stdout.strip())
-    except FileNotFoundError:
-        pass
-    for p in candidates:
-        if os.path.exists(p):
-            return p
+def _find_forge_python() -> str:
+    """Return path to a Forge-compatible Python (3.10 or 3.11), or empty string."""
+    if os.name != "nt":
+        # Prefer 3.10, fall back to 3.11 (Forge supports both; 3.12+ has issues)
+        for ver in ("3.10", "3.11"):
+            hit = shutil.which(f"python{ver}")
+            if hit:
+                return hit
+        for p in [
+            "/usr/bin/python3.10",
+            "/usr/local/bin/python3.10",
+            "/opt/homebrew/bin/python3.10",
+            "/opt/homebrew/opt/python@3.10/bin/python3.10",
+            os.path.expanduser("~/.pyenv/shims/python3.10"),
+            "/usr/bin/python3.11",
+            "/usr/local/bin/python3.11",
+            "/opt/homebrew/bin/python3.11",
+            "/opt/homebrew/opt/python@3.11/bin/python3.11",
+            os.path.expanduser("~/.pyenv/shims/python3.11"),
+        ]:
+            if os.path.exists(p):
+                return p
+        return ""
+    # Windows: try the launcher, then well-known install paths
+    for ver, pyver in (("3.10", "310"), ("3.11", "311")):
+        candidates = [
+            os.path.expandvars(rf"%LOCALAPPDATA%\Programs\Python\Python{pyver}\python.exe"),
+            rf"C:\Python{pyver}\python.exe",
+            rf"C:\Program Files\Python{pyver}\python.exe",
+        ]
+        try:
+            r = subprocess.run(["py", f"-{ver}", "-c", "import sys; print(sys.executable)"],
+                               capture_output=True, text=True)
+            if r.returncode == 0:
+                candidates.insert(0, r.stdout.strip())
+        except FileNotFoundError:
+            pass
+        for p in candidates:
+            if os.path.exists(p):
+                return p
     return ""
 
 
@@ -362,7 +386,9 @@ def install_forge():
         ok("Forge already present")
 
     # Warn if Forge venv was built with wrong Python version
-    venv_python = os.path.join(FORGE_DIR, "venv", "Scripts", "python.exe")
+    venv_python = os.path.join(FORGE_DIR, "venv",
+                               "Scripts" if os.name == "nt" else "bin",
+                               "python.exe" if os.name == "nt" else "python3")
     if os.path.exists(venv_python):
         try:
             r = subprocess.run([venv_python, "--version"], capture_output=True, text=True)
@@ -370,16 +396,24 @@ def install_forge():
             if "3.10" not in version:
                 warn(f"Forge venv is {version}, needs 3.10 — deleting venv for rebuild ...")
                 shutil.rmtree(os.path.join(FORGE_DIR, "venv"))
-                ok("Venv deleted; Forge will rebuild with Python 3.10 on first run")
+                ok("Venv deleted; Forge will rebuild with a compatible Python on first run")
         except Exception as e:
             warn(f"Could not check Forge venv: {e}")
 
-    py310 = _find_python310()
-    if not py310:
-        warn("Python 3.10 not found — Forge needs it.")
-        warn("Install from: https://python.org/downloads/release/python-31011/")
+    forge_py = _find_forge_python()
+    if not forge_py:
+        warn("Python 3.10 or 3.11 not found — Forge requires one of these.")
+        if os.name == "nt":
+            warn("Install Python 3.11: https://python.org/downloads/release/python-3110/")
+        elif platform.system() == "Darwin":
+            warn("  brew install python@3.11")
+            warn("  # or: pyenv install 3.11  (then add to PATH)")
+        else:
+            warn("  sudo apt install python3.11  (Debian/Ubuntu)")
+            warn("  # or: pyenv install 3.11")
+        warn("Image generation will be unavailable until a compatible Python is installed.")
     else:
-        ok(f"Python 3.10 found: {py310}")
+        ok(f"Forge-compatible Python found: {forge_py}")
 
     # Download checkpoint if not present
     sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
@@ -422,10 +456,18 @@ def main():
 
     # Load or create config so steps 3 & 4 can write to it
     if not os.path.exists(CONFIG_FILE):
-        example = os.path.join(SCRIPT_DIR, "alice.json.example")
+        example = os.path.join(SCRIPT_DIR, "alice.example.json")
         if os.path.exists(example):
             shutil.copy(example, CONFIG_FILE)
-            info("created alice.json from alice.json.example")
+            info("created alice.json from alice.example.json")
+
+    personas_file = os.path.join(SCRIPT_DIR, "personas.json")
+    if not os.path.exists(personas_file):
+        personas_example = os.path.join(SCRIPT_DIR, "personas.example.json")
+        if os.path.exists(personas_example):
+            shutil.copy(personas_example, personas_file)
+            info("created personas.json from personas.example.json")
+
     with open(CONFIG_FILE, encoding="utf-8") as f:
         cfg = json.load(f)
 

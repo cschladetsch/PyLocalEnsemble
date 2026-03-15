@@ -56,7 +56,7 @@ You can also run `install.py` directly at any time to re-run setup or add missin
 
 ## Configuration
 
-`install.py` creates `alice.json` from `alice.json.example` on first run. `alice.json` is gitignored — it is your personal config.
+`install.py` creates `alice.json` from `alice.example.json` on first run. `alice.json` is gitignored — it is your personal config.
 
 Key settings:
 
@@ -209,7 +209,7 @@ alice/
 ├── utils.py          ← step/ok/warn, http_ok, wait_for
 ├── install.py        ← one-time installer (run once before alice.py)
 ├── alice.json        ← your personal config (gitignored)
-├── alice.json.example             ← SFW reference config (committed)
+├── alice.example.json             ← SFW reference config (committed)
 ├── personas.json                  ← your personas (gitignored)
 ├── history.json                   ← conversation history (auto-created, gitignored)
 ├── models/                        ← GGUF models (gitignored)

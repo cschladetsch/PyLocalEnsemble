@@ -18,7 +18,7 @@ _DEFAULT_CONFIG = {
     "llama_model":        "mistral-nemo",
     "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "worst quality, low quality, lowres, illustration, 3d, 2d, painting, cartoons, anime, CGI, 3D render, bad anatomy, deformed, blurry, extra limbs, mutation, watermark, signature, text",
+    "negative_prompt": "(deformed iris, deformed pupils), semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime, text, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, bad anatomy, bad proportions, extra limbs, disfigured, gross proportions, malformed limbs, extra legs, extra arms, extra feet, four legs, six legs, too many limbs, fused limbs, missing arms, fused fingers, too many fingers, long neck, watermark, signature",
     "system_prompt": (
         "You are Alice. Respond always in first person as Alice — never narrate in third person.\n"
         "You are enigmatic, sensual, intelligent, and fully present.\n"
@@ -66,7 +66,7 @@ def resolve_path(p: str) -> str:
 
 
 def load_config() -> dict:
-    example = os.path.join(ALICE_DIR, "alice.json.example")
+    example = os.path.join(ALICE_DIR, "alice.example.json")
     if not os.path.exists(CONFIG_FILE) and os.path.exists(example):
         shutil.copy(example, CONFIG_FILE)
         print(f"        config: created {CONFIG_FILE} from example")
@@ -108,6 +108,11 @@ def load_personas(cfg: dict) -> dict:
             "appearance":    cfg["appearance"],
         }
     }
+    if not os.path.exists(PERSONAS_FILE):
+        example = os.path.join(ALICE_DIR, "personas.example.json")
+        if os.path.exists(example):
+            shutil.copy(example, PERSONAS_FILE)
+            print(f"        config: created {PERSONAS_FILE} from example")
     if os.path.exists(PERSONAS_FILE):
         try:
             with open(PERSONAS_FILE, encoding="utf-8") as f:
