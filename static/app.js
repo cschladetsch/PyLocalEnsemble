@@ -1,5 +1,6 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
 let mediaRecorder = null, audioChunks = [];
+let lastReplyText = '';
 let charName = 'Alice';
 let llmReady = false;
 let imgHistory = [];
@@ -19,11 +20,17 @@ function saveImg(url, prompt) {
   renderHistory();
 }
 
+function removeImgHistoryItem(index) {
+  imgHistory.splice(index, 1);
+  try { localStorage.setItem('alice_img_history_urls', JSON.stringify(imgHistory)); } catch {}
+  renderHistory();
+}
+
 function renderHistory() {
   const container = document.getElementById('is');
   if (!container) return;
-  container.innerHTML = imgHistory.map((item, i) => 
-    `<img src="${item.url}" onclick="showHistImg(${i})" title="${item.prompt || ''}" class="${i===0?'active':''}">`
+  container.innerHTML = imgHistory.map((item, i) =>
+    `<img src="${item.url}" onclick="showHistImg(${i})" title="${item.prompt || ''}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`
   ).join('');
 }
 
@@ -308,6 +315,7 @@ async function loadVoices() {
 
 async function switchVoice(voice) {
   await fetch('/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice }) });
+  if (lastReplyText) speak(lastReplyText);
 }
 
 loadVoices();
@@ -405,7 +413,7 @@ async function _chatWith(msg) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (reply) { speak(reply); if (autoImage) triggerMedia('', true); }
+  if (reply) { lastReplyText = reply; speak(reply); if (autoImage) triggerMedia('', true); }
 }
 
 async function send() {
