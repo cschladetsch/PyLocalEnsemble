@@ -31,7 +31,7 @@ The target user is already running local AI tools. They understand LLMs and Stab
 ```mermaid
 graph TD
     subgraph App ["alice.py — entry point"]
-        Routes["FastAPI :8000\nroutes + startup"]
+        Routes["FastAPI :8000<br/>routes + startup"]
     end
 
     subgraph Core ["Core modules"]
@@ -50,17 +50,17 @@ graph TD
 
     subgraph InstallPkg ["installer/ package"]
         Helpers["helpers.py"]
-        Steps["packages · llama · model\ntts_install · forge_install"]
+        Steps["packages · llama · model<br/>tts_install · forge_install"]
     end
 
     subgraph GPU ["External GPU Processes"]
-        LlamaServer["llama-server :8080\nGGUF — Vulkan/CUDA/Metal"]
-        Forge["SD Forge :7860\nStable Diffusion"]
+        LlamaServer["llama-server :8080<br/>GGUF — Vulkan/CUDA/Metal"]
+        Forge["SD Forge :7860<br/>Stable Diffusion"]
     end
 
     subgraph CPU ["In-process (CPU)"]
-        Kokoro["Kokoro ONNX\nTTS"]
-        Whisper["faster-whisper\nSTT"]
+        Kokoro["Kokoro ONNX<br/>TTS"]
+        Whisper["faster-whisper<br/>STT"]
     end
 
     Routes --> Core
@@ -167,10 +167,10 @@ Current image generation: ~30–60 s on RTX 2070 (8 GB VRAM).
 
 ```mermaid
 flowchart LR
-    Dev([Developer\nalias identity]) -->|upload zip| Gumroad
+    Dev(["Developer<br/>alias identity"]) -->|upload zip| Gumroad
     Gumroad -->|download link| Buyer
-    Buyer -->|python alice.py| Local["Local machine\nno cloud"]
-    Dev -->|demo post| Reddit["r/LocalLLaMA\nr/StableDiffusion"]
+    Buyer -->|python alice.py| Local["Local machine<br/>no cloud"]
+    Dev -->|demo post| Reddit["r/LocalLLaMA<br/>r/StableDiffusion"]
     Reddit -->|organic traffic| Gumroad
 ```
 
