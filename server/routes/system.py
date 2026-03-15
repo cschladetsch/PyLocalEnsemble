@@ -1,7 +1,8 @@
-import re, os
-from fastapi import APIRouter
+import re, os, asyncio
+from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+import requests as req
 
 import config
 import llm
@@ -12,6 +13,9 @@ router = APIRouter()
 
 class ModelSwitchRequest(BaseModel):
     path: str
+
+class DemoPersonaRequest(BaseModel):
+    name: str
 
 
 @router.get("/models")
@@ -56,6 +60,7 @@ async def export_history():
 @router.get("/info")
 async def info():
     mem_cfg  = config.CFG.get("memory", config._DEFAULT_CONFIG["memory"])
+    demo_cfg = config.CFG.get("demo",   config._DEFAULT_CONFIG["demo"])
     max_hist = mem_cfg["max_history"]
     n_msgs   = len(llm.history)
     return JSONResponse({
@@ -64,12 +69,115 @@ async def info():
         "stt_silence":   config.CFG.get("stt_silence_seconds", 3),
         "history_msgs":  n_msgs,
         "history_max":   max_hist,
+        "demo": {**demo_cfg, "user_name": demo_cfg.get("user_name", "Christian")},
     })
 
 
 @router.get("/negative")
 async def get_negative():
     return JSONResponse({"negative": state.BASE_NEGATIVE})
+
+
+@router.get("/demo/user-personas")
+async def list_demo_user_personas():
+    demo_cfg  = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])
+    personas  = demo_cfg.get("user_personas", {})
+    current   = state._demo_user_persona_name or demo_cfg.get("user_persona", "default")
+    return JSONResponse({"personas": list(personas.keys()), "current": current})
+
+
+@router.post("/demo/user-persona")
+async def set_demo_user_persona(body: DemoPersonaRequest):
+    demo_cfg = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])
+    personas = demo_cfg.get("user_personas", {})
+    if body.name not in personas:
+        return JSONResponse({"error": "Unknown persona"}, status_code=400)
+    state._demo_user_persona_name = body.name
+    state._demo_user_persona_desc = personas[body.name]
+    print(f"[demo] user persona → {body.name!r}")
+    return JSONResponse({"status": "ok", "name": body.name})
+
+
+_DEMO_STAGES = [
+    (0,  2,  "opening",          "Be curious and slightly guarded — you've just met."),
+    (3,  5,  "warming up",       "Show genuine interest; be charming and a little playful."),
+    (6,  9,  "building",         "Become more personal; share observations, push topics deeper."),
+    (10, 14, "intimate",         "Be direct and emotionally present; the connection feels real."),
+    (15, 99, "deeply connected", "Speak with easy familiarity; be bold, warm, and unhurried."),
+]
+
+def _demo_stage(turn: int) -> tuple[str, str]:
+    for lo, hi, label, hint in _DEMO_STAGES:
+        if lo <= turn <= hi:
+            return label, hint
+    return _DEMO_STAGES[-1][2], _DEMO_STAGES[-1][3]
+
+
+@router.get("/demo/prompt")
+async def demo_prompt(turn: int = Query(default=0, ge=0)):
+    """Generate a short, natural user message appropriate for the current persona/context."""
+    if not llm.LLM_READY:
+        return JSONResponse({"error": "LLM not ready"}, status_code=503)
+
+    recent = llm.history[-10:] if llm.history else []
+    demo_cfg     = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])
+    user_name    = demo_cfg.get("user_name", "Christian")
+    persona_name = config.NAME
+    # Active persona description — live state takes precedence over config default
+    active_key  = state._demo_user_persona_name or demo_cfg.get("user_persona", "default")
+    user_personas = demo_cfg.get("user_personas", {})
+    user_persona_desc = (
+        state._demo_user_persona_desc
+        or user_personas.get(active_key, "")
+        or user_personas.get("default", "A charming, confident man.")
+    )
+    stage_label, stage_hint = _demo_stage(turn)
+
+    # Lead with the authoritative persona definitions so history can't override them
+    her_persona  = state.SYSTEM_PROMPT[:800]
+    last_reply   = next((m["content"] for m in reversed(recent) if m["role"] == "assistant"), None)
+    last_reply_anchor = (
+        f'\n\nHer last reply (react to this directly):\n"{last_reply[:600]}"'
+        if last_reply else ""
+    )
+
+    system = (
+        f"## WHO SHE IS — treat this as ground truth, overriding anything in the conversation history:\n"
+        f"{her_persona}\n\n"
+        f"## WHO {user_name.upper()} IS:\n"
+        f"{user_persona_desc}\n\n"
+        f"## YOUR TASK:\n"
+        f"Write ONE short message (1–2 sentences) that {user_name} would say next to {persona_name}.\n"
+        f"Conversation stage: {stage_label}. {stage_hint}\n"
+        f"React to what {persona_name} just said — pick up a specific word, image, or feeling.\n"
+        f"Sometimes ask a question; sometimes make a statement, observation, or compliment.\n"
+        f"Output ONLY the message — no quotes, no name prefix, no explanation."
+    )
+
+    context = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else "(no conversation yet)"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user",   "content": f"Conversation so far:\n{context}{last_reply_anchor}\n\nWrite {user_name}'s next message:"},
+    ]
+
+    def _call():
+        p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
+        r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
+            "model":       llm.llm_model(),
+            "messages":    messages,
+            "stream":      False,
+            "max_tokens":  80,
+            "temperature": 1.1,
+        }, timeout=30)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip().strip('"\'')
+
+    try:
+        loop = asyncio.get_running_loop()
+        prompt = await loop.run_in_executor(None, _call)
+        return JSONResponse({"prompt": prompt})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.get("/", response_class=HTMLResponse)

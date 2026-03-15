@@ -5,6 +5,7 @@ let charName = 'Alice';
 let llmReady = false;
 let _activePersona = '';
 let imgHistory = [];
+let _demoMode = false, _demoTimer = null;
 
 const ENTRANCE_LINES = [
   "Hello. I've been waiting for you...",
@@ -35,6 +36,12 @@ function _stopTts() {
   _ttsNodes = [];
   _nextStart = 0;
   // _lastChunks is intentionally kept so resay() can replay after an interrupt
+  const skip = document.getElementById('skip-btn');
+  if (skip) skip.disabled = true;
+}
+
+function skipVoice() {
+  _stopTts();
 }
 
 function _ensureAudioCtx() {
@@ -53,6 +60,14 @@ function _playAudioBuffer(audioBuf) {
   src.start(start);
   _nextStart = start + audioBuf.duration;
   _ttsNodes.push(src);
+  const skip = document.getElementById('skip-btn');
+  if (skip) skip.disabled = false;
+  src.onended = () => {
+    // Disable skip once the last scheduled node finishes
+    if (_audioCtx && _audioCtx.currentTime >= _nextStart - 0.1) {
+      if (skip) skip.disabled = true;
+    }
+  };
 }
 
 async function _scheduleChunk(b64wav, gen) {
@@ -132,6 +147,12 @@ async function loadInfo() {
       // Only replace the hardcoded greeting on first load (before any conversation)
       firstBody.childNodes[1].textContent = entranceLine();
     }
+    if (d.demo) {
+      if (d.demo.user_name)  DEMO_USER_NAME  = d.demo.user_name;
+      if (d.demo.user_voice) DEMO_USER_VOICE = d.demo.user_voice;
+      if (d.demo.user_speed) DEMO_USER_SPEED = d.demo.user_speed;
+      if (d.demo.user_pitch) DEMO_USER_PITCH = d.demo.user_pitch;
+    }
     window._sttSilenceMs = (d.stt_silence || 3) * 1000;
     if (!llmReady && d.llm_ready) {
       llmReady = true;
@@ -191,17 +212,22 @@ function toggleMute() {
   document.getElementById('mute-btn').textContent = muted ? 'Unmute' : 'Mute';
 }
 
-async function speak(text) {
+async function speak(text, voice = null, speed = null, pitch = null, effects = null) {
   if (muted) return;
   _stopTts();
   _lastChunks = [];             // discard cached chunks — new speech incoming
   lastReplyText = text;
   const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
   try {
+    const body = { text };
+    if (voice   !== null) body.voice   = voice;
+    if (speed   !== null) body.speed   = speed;
+    if (pitch   !== null) body.pitch   = pitch;
+    if (effects !== null) body.effects = effects;
     const res = await fetch('/tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify(body)
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -248,6 +274,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'r' || e.key === 'R') resay();
 });
 
+// Auto-stop demo if the user takes over — focus input or type a printable char into it
+document.getElementById('inp')?.addEventListener('focus', () => { if (_demoMode) stopDemo(); });
+document.getElementById('inp')?.addEventListener('input',  () => { if (_demoMode) stopDemo(); });
+
 async function deleteActiveImage() {
   const img = document.querySelector('#ic img');
   if (!img) return;
@@ -268,6 +298,7 @@ async function deleteActiveImage() {
 }
 
 async function interrupt(reason) {
+  if (reason === 'user' && _demoMode) stopDemo();
   _stopTts();
   if (chatAbort) {
     console.log('Aborting chat:', reason);
@@ -476,6 +507,28 @@ async function switchPersona(name) {
 
 loadPersonas();
 
+async function loadDemoPersonas() {
+  try {
+    const r = await fetch('/demo/user-personas');
+    const d = await r.json();
+    const sel = document.getElementById('demo-persona-select');
+    if (!sel) return;
+    sel.innerHTML = d.personas.map(p =>
+      `<option value="${p}" ${p === d.current ? 'selected' : ''}>${p}</option>`
+    ).join('');
+  } catch (e) { console.warn('Could not load demo personas:', e); }
+}
+
+async function switchDemoPersona(name) {
+  await fetch('/demo/user-persona', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+}
+
+loadDemoPersonas();
+
 async function loadVoices() {
   try {
     const r = await fetch('/voices');
@@ -612,6 +665,131 @@ async function send() {
   inp.focus();
   await _chatWith(msg);
   inp.focus();
+}
+
+function toggleDemo() {
+  if (_demoMode) stopDemo();
+  else startDemo();
+}
+
+function startDemo() {
+  _demoMode = true;
+  _demoTurn = 0;
+  _updateDemoBtn();
+  demoLoop();
+}
+
+function stopDemo() {
+  _demoMode = false;
+  if (_demoTimer) { clearTimeout(_demoTimer); _demoTimer = null; }
+  _updateDemoBtn();
+}
+
+function _updateDemoBtn() {
+  const btn = document.getElementById('demo-btn');
+  if (!btn) return;
+  if (_demoMode) {
+    btn.textContent = `Demo: ON (${_demoTurn})`;
+    btn.classList.add('demo-active');
+  } else {
+    btn.textContent = 'Demo';
+    btn.classList.remove('demo-active');
+  }
+}
+
+let DEMO_USER_NAME  = 'Christian';
+let DEMO_USER_VOICE = 'am_adam';
+let DEMO_USER_SPEED = 0.88;
+let DEMO_USER_PITCH = 0.88;
+let _demoTurn = 0;
+
+async function demoLoop() {
+  if (!_demoMode) return;
+  try {
+    // Fetch the next user-side prompt, passing turn for mood-arc
+    const r = await fetch(`/demo/prompt?turn=${_demoTurn}`);
+    const d = await r.json();
+    if (!_demoMode) return;
+    if (d.error) { console.warn('[demo] prompt error:', d.error); stopDemo(); return; }
+    const msg = d.prompt;
+    if (!msg) { stopDemo(); return; }
+
+    // Typing indicator — brief pause then reveal message
+    const typingId = addMsg('user', DEMO_USER_NAME, '<span class="gen dots">typing</span>');
+    const typingDelay = 600 + Math.random() * 900;
+    await new Promise(r => setTimeout(r, typingDelay));
+    if (!_demoMode) return;
+    updMsg(typingId, msg);
+    lastUserMsg = msg;
+
+    // Slight random speed jitter so each turn sounds a little different
+    const spd = DEMO_USER_SPEED + (Math.random() * 0.06 - 0.03);
+    await speak(msg, DEMO_USER_VOICE, spd, DEMO_USER_PITCH, '');
+    const userTtsGen = _ttsGen;
+    await _waitForTts(userTtsGen);
+
+    if (!_demoMode) return;
+
+    // Send through the full chat pipeline (LLM reply + Alice TTS + image)
+    await _chatWith(msg);
+
+    if (!_demoMode) return;
+
+    // _chatWith fires speak(reply) synchronously calling _stopTts() → _ttsGen++
+    const aliceTtsGen = _ttsGen;
+
+    // Wait for Alice TTS and image to both finish
+    await Promise.all([_waitForTts(aliceTtsGen), _waitForImage()]);
+
+    if (!_demoMode) return;
+
+    _demoTurn++;
+    _updateDemoBtn();
+
+    // Variable pause 1.5–4s before next turn
+    const pause = 1500 + Math.random() * 2500;
+    await new Promise(resolve => { _demoTimer = setTimeout(resolve, pause); });
+    _demoTimer = null;
+    demoLoop();
+  } catch (e) {
+    console.warn('[demo] loop error:', e);
+    stopDemo();
+  }
+}
+
+async function _waitForTts(gen, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  // Phase 1: wait up to 8s for speak() to start scheduling audio
+  const p1End = Date.now() + 8000;
+  while (Date.now() < p1End) {
+    if (_ttsGen !== gen || !_demoMode) return;
+    if (_audioCtx && _nextStart > (_audioCtx.currentTime + 0.2)) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  // If no audio was ever scheduled (e.g. skipped before first chunk), nothing to wait for
+  if (!_audioCtx || _nextStart <= 0.1) return;
+  // Phase 2: wait for scheduled audio to finish playing
+  while (Date.now() < deadline) {
+    if (_ttsGen !== gen || !_demoMode) return;
+    if (_audioCtx.currentTime >= _nextStart - 0.1) return;
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+async function _waitForImage(timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  // Wait for triggerMedia to start (imgAbort becomes non-null)
+  while (Date.now() < deadline) {
+    if (!_demoMode) return;
+    if (imgAbort) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  // Wait for image gen to finish (imgAbort cleared)
+  while (Date.now() < deadline) {
+    if (!_demoMode) return;
+    if (!imgAbort) return;
+    await new Promise(r => setTimeout(r, 500));
+  }
 }
 
 function renderMd(text) {

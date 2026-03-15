@@ -55,6 +55,20 @@ _DEFAULT_CONFIG = {
         "hires_denoising": 0.45,
         "hires_upscaler": "Latent",
     },
+    "demo": {
+        "user_name":    "Christian",
+        "user_voice":   "am_adam",
+        "user_speed":   0.88,
+        "user_pitch":   0.88,
+        "user_persona": "default",
+        "user_personas": {
+            "default":      "A charming, confident man with a poetic soul and a taste for dark beauty. Speaks with measured warmth.",
+            "intellectual": "A sharp, curious academic who probes ideas, draws unexpected connections, and challenges assumptions with wit.",
+            "dominant":     "A commanding, self-assured man who speaks with quiet authority and expects to be heard.",
+            "romantic":     "A deeply feeling man who notices beauty in small things and expresses himself with unguarded tenderness.",
+            "playful":      "A teasing, irreverent man who keeps things light but knows exactly when to be serious.",
+        },
+    },
     "memory": {
         "max_history": 16,   # compress when history exceeds this many messages
         "keep_recent": 8,    # keep this many recent messages after compression
@@ -90,7 +104,7 @@ def load_config() -> dict:
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             merged = {**_DEFAULT_CONFIG, **data}
-            for key in ("image", "tts", "llama_server", "memory", "llm_params"):
+            for key in ("image", "tts", "llama_server", "memory", "llm_params", "demo"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
             
             # Resolve paths

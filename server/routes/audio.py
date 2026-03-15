@@ -15,7 +15,11 @@ class VoiceRequest(BaseModel):
 
 
 class TtsRequest(BaseModel):
-    text: str
+    text:    str
+    voice:   str   = None
+    speed:   float = None
+    pitch:   float = None
+    effects: str   = None  # override persona effects; "" = no effects, None = use config
 
 
 def _tts_clean(text: str) -> str:
@@ -74,7 +78,7 @@ async def speak_stream(body: TtsRequest):
 
     def _worker():
         try:
-            for b64, is_last in tts.tts_wav_b64_stream(clean):
+            for b64, is_last in tts.tts_wav_b64_stream(clean, voice=body.voice, speed=body.speed, pitch=body.pitch, effects=body.effects):
                 if stop.is_set():
                     break
                 q.put(('chunk', b64, is_last))

@@ -84,6 +84,12 @@ Key settings:
 | `memory.max_history` | `16` | Compress history after this many messages |
 | `memory.keep_recent` | `8` | Messages kept after compression |
 | `memory.max_chars` | `1500` | Max chars in rolling memory summary |
+| `demo.user_name` | `"Christian"` | Name shown for the auto-generated user side in demo mode |
+| `demo.user_voice` | `"am_adam"` | TTS voice for the user side (`am_adam`, `am_michael`, `bm_george`, `bm_lewis`) |
+| `demo.user_speed` | `0.88` | TTS speed for the user voice |
+| `demo.user_pitch` | `0.88` | Pitch multiplier for the user voice (< 1.0 = lower/deeper) |
+| `demo.user_persona` | `"default"` | Active user persona key (must match a key in `user_personas`) |
+| `demo.user_personas` | *(5 built-in)* | Dict of named persona descriptions — each shapes how the user-side messages are written |
 
 Restart `alice.py` after editing `alice.json`.
 
@@ -203,6 +209,7 @@ Alice speaks every reply using Kokoro neural TTS. Speech is streamed sentence-by
 | Voice dropdown | Switch TTS voice instantly |
 | Mute / **M** | Toggle voice on/off |
 | Re-say / **R** | Replay the last spoken reply (instant — uses cached audio, no re-synthesis) |
+| Skip | Stop the current voice playback and move on — does not interrupt chat or image generation |
 
 **Keyboard shortcuts** (when the text input is not focused):
 
@@ -268,6 +275,16 @@ Use the **Image** button or type a command:
 
 Prefix a token with `no ` to push it to the negative prompt. All other tokens are prepended to the positive prompt.
 
+### Demo mode
+
+**Demo** puts Alice on autopilot — the system generates both sides of the conversation, speaks them, and generates images, indefinitely.
+
+Click **Demo** to start. The button shows the current turn count (`Demo: ON (4)`). Click again or press **Stop** to end.
+
+The **user persona dropdown** (left of the Demo button) controls how the generated user-side messages are written. Five personas are built in (`default`, `intellectual`, `dominant`, `romantic`, `playful`); add your own in `alice.json` under `demo.user_personas`.
+
+The user side is spoken in a separate male voice (`am_adam` by default) with independent speed and pitch settings, both configurable in `alice.json`. Demo pauses for a random 1.5–4s between turns and builds conversational intensity across a five-stage arc (opening → warming up → building → intimate → deeply connected). Typing into the chat input or clicking Stop ends the demo immediately.
+
 ### Model switcher
 
 The leftmost dropdown lists models available from the llama-server. Switching clears history and forces model re-detection on the next request.
@@ -292,7 +309,7 @@ alice/
 │   ├── audio.py              ← GET /voices · POST /voice · /tts · /tts/stream · /stt
 │   ├── image_api.py          ← POST /image · /reroll · /generate · /interrupt · /seed
 │   ├── persona.py            ← GET /personas · POST /persona/{name}
-│   └── system.py             ← GET /info · /history · /negative · POST /model · DELETE /image
+│   └── system.py             ← GET /info · /history · /negative · /demo/prompt · /demo/user-personas · POST /model · /demo/user-persona · DELETE /image
 │
 ├── image/                    ← image generation package
 │   ├── prompt.py             ← SD tag utilities, LLM prompt extraction, accessory detection

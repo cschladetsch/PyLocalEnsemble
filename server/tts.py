@@ -135,26 +135,33 @@ def _crossfade(parts: list, sr: int, fade_ms: int = 25) -> "np.ndarray":
     return result
 
 
-def tts_wav_b64_stream(text: str):
-    """Yield (b64_wav_str, is_last) for each sentence chunk — enables low-latency streaming."""
+def tts_wav_b64_stream(text: str, voice: str = None, speed: float = None, pitch: float = None, effects: str = None):
+    """Yield (b64_wav_str, is_last) for each sentence chunk — enables low-latency streaming.
+
+    pitch: framerate multiplier (< 1.0 = lower pitch + slower playback).
+           e.g. 0.88 ≈ -2 semitones.  Default: 1.0 (no shift).
+    """
     import numpy as np
     tts_cfg = config.CFG.get("tts", {})
-    voice   = tts_cfg.get("voice", "af_nicole")
-    speed   = _emotion_speed(text, tts_cfg.get("speed", 0.85))
-    effects = tts_cfg.get("effects", "")
+    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_nicole")
+    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    effects = effects if effects is not None else tts_cfg.get("effects", "")
     chunks  = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
     total   = len(chunks)
     for i, chunk in enumerate(chunks):
-        s, sr = TTS.create(chunk, voice=voice, speed=speed, lang="en-us")
+        s, sr = TTS.create(chunk, voice=voice, speed=spd, lang="en-us")
         if effects == "android":
             s = _android_effect(s, sr)
         elif effects == "cathedral":
             s = _cathedral_effect(s, sr)
+        # Pitch shift via framerate trick: claim a lower sample rate so the
+        # browser plays back slower + lower-pitched with no extra processing.
+        out_sr = int(sr * pitch) if pitch and pitch != 1.0 else sr
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(sr)
+            wf.setframerate(out_sr)
             wf.writeframes((s * 32767).astype(np.int16).tobytes())
         yield base64.b64encode(buf.getvalue()).decode(), (i == total - 1)
 

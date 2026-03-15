@@ -19,6 +19,10 @@ _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
 last_seed        = -1          # seed used by the most recent successful generation
 
+# Demo mode — active user persona (name + description)
+_demo_user_persona_name: str = ""
+_demo_user_persona_desc: str = ""
+
 # Pre-extracted SD prompt — populated by chat route, consumed by /image
 _pre_sd_prompt:    str | None = None   # positive prompt
 _pre_sd_negative:  str        = ""     # extra negative tags
