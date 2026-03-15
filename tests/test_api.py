@@ -357,3 +357,100 @@ def test_decay_fully_nude_decays_one_step(clean_nudity_state):
     for msg in ["hello", "how are you", "nice weather"]:
         state.decay_nudity_state(msg)
     assert state._nudity_state == "bottomless"
+
+
+# ── GET /seed, POST /seed/pin, POST /seed/unpin ───────────────────────────────
+
+@pytest.fixture()
+def reset_seed_state():
+    import state
+    saved_seed   = state._character_seed
+    saved_pinned = state._seed_pinned
+    saved_last   = state.last_seed
+    yield
+    state._character_seed = saved_seed
+    state._seed_pinned    = saved_pinned
+    state.last_seed       = saved_last
+
+
+def test_get_seed_returns_seed_and_pinned(reset_seed_state):
+    import state
+    state.last_seed    = 99
+    state._seed_pinned = False
+    res = client.get("/seed")
+    assert res.status_code == 200
+    data = res.json()
+    assert "seed"   in data
+    assert "pinned" in data
+
+
+def test_pin_seed_sets_pinned(reset_seed_state):
+    import state
+    state.last_seed       = 42
+    state._seed_pinned    = False
+    state._character_seed = -1
+    res = client.post("/seed/pin")
+    assert res.status_code == 200
+    assert res.json()["pinned"] is True
+    assert res.json()["seed"]   == 42
+    assert state._seed_pinned    is True
+    assert state._character_seed == 42
+
+
+def test_unpin_seed_clears_pinned(reset_seed_state):
+    import state
+    state._seed_pinned    = True
+    state._character_seed = 42
+    res = client.post("/seed/unpin")
+    assert res.status_code == 200
+    assert res.json()["pinned"] is False
+    assert state._seed_pinned    is False
+    assert state._character_seed == -1
+
+
+def test_pin_then_unpin_roundtrip(reset_seed_state):
+    import state
+    state.last_seed = 7
+    client.post("/seed/pin")
+    assert state._seed_pinned is True
+    client.post("/seed/unpin")
+    assert state._seed_pinned    is False
+    assert state._character_seed == -1
+
+
+# ── POST /model ───────────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def reset_model_state():
+    import llm
+    saved_det   = llm._DETECTED_MODEL
+    saved_model = config.CFG.get("llama_model")
+    yield
+    llm._DETECTED_MODEL       = saved_det
+    config.CFG["llama_model"] = saved_model
+
+
+def test_switch_model_clears_detected_model(reset_model_state):
+    import llm
+    llm._DETECTED_MODEL = "old-model"
+    res = client.post("/model", json={"path": "new-model"})
+    assert res.status_code == 200
+    assert llm._DETECTED_MODEL is None
+
+
+def test_switch_model_updates_llama_model_config(reset_model_state):
+    res = client.post("/model", json={"path": "custom-model-path"})
+    assert res.status_code == 200
+    assert config.CFG["llama_model"] == "custom-model-path"
+
+
+def test_switch_model_clears_history(reset_model_state):
+    import llm
+    llm.history.append({"role": "user", "content": "test"})
+    client.post("/model", json={"path": "any-model"})
+    assert llm.history == []
+
+
+def test_switch_model_returns_model_name(reset_model_state):
+    res = client.post("/model", json={"path": "my-model"})
+    assert res.json()["model"] == "my-model"
