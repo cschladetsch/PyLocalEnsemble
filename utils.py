@@ -1,7 +1,18 @@
-import sys, time, builtins
+import sys, os, time, builtins
 from datetime import datetime
 import requests as req
 import config
+
+
+def is_wsl() -> bool:
+    """True when running inside WSL1 or WSL2."""
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+IS_WSL = is_wsl()
 
 _real_print = builtins.print
 def _ts_print(*args, **kwargs):

@@ -193,6 +193,8 @@ def install_llama_server(cfg: dict):
         exe = hits[0] if hits else None
 
     if exe:
+        if os.name != "nt":
+            os.chmod(exe, 0o755)
         cfg["llama_server_path"] = exe
         ok(f"llama-server installed: {exe}")
     else:

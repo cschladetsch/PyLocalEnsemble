@@ -448,13 +448,29 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
     print(f"[{config.NAME}] Starting server at {config.ALICE_URL}")
+    from utils import IS_WSL
+    if IS_WSL:
+        try:
+            import socket
+            wsl_ip = socket.gethostbyname(socket.gethostname())
+            print(f"        WSL2 detected. If localhost doesn't work, try http://{wsl_ip}:8000")
+        except Exception:
+            pass
 
     threading.Thread(target=_startup, daemon=True).start()
 
     if INTERACTIVE:
         def _open():
             time.sleep(2)
-            webbrowser.open(config.ALICE_URL)
+            from utils import IS_WSL
+            if IS_WSL:
+                # webbrowser.open() silently fails in WSL — use Windows browser
+                import shutil
+                opener = shutil.which("wslview") or "explorer.exe"
+                subprocess.Popen([opener, config.ALICE_URL],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                webbrowser.open(config.ALICE_URL)
         threading.Thread(target=_open, daemon=True).start()
     else:
         print("        NOTE: Non-interactive session detected; not opening browser.")
