@@ -247,7 +247,7 @@ def test_detect_fellatio():
 
 def test_detect_finger_in_mouth():
     actions, body, camera = _detect_action("put your finger in your mouth")
-    assert actions[0] == "finger in mouth"
+    assert actions[0] == "one finger in mouth"
     assert body   == "mouth"
     assert camera == "face level"
 
@@ -255,7 +255,7 @@ def test_detect_finger_in_mouth():
 def test_detect_finger_in_mouth_reversed():
     # "suck your finger" — mouth word comes first
     actions, body, camera = _detect_action("suck your finger slowly")
-    assert actions[0] == "finger in mouth"
+    assert actions[0] == "one finger in mouth"
     assert camera == "face level"
 
 
@@ -352,12 +352,12 @@ def test_detect_blowjob_keyword():
 
 def test_detect_lick_finger():
     actions, body, camera = _detect_action("lick your finger")
-    assert actions[0] == "finger in mouth"
+    assert actions[0] == "one finger in mouth"
     assert body == "mouth"
 
 def test_detect_tongue_finger():
     actions, body, _ = _detect_action("run your finger along your tongue")
-    assert actions[0] == "finger in mouth"
+    assert actions[0] == "one finger in mouth"
     assert body == "mouth"
 
 

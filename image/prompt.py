@@ -136,7 +136,7 @@ _ACTION_PATTERNS = [
         ["hands on breasts", "cupping breasts"],
         "breasts", "front view"),
     (r'\bfinger\w*\b.{0,20}\b(?:mouth|lips|suck|lick|tongue)\b|\b(?:mouth|lips|suck|lick|tongue)\b.{0,20}\bfinger\w*\b',
-        ["finger in mouth", "sucking finger", "lips parted"],
+        ["one finger in mouth", "index finger", "lips parted", "looking at viewer"],
         "mouth", "face level"),
     (r'\bsuck\b|\bblowjob\b|\bfellatio\b',
         ["fellatio", "penis in mouth", "oral sex"],
