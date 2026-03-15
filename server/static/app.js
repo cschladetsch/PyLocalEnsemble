@@ -408,6 +408,7 @@ async function triggerMedia(extra = '', auto = false) {
       ic.innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
+      _syncSeedBtn(d.pinned, d.seed);
       const rerollBtn = document.getElementById('reroll-btn');
       if (rerollBtn) rerollBtn.disabled = false;
     } else {
@@ -866,13 +867,19 @@ function closeFullscreen() {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFullscreen(); });
 
+function _syncSeedBtn(pinned, seed) {
+  const btn = document.getElementById('seed-btn');
+  if (!btn) return;
+  btn.classList.toggle('pinned', !!pinned);
+  btn.title = pinned ? `Seed ${seed} pinned — face consistent` : 'Pin seed for face consistency';
+}
+
 async function toggleSeedPin() {
   const btn = document.getElementById('seed-btn');
   const pinned = btn.classList.contains('pinned');
   const res = await fetch(pinned ? '/seed/unpin' : '/seed/pin', { method: 'POST' });
   const d = await res.json();
-  btn.classList.toggle('pinned', d.pinned);
-  btn.title = d.pinned ? `Seed ${d.seed} pinned — face consistent` : 'Pin seed for face consistency';
+  _syncSeedBtn(d.pinned, d.seed);
 }
 
 async function _sttTranscribe(webmBlob, btn) {

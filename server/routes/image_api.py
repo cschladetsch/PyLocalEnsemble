@@ -106,7 +106,12 @@ async def image_from_history(body: ImageRequest):
         sd_prompt, url = result if result and result[0] is not None else (None, None)
         if url is None and sd_prompt is None:
             return JSONResponse({"error": "Cancelled or failed."}, status_code=200)
-        return JSONResponse({"sd_prompt": sd_prompt, "url": url})
+        return JSONResponse({
+            "sd_prompt": sd_prompt,
+            "url":       url,
+            "seed":      state.last_seed,
+            "pinned":    state._seed_pinned,
+        })
 
     except Exception as e:
         import traceback

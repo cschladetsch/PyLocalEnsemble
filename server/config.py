@@ -62,6 +62,7 @@ _DEFAULT_CONFIG = {
         "user_voice":   "am_adam",
         "user_speed":   0.88,
         "user_pitch":   0.88,
+        "context_messages": 12,   # how many recent messages to include in demo prompt context
         "user_persona": "default",
         "user_personas": {
             "default":      "A charming, confident man with a poetic soul and a taste for dark beauty. Speaks with measured warmth.",

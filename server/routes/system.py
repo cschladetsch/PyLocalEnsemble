@@ -119,8 +119,9 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
     if not llm.LLM_READY:
         return JSONResponse({"error": "LLM not ready"}, status_code=503)
 
-    recent = llm.history[-10:] if llm.history else []
     demo_cfg     = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])
+    ctx_msgs     = demo_cfg.get("context_messages", 12)
+    recent       = llm.history[-ctx_msgs:] if llm.history else []
     user_name    = demo_cfg.get("user_name", "Christian")
     persona_name = config.NAME
     # Active persona description — live state takes precedence over config default
