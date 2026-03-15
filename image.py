@@ -10,15 +10,31 @@ _gen_cancel = threading.Event()
 def clean_tags(prompt: str) -> str:
     """Deduplicates tags, preserving SD weighting syntax. Weighted form wins over unweighted."""
     tags = [t.strip() for t in prompt.split(",")]
+
+    def _norm(tag):
+        bare = re.sub(r"^\((.+?):[0-9.]+\)$", r"\1", tag)
+        return re.sub(r"[^a-z0-9 ]", "", bare.lower()).strip()
+
+    def _is_weighted(tag):
+        return bool(re.match(r"^\(.+:[0-9.]+\)$", tag.strip()))
+
+    # First pass: find the best (weighted) form for each key
+    best = {}
+    for t in tags:
+        if not t: continue
+        n = _norm(t)
+        if not n: continue
+        if n not in best or _is_weighted(t):
+            best[n] = t
+
+    # Second pass: emit in original order, using the best form, skipping dupes
     seen, out = set(), []
     for t in tags:
         if not t: continue
-        # Strip weight syntax for dedup key: (anal insertion:1.7) → "anal insertion"
-        bare = re.sub(r"^\((.+?):[0-9.]+\)$", r"\1", t.strip())
-        norm = re.sub(r"[^a-z0-9 ]", "", bare.lower()).strip()
-        if norm and norm not in seen:
-            seen.add(norm)
-            out.append(t)
+        n = _norm(t)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(best[n])
     return ", ".join(out)
 
 
