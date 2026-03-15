@@ -1,6 +1,6 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
 let mediaRecorder = null, audioChunks = [];
-let lastReplyText = '';
+let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
 let llmReady = false;
 let imgHistory = [];
@@ -342,6 +342,10 @@ async function switchPersona(name) {
   const rerollBtn = document.getElementById('reroll-btn');
   if (rerollBtn) rerollBtn.disabled = true;
   loadVoices();
+  if (lastUserMsg) {
+    addMsg('user', 'You', lastUserMsg);
+    await _chatWith(lastUserMsg, { forceImage: true });
+  }
 }
 
 loadPersonas();
@@ -410,7 +414,7 @@ async function regenFromPrompt() {
 
 renderHistory();
 
-async function _chatWith(msg) {
+async function _chatWith(msg, { forceImage = false } = {}) {
   await interrupt('new message sent');
   const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
@@ -455,7 +459,7 @@ async function _chatWith(msg) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (reply) { lastReplyText = reply; speak(reply); if (autoImage) triggerMedia('', true); }
+  if (reply) { lastReplyText = reply; speak(reply); if (autoImage || forceImage) triggerMedia('', true); }
   loadInfo();
 }
 
@@ -464,6 +468,7 @@ async function send() {
   if (!msg) return;
   inp.value = '';
   if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
+  lastUserMsg = msg;
   addMsg('user', 'You', msg);
   inp.focus();
   await _chatWith(msg);
