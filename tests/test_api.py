@@ -130,19 +130,19 @@ def test_switch_persona_valid():
 
 
 def test_switch_persona_updates_appearance():
-    import alice as alice_mod
+    import state
     persona_name = list(config.PERSONAS.keys())[0]
     expected = config.PERSONAS[persona_name].get("appearance", "")
     client.post(f"/persona/{persona_name}")
-    assert alice_mod.ALICE_APPEARANCE == expected
+    assert state.ALICE_APPEARANCE == expected
 
 
 def test_switch_persona_updates_system_prompt():
-    import alice as alice_mod
+    import state
     persona_name = list(config.PERSONAS.keys())[0]
     expected = config.PERSONAS[persona_name].get("system_prompt", "")
     client.post(f"/persona/{persona_name}")
-    assert alice_mod.SYSTEM_PROMPT == expected
+    assert state.SYSTEM_PROMPT == expected
 
 
 def test_switch_persona_clears_history():
