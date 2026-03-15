@@ -305,7 +305,7 @@ async function switchModel(sel) {
 loadModels();
 
 const _PERSONA_FONTS = {
-  'default':          { family: "'Cormorant Garamond', serif",  style: 'italic', size: '1rem',   weight: '300', spacing: 'normal' },
+  'default':          { family: "'Montserrat', sans-serif",      style: 'normal', size: '.88rem', weight: '300', spacing: 'normal' },
   'android':          { family: "'Share Tech Mono', monospace", style: 'normal', size: '.85rem', weight: '400', spacing: '.04em' },
   'victorian-lady':   { family: "'Pinyon Script', cursive",     style: 'normal', size: '1.3rem', weight: '400', spacing: 'normal' },
   'egyptian-goddess': { family: "'Cinzel Decorative', serif",   style: 'normal', size: '.82rem', weight: '400', spacing: '.06em' },
