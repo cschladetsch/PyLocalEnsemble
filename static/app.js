@@ -252,7 +252,14 @@ async function triggerMedia(extra = '', auto = false) {
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (d.url) {
-      document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
+      // Preload final image before swapping — keeps preview visible until ready
+      await new Promise(resolve => {
+        const img = new Image();
+        img.onload = img.onerror = resolve;
+        img.src = d.url;
+      });
+      const ic = document.getElementById('ic');
+      ic.innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
       const rerollBtn = document.getElementById('reroll-btn');
@@ -635,6 +642,11 @@ async function reroll() {
     const res = await fetch('/reroll', { method: 'POST', signal: imgAbort.signal });
     const d = await res.json();
     if (d.url) {
+      await new Promise(resolve => {
+        const img = new Image();
+        img.onload = img.onerror = resolve;
+        img.src = d.url;
+      });
       document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
