@@ -51,7 +51,7 @@ def apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
 
 
 _PROSE_RE = re.compile(
-    r'\b(me|my\b|thee|thou|thy|down spine|tease shivers|'
+    r'\b(I|me|my\b|thee|thou|thy|down spine|tease shivers|'
     r'escaping|streaming through|weaving together)\b', re.I
 )
 

@@ -73,6 +73,12 @@ def test_parse_drops_apostrophe_tag():
     assert r.get("SETTING") == "forest"
 
 
+def test_parse_drops_first_person_prose():
+    raw = "POSE: kneeling I am standing"
+    r = _parse_template(raw)
+    assert "POSE" not in r
+
+
 def test_parse_drops_or_uncertainty():
     raw = "POSE: kneeling or bent over"
     r = _parse_template(raw)

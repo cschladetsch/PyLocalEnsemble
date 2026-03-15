@@ -50,7 +50,7 @@ _DEFAULT_CONFIG = {
         "hires_scale":  1.5,
         "hires_steps":  15,
         "hires_denoising": 0.45,
-        "hires_upscaler": "R-ESRGAN 4x+",
+        "hires_upscaler": "Latent",
     },
     "memory": {
         "max_history": 16,   # compress when history exceeds this many messages
