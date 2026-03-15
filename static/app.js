@@ -305,15 +305,19 @@ async function switchModel(sel) {
 loadModels();
 
 const _PERSONA_FONTS = {
+  'default':          { family: "'Cormorant Garamond', serif",  style: 'italic', size: '1rem',   weight: '300', spacing: 'normal' },
   'android':          { family: "'Share Tech Mono', monospace", style: 'normal', size: '.85rem', weight: '400', spacing: '.04em' },
-  'victorian-lady':   { family: "'Pinyon Script', cursive",     style: 'normal', size: '1.3rem',  weight: '400', spacing: 'normal' },
+  'victorian-lady':   { family: "'Pinyon Script', cursive",     style: 'normal', size: '1.3rem', weight: '400', spacing: 'normal' },
   'egyptian-goddess': { family: "'Cinzel Decorative', serif",   style: 'normal', size: '.82rem', weight: '400', spacing: '.06em' },
   'forest-witch':     { family: "'Almendra', serif",            style: 'italic', size: '1rem',   weight: '400', spacing: 'normal' },
 };
-const _DEFAULT_FONT = { family: "'Cormorant Garamond', serif", style: 'italic', size: '1rem', weight: '300', spacing: 'normal' };
+const _DEFAULT_FONT = _PERSONA_FONTS['default'];
+
+// Populated by loadPersonas() — maps persona name to font key
+const _personaFontKeys = {};
 
 function _applyPersonaFont(name) {
-  const key = name.toLowerCase().replace(/\s+/g, '-');
+  const key = _personaFontKeys[name] || name.toLowerCase().replace(/\s+/g, '-');
   const f = _PERSONA_FONTS[key] || _DEFAULT_FONT;
   const b = document.body;
   b.style.setProperty('--alice-font',    f.family);
@@ -328,7 +332,8 @@ async function loadPersonas() {
   const res = await fetch('/personas');
   const d = await res.json();
   const sel = document.getElementById('persona-select');
-  sel.innerHTML = d.personas.map(p => `<option value="${p}">${p}</option>`).join('');
+  sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  d.personas.forEach(p => { _personaFontKeys[p.name] = p.font_key; });
   if (sel.value) _applyPersonaFont(sel.value);
 }
 

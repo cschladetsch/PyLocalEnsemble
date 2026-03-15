@@ -70,6 +70,26 @@ def test_personas_returns_list():
     assert "personas" in data
     assert isinstance(data["personas"], list)
     assert len(data["personas"]) > 0
+    # Each entry is a dict with name and font_key
+    for p in data["personas"]:
+        assert "name" in p
+        assert "font_key" in p
+
+
+def test_personas_default_has_font_key():
+    res = client.get("/personas")
+    personas = {p["name"]: p for p in res.json()["personas"]}
+    assert "Default" in personas
+    assert personas["Default"]["font_key"] == "default"
+
+
+def test_personas_font_key_derived_from_name():
+    res = client.get("/personas")
+    personas = {p["name"]: p for p in res.json()["personas"]}
+    if "Victorian Lady" in personas:
+        assert personas["Victorian Lady"]["font_key"] == "victorian-lady"
+    if "Forest Witch" in personas:
+        assert personas["Forest Witch"]["font_key"] == "forest-witch"
 
 
 # ── DELETE /history ───────────────────────────────────────────────────────────
@@ -244,6 +264,6 @@ def test_info_name_matches_config():
 
 def test_personas_list_includes_known_personas():
     res = client.get("/personas")
-    names = res.json()["personas"]
+    names = [p["name"] for p in res.json()["personas"]]
     for key in config.PERSONAS:
         assert key in names

@@ -113,6 +113,7 @@ def load_personas(cfg: dict) -> dict:
         "Default": {
             "system_prompt": cfg["system_prompt"],
             "appearance":    cfg["appearance"],
+            "font_key":      "default",
         }
     }
     if not os.path.exists(PERSONAS_FILE):

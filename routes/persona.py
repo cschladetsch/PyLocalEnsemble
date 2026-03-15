@@ -12,7 +12,12 @@ router = APIRouter()
 
 @router.get("/personas")
 async def list_personas():
-    return JSONResponse({"personas": list(config.PERSONAS.keys())})
+    personas = []
+    for name, p in config.PERSONAS.items():
+        # font_key: explicit in config, or derive from persona name
+        font_key = p.get("font_key", name.lower().replace(" ", "-"))
+        personas.append({"name": name, "font_key": font_key})
+    return JSONResponse({"personas": personas})
 
 
 @router.post("/persona/{name}")
