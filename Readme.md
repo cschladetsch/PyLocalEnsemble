@@ -288,31 +288,31 @@ alice/
 ```mermaid
 graph TD
     subgraph App ["alice.py — entry point"]
-        Routes["FastAPI routes<br/>/chat /image /tts /stt …"]
+        Routes["FastAPI routes — /chat /image /tts /stt …"]
     end
 
     subgraph Core ["Core modules"]
-        Config["config.py<br/>paths · defaults · load/save · personas"]
-        LLM["llm.py<br/>llama-server · chat · history · memory"]
-        TTS["tts.py<br/>Kokoro load + synthesis"]
-        STT["stt.py<br/>Whisper load + transcription"]
-        Utils["utils.py<br/>step · ok · warn · http_ok · is_wsl"]
+        Config["config.py — paths · defaults · personas"]
+        LLM["llm.py — llama-server · chat · history · memory"]
+        TTS["tts.py — Kokoro load + synthesis"]
+        STT["stt.py — Whisper load + transcription"]
+        Utils["utils.py — step · ok · warn · http_ok · is_wsl"]
     end
 
     subgraph ImagePkg ["image/ package"]
-        Prompt["prompt.py<br/>clean_tags · extract_sd_prompt"]
-        Forge["forge.py<br/>start_forge · set_forge_model"]
-        Generate["generate.py<br/>generate_image · nudity handling"]
+        Prompt["prompt.py — clean_tags · extract_sd_prompt"]
+        Forge["forge.py — start_forge · set_forge_model"]
+        Generate["generate.py — generate_image · nudity handling"]
     end
 
     subgraph InstallPkg ["installer/ package"]
-        Helpers["helpers.py<br/>Spinner · _download · constants"]
-        Steps["packages · llama · model<br/>tts_install · forge_install"]
+        Helpers["helpers.py — Spinner · _download · constants"]
+        Steps["packages · llama · model · tts_install · forge_install"]
     end
 
     subgraph External ["External processes (GPU)"]
-        LlamaServer["llama-server :8080<br/>OpenAI-compatible API"]
-        ForgeProc["SD Forge :7860<br/>Stable Diffusion"]
+        LlamaServer["llama-server :8080 — OpenAI-compatible API"]
+        ForgeProc["SD Forge :7860 — Stable Diffusion"]
     end
 
     Routes --> Config
@@ -363,34 +363,34 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A([python alice.py]) --> B["config.py<br/>Load alice.json"]
-    B --> C["llm.load_llm()<br/>Connect to llama-server"]
-    C -->|not running| D["llm._start_server()<br/>Spawn llama-server"]
-    D --> E["Retry until ready<br/>up to 2 min"]
+    A([python alice.py]) --> B[config.py — Load alice.json]
+    B --> C[llm.load_llm — Connect to llama-server]
+    C -->|not running| D[llm._start_server — Spawn llama-server]
+    D --> E[Retry until ready — up to 2 min]
     C -->|already up| E
-    E --> F["llm.load_history()<br/>Restore history + memory"]
-    F --> G["tts.load_tts()<br/>Load Kokoro ONNX"]
-    G --> H{"image: Forge<br/>running?"}
-    H -->|no| I["image.start_forge()<br/>webui.bat / webui.sh"]
+    E --> F[llm.load_history — Restore history + memory]
+    F --> G[tts.load_tts — Load Kokoro ONNX]
+    G --> H{Forge running?}
+    H -->|no| I[image.start_forge — webui.bat / webui.sh]
     H -->|yes| J
-    I --> J["image.set_forge_model()<br/>Select checkpoint"]
-    J --> K(["Open browser<br/>localhost:8000"])
+    I --> J[image.set_forge_model — Select checkpoint]
+    J --> K([Open browser — localhost:8000])
 ```
 
 ### Memory compression
 
 ```mermaid
 flowchart TD
-    M[New message arrives] --> C{"history ><br/>memory.max_history<br/>(default 16)?"}
+    M[New message arrives] --> C{history > max_history?}
     C -->|no| R[Normal reply]
-    C -->|yes| S["Take oldest messages<br/>keep memory.keep_recent<br/>(default 8)"]
-    S --> LLM["llm.py: LLM summarises<br/>into 2-4 sentences"]
+    C -->|yes| S[Take oldest msgs, keep keep_recent]
+    S --> LLM[LLM summarises into 2-4 sentences]
     LLM --> MEM[Append to memory string]
-    MEM --> CAP{"memory ><br/>memory.max_chars<br/>(default 1500)?"}
+    MEM --> CAP{memory > max_chars?}
     CAP -->|yes| TRIM[Trim to last N chars]
     CAP -->|no| R
     TRIM --> R
-    R --> SYS["Inject memory into<br/>system prompt"]
+    R --> SYS[Inject memory into system prompt]
 ```
 
 ---
