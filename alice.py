@@ -61,6 +61,7 @@ BASE_NEGATIVE      = config.CFG["negative_prompt"]
 _auto_image_counter = 0
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
+NO_SPEECH   = "--no-speech" in sys.argv
 
 # ── Logging config ────────────────────────────────────────────────────────────
 import logging
@@ -394,6 +395,8 @@ def _tts_clean(text: str) -> str:
 
 @app.post("/tts")
 async def speak(body: TtsRequest):
+    if NO_SPEECH:
+        return JSONResponse({"audio": None})
     if tts.TTS is None:
         return JSONResponse({"error": "TTS not ready"}, status_code=503)
     try:
@@ -451,7 +454,8 @@ def _startup():
     try:
         llm.load_llm()
         llm.load_history()
-        tts.load_tts()
+        if not NO_SPEECH:
+            tts.load_tts()
         image.start_forge()
         sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
         image.set_forge_model(sd_checkpoint)
