@@ -288,15 +288,21 @@ async function switchModel(sel) {
 
 loadModels();
 
+function _applyPersonaFont(name) {
+  document.body.dataset.persona = name.toLowerCase().replace(/\s+/g, '-');
+}
+
 async function loadPersonas() {
   const res = await fetch('/personas');
   const d = await res.json();
   const sel = document.getElementById('persona-select');
   sel.innerHTML = d.personas.map(p => `<option value="${p}">${p}</option>`).join('');
+  if (sel.value) _applyPersonaFont(sel.value);
 }
 
 async function switchPersona(name) {
   await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
+  _applyPersonaFont(name);
   document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';

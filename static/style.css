@@ -55,3 +55,8 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .cp{position:relative}
 .img-progress-track{width:75%;max-width:280px;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
 .img-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:2px;transition:width .4s ease}
+/* ── per-persona Alice message fonts ─────────────────────────────────────── */
+body[data-persona="android"] .msg.alice{font-family:'Share Tech Mono',monospace;font-style:normal;font-size:.82rem;letter-spacing:.04em}
+body[data-persona="victorian-lady"] .msg.alice{font-family:'Pinyon Script',cursive;font-style:normal;font-size:1.3rem;font-weight:400;line-height:1.5}
+body[data-persona="egyptian-goddess"] .msg.alice{font-family:'Cinzel Decorative',serif;font-style:normal;font-size:.82rem;letter-spacing:.06em}
+body[data-persona="forest-witch"] .msg.alice{font-family:'Almendra',serif;font-style:italic;font-size:1rem}
