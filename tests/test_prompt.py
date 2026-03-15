@@ -6,7 +6,7 @@ from image.prompt import _parse_template, _build_tags, _detect_action, _NUDITY_M
 # ── _parse_template ───────────────────────────────────────────────────────────
 
 GOOD_TEMPLATE = """\
-ACTION: cupping own breasts
+ACTION: cupping breasts
 BODY: breasts
 CAMERA: front view
 POSE: standing
@@ -18,7 +18,7 @@ LIGHTING: soft lighting"""
 
 def test_parse_all_fields():
     r = _parse_template(GOOD_TEMPLATE)
-    assert r["ACTION"]   == "cupping own breasts"
+    assert r["ACTION"]   == "cupping breasts"
     assert r["BODY"]     == "breasts"
     assert r["CAMERA"]   == "front view"
     assert r["POSE"]     == "standing"
@@ -108,12 +108,12 @@ def _tags(fields, appearance=""):
 
 
 def test_action_gets_highest_weight():
-    tags = _tags({"ACTION": "cupping own breasts"})
-    assert "(cupping own breasts:1.7)" in tags
+    tags = _tags({"ACTION": "cupping breasts"})
+    assert "(cupping breasts:1.7)" in tags
 
 
 def test_body_not_repeated_if_in_action():
-    tags = _tags({"ACTION": "cupping own breasts", "BODY": "breasts"})
+    tags = _tags({"ACTION": "cupping breasts", "BODY": "breasts"})
     # 'breasts' appears in the action tag; standalone (breasts:1.5) should be absent
     assert "(breasts:1.5)" not in tags
 
@@ -227,15 +227,15 @@ def test_last_clause_multiple_ands():
 
 def test_detect_cup_breasts():
     actions, body, camera = _detect_action("cup your breasts in your hands")
-    assert actions[0] == "cupping own breasts"
+    assert actions[0] == "cupping breasts"
     assert body   == "breasts"
     assert camera == "front view"
 
 
 def test_detect_hold_breasts():
     actions, body, _ = _detect_action("hold your breasts up for me")
-    assert actions[0] == "holding own breasts"
-    assert "cupping own breasts" in actions
+    assert actions[0] == "holding breasts"
+    assert "cupping breasts" in actions
     assert body   == "breasts"
 
 
@@ -271,7 +271,7 @@ def test_detect_compound_picks_last_matching():
     # "take off your top and cup your breasts" — after clause reorder,
     # last_user_msg = "cup your breasts in your hands, take off your top"
     actions, _, _ = _detect_action("cup your breasts in your hands, take off your top")
-    assert actions[0] == "cupping own breasts"
+    assert actions[0] == "cupping breasts"
 
 
 def test_last_clause_preserves_all_context():
