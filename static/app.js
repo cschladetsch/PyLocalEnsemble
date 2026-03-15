@@ -5,6 +5,25 @@ let charName = 'Alice';
 let llmReady = false;
 let imgHistory = [];
 
+const ENTRANCE_LINES = [
+  "Hello. I've been waiting for you...",
+  "You came back. I knew you would.",
+  "Ah. There you are.",
+  "I've been thinking about you.",
+  "You're here. Finally.",
+  "I was beginning to wonder.",
+  "Come in. I don't bite... unless asked.",
+  "I hoped it would be you.",
+  "Tell me everything.",
+  "I've been saving my best words for you.",
+  "Good. I was growing tired of my own company.",
+  "You always keep me waiting just long enough.",
+];
+
+function entranceLine() {
+  return ENTRANCE_LINES[Math.floor(Math.random() * ENTRANCE_LINES.length)];
+}
+
 // ── Web Audio streaming TTS ───────────────────────────────────────────────────
 let _audioCtx = null, _nextStart = 0, _ttsNodes = [], _ttsGen = 0;
 let _lastChunks = [];   // decoded AudioBuffers from last speak() for instant resay
@@ -105,6 +124,11 @@ async function loadInfo() {
     if (h1) h1.textContent = charName;
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
+    const firstBody = document.querySelector('#msgs .msg.alice');
+    if (firstBody && firstBody.childNodes.length === 2) {
+      // Only replace the hardcoded greeting on first load (before any conversation)
+      firstBody.childNodes[1].textContent = entranceLine();
+    }
     window._sttSilenceMs = (d.stt_silence || 3) * 1000;
     if (!llmReady && d.llm_ready) {
       llmReady = true;
@@ -763,7 +787,7 @@ async function exportHistory() {
 
 async function clearHistory() {
   await fetch('/history', { method: 'DELETE' });
-  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
+  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>${entranceLine()}</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
