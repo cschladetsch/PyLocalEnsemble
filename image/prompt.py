@@ -226,6 +226,24 @@ _NUDITY_MAP = {
 }
 
 
+# Wearable accessories — pattern-matched from the user message and injected directly,
+# bypassing the LLM (which only handles PROP for held/inserted objects).
+_ACCESSORY_RE = [
+    (r'\bglasses?\b|\bspectacles?\b|\breading glasses\b', "wearing glasses"),
+    (r'\bsunglasses?\b',                                   "wearing sunglasses"),
+    (r'\bhat\b|\bcap\b|\bberet\b',                         "wearing hat"),
+    (r'\bchoker\b|\bcollar\b',                             "choker necklace"),
+    (r'\bstockings?\b|\bthigh.?highs?\b',                  "thigh-high stockings"),
+    (r'\bheels?\b|\bstiletto\w*\b',                        "high heels"),
+    (r'\bmask\b',                                          "wearing mask"),
+]
+
+
+def _detect_accessories(msg: str) -> list:
+    """Return SD accessory tags for any wearables explicitly mentioned in user message."""
+    return [tag for pattern, tag in _ACCESSORY_RE if re.search(pattern, msg, re.I)]
+
+
 _STOP_WORDS = re.compile(r'\b(with|the|a|an|of|in|on|at|and|or|but|from|into|by)\s*$', re.I)
 
 def _parse_template(raw: str) -> dict:
@@ -308,6 +326,10 @@ def _build_tags(fields: dict, appearance: str) -> str:
     prop = fields.get("PROP", "").strip().lower()
     if prop and prop != "none":
         add(prop, 1.4)
+
+    # Accessories — glasses, hat, collar, etc. (detected from user message, not LLM)
+    for acc in fields.get("ACCESSORIES", []):
+        add(acc, 1.3)
 
     # Extra secondary detail
     extra = fields.get("EXTRA", "")
@@ -393,6 +415,12 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
         ])
 
         fields = _parse_template(raw)
+
+        # Detect wearable accessories from user message — LLM only handles held props
+        accessories = _detect_accessories(last_user_msg)
+        if accessories:
+            fields["ACCESSORIES"] = accessories
+            print(f"[image] accessories detected: {accessories}")
 
         # Override ACTION/BODY/CAMERA with pattern match from user command —
         # the LLM reliably misreads Alice's prose response for these fields.

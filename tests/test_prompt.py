@@ -1,6 +1,6 @@
 """Tests for image/prompt.py: structured template parsing and tag building."""
 import pytest
-from image.prompt import _parse_template, _build_tags, _detect_action, _NUDITY_MAP, _CAMERA_MAP
+from image.prompt import _parse_template, _build_tags, _detect_action, _detect_accessories, _NUDITY_MAP, _CAMERA_MAP
 
 
 # ── _parse_template ───────────────────────────────────────────────────────────
@@ -463,3 +463,40 @@ def test_multiple_action_tags_descending_weights():
     assert "(cupping breasts:1.7)" in tags
     assert "(hands on breasts:1.6)" in tags
     assert "(breast grab:1.5)" in tags
+
+
+# ── _detect_accessories ────────────────────────────────────────────────────────
+
+def test_accessory_glasses():
+    assert "wearing glasses" in _detect_accessories("put on your glasses")
+
+def test_accessory_spectacles():
+    assert "wearing glasses" in _detect_accessories("wear your spectacles")
+
+def test_accessory_sunglasses():
+    assert "wearing sunglasses" in _detect_accessories("put on sunglasses")
+
+def test_accessory_hat():
+    assert "wearing hat" in _detect_accessories("put on your hat")
+
+def test_accessory_choker():
+    assert "choker necklace" in _detect_accessories("wear your choker")
+
+def test_accessory_stockings():
+    assert "thigh-high stockings" in _detect_accessories("put on your stockings")
+
+def test_accessory_heels():
+    assert "high heels" in _detect_accessories("put on heels and dance")
+
+def test_accessory_no_match():
+    assert _detect_accessories("show me your breasts") == []
+
+def test_accessory_multiple():
+    result = _detect_accessories("put on glasses and heels")
+    assert "wearing glasses" in result
+    assert "high heels" in result
+
+def test_accessory_injected_into_build_tags():
+    tags = _build_tags({"ACCESSORIES": ["wearing glasses", "high heels"]}, "")
+    assert "(wearing glasses:1.3)" in tags
+    assert "(high heels:1.3)" in tags
