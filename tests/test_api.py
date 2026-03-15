@@ -90,3 +90,87 @@ def test_voices_returns_list():
     data = res.json()
     assert "voices" in data
     assert isinstance(data["voices"], list)
+
+
+def test_voices_includes_current():
+    res = client.get("/voices")
+    assert "current" in res.json()
+
+
+# ── POST /voice ───────────────────────────────────────────────────────────────
+
+def test_set_voice_valid():
+    import tts as tts_mod
+    voice = tts_mod.VOICES[0]
+    res = client.post("/voice", json={"voice": voice})
+    assert res.status_code == 200
+    assert res.json()["voice"] == voice
+
+
+def test_set_voice_updates_config():
+    import tts as tts_mod
+    import config
+    voice = tts_mod.VOICES[-1]
+    client.post("/voice", json={"voice": voice})
+    assert config.CFG["tts"]["voice"] == voice
+
+
+def test_set_voice_unknown_returns_400():
+    res = client.post("/voice", json={"voice": "non_existent_voice"})
+    assert res.status_code == 400
+
+
+# ── POST /persona/{name} ──────────────────────────────────────────────────────
+
+def test_switch_persona_valid():
+    persona_name = list(config.PERSONAS.keys())[0]
+    res = client.post(f"/persona/{persona_name}")
+    assert res.status_code == 200
+    assert res.json()["persona"] == persona_name
+
+
+def test_switch_persona_updates_appearance():
+    import alice as alice_mod
+    persona_name = list(config.PERSONAS.keys())[0]
+    expected = config.PERSONAS[persona_name].get("appearance", "")
+    client.post(f"/persona/{persona_name}")
+    assert alice_mod.ALICE_APPEARANCE == expected
+
+
+def test_switch_persona_updates_system_prompt():
+    import alice as alice_mod
+    persona_name = list(config.PERSONAS.keys())[0]
+    expected = config.PERSONAS[persona_name].get("system_prompt", "")
+    client.post(f"/persona/{persona_name}")
+    assert alice_mod.SYSTEM_PROMPT == expected
+
+
+def test_switch_persona_clears_history():
+    import llm
+    llm.history.append({"role": "user", "content": "test"})
+    persona_name = list(config.PERSONAS.keys())[0]
+    client.post(f"/persona/{persona_name}")
+    assert llm.history == []
+
+
+def test_switch_persona_unknown_returns_404():
+    res = client.post("/persona/NonExistentPersona99")
+    assert res.status_code == 404
+
+
+def test_switch_persona_applies_tts_effects():
+    """Android persona should set effects=android in config.CFG['tts']."""
+    if "Android" not in config.PERSONAS:
+        pytest.skip("Android persona not present")
+    client.post("/persona/Android")
+    assert config.CFG["tts"].get("effects") == "android"
+
+
+def test_switch_persona_clears_effects_on_non_android():
+    """Switching away from Android should clear the effects key."""
+    if "Android" not in config.PERSONAS:
+        pytest.skip("Android persona not present")
+    client.post("/persona/Android")
+    non_android = next(n for n in config.PERSONAS if n != "Android")
+    client.post(f"/persona/{non_android}")
+    assert config.CFG["tts"].get("effects", "") == ""

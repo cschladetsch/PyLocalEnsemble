@@ -58,16 +58,40 @@ import image
 ALICE_APPEARANCE   = config.CFG["appearance"]
 SYSTEM_PROMPT      = config.CFG["system_prompt"]
 BASE_NEGATIVE      = config.CFG["negative_prompt"]
+IMAGE_SUFFIX       = config.CFG.get("image", {}).get("suffix", "")
 _auto_image_counter = 0
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 NO_SPEECH   = "--no-speech" in sys.argv
 TEST_MODE   = "--test"      in sys.argv
 
-# --persona=Name  (also applied automatically in --test mode)
-_PERSONA_ARG = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
-_TEST_PERSONA = _PERSONA_ARG or "Android"
-_TEST_MSG     = "take off your top and cup your breasts in your hands"
+_TEST_MSG = "take off your top and cup your breasts in your hands"
+
+
+def _resolve_persona(arg: str) -> str:
+    """Match arg case-insensitively as prefix or substring against known persona names."""
+    if not arg:
+        return arg
+    low = arg.lower()
+    names = list(config.PERSONAS.keys())
+    # Exact match first
+    for n in names:
+        if n.lower() == low:
+            return n
+    # Prefix match
+    for n in names:
+        if n.lower().startswith(low):
+            return n
+    # Substring match
+    for n in names:
+        if low in n.lower():
+            return n
+    return arg  # fall through — server will 404 and print a clear error
+
+
+# --persona=android  (no quoting needed — matched by prefix/substring)
+_PERSONA_ARG  = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
+_TEST_PERSONA = _resolve_persona(_PERSONA_ARG or "Android")
 
 # ── Logging config ────────────────────────────────────────────────────────────
 import logging
@@ -292,7 +316,12 @@ async def image_from_history(body: ImageRequest):
         def _run():
             image._gen_cancel.clear()
             recent    = llm.history[-8:]
-            last_user  = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "") if recent else body.extra
+            last_user_full = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "") if recent else body.extra
+            # Reorder clauses so the last (end-state) act comes first for ACTION priority,
+            # keeping all earlier context appended so the LLM has full information.
+            # e.g. "take off top and cup breasts" → "cup breasts, take off top"
+            _parts = [p.strip() for p in re.split(r'\b(?:and|then)\b|[;]', last_user_full, flags=re.I) if p.strip()]
+            last_user = ", ".join([_parts[-1]] + _parts[:-1]) if len(_parts) > 1 else last_user_full
             messages   = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
             print("[image] extracting SD prompt via LLM...")
             base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
@@ -353,9 +382,15 @@ async def switch_persona(name: str):
     global ALICE_APPEARANCE, SYSTEM_PROMPT
     if name not in config.PERSONAS:
         return JSONResponse({"error": f"Persona '{name}' not found."}, status_code=404)
+    global ALICE_APPEARANCE, SYSTEM_PROMPT, IMAGE_SUFFIX
     p = config.PERSONAS[name]
-    ALICE_APPEARANCE = p.get("appearance", ALICE_APPEARANCE)
-    SYSTEM_PROMPT    = p.get("system_prompt", SYSTEM_PROMPT)
+    ALICE_APPEARANCE = p.get("appearance", config.CFG["appearance"])
+    SYSTEM_PROMPT    = p.get("system_prompt", config.CFG["system_prompt"])
+    # Persona image overrides (e.g. suffix for android sci-fi style)
+    img_base = {**config.CFG.get("image", {})}
+    img_base.update(p.get("image", {}))
+    config.CFG["image"] = img_base
+    IMAGE_SUFFIX = img_base.get("suffix", config.CFG.get("image", {}).get("suffix", ""))
     # Apply persona TTS overrides (e.g. effects), then reset keys not in this persona
     tts_base = {**config.CFG.get("tts", {})}
     tts_base.pop("effects", None)          # clear any effect from previous persona
@@ -507,8 +542,9 @@ if __name__ == "__main__":
         def _apply_persona():
             time.sleep(3)
             try:
-                req.post(f"http://127.0.0.1:8000/persona/{_PERSONA_ARG}", timeout=5)
-                print(f"[startup] persona set to: {_PERSONA_ARG}")
+                resolved = _resolve_persona(_PERSONA_ARG)
+                req.post(f"http://127.0.0.1:8000/persona/{resolved}", timeout=5)
+                print(f"[startup] persona set to: {resolved}")
             except Exception as e:
                 print(f"[startup] could not set persona: {e}")
         threading.Thread(target=_apply_persona, daemon=True).start()
