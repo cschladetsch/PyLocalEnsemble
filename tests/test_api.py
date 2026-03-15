@@ -145,12 +145,12 @@ def test_switch_persona_updates_system_prompt():
     assert state.SYSTEM_PROMPT == expected
 
 
-def test_switch_persona_clears_history():
+def test_switch_persona_preserves_history():
     import llm
     llm.history.append({"role": "user", "content": "test"})
     persona_name = list(config.PERSONAS.keys())[0]
     client.post(f"/persona/{persona_name}")
-    assert llm.history == []
+    assert any(m["content"] == "test" for m in llm.history)
 
 
 def test_switch_persona_unknown_returns_404():

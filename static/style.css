@@ -60,3 +60,5 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 #fullscreen-img{max-width:95vw;max-height:95vh;object-fit:contain;border:1px solid var(--border)}
 .ic img.final{cursor:zoom-in}
 #seed-btn.pinned{border-color:var(--accent);color:var(--accent)}
+
+.persona-switch-divider{text-align:center;font-size:.65rem;letter-spacing:.2em;color:var(--accent2);padding:.4rem 0;margin:.2rem 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-family:'Montserrat',sans-serif;text-transform:uppercase;opacity:.7}
