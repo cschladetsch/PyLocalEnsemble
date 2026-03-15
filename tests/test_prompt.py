@@ -60,6 +60,28 @@ def test_parse_missing_fields_returns_empty_dict():
     assert r == {}
 
 
+def test_parse_nudity_full_nudity_normalised():
+    r = _parse_template("NUDITY: full nudity")
+    assert r["NUDITY"] == "fully nude"
+
+
+def test_parse_nudity_naked_normalised():
+    r = _parse_template("NUDITY: naked")
+    assert r["NUDITY"] == "fully nude"
+
+
+def test_parse_setting_meta_commentary_dropped():
+    r = _parse_template("SETTING: somewhere with no specification\nLIGHTING: not specified but assumed")
+    assert "SETTING" not in r
+    assert "LIGHTING" not in r
+
+
+def test_parse_setting_real_value_kept():
+    r = _parse_template("SETTING: bedroom\nLIGHTING: soft lighting")
+    assert r["SETTING"] == "bedroom"
+    assert r["LIGHTING"] == "soft lighting"
+
+
 def test_parse_trailing_period_stripped():
     raw = "POSE: standing."
     r = _parse_template(raw)
@@ -288,6 +310,12 @@ def test_detect_riding():
     actions, _, camera = _detect_action("sit on me and ride")
     assert actions[0] == "riding"
     assert camera == "from below"
+
+
+def test_detect_riding_horse_excluded():
+    # "ride" with animal context must not trigger cowgirl position
+    assert _detect_action("I want to ride a horse") is None
+    assert _detect_action("let's go horse riding") is None
 
 
 def test_detect_no_match_returns_none():

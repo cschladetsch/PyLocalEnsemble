@@ -6,7 +6,31 @@ import state
 from utils import http_ok
 from image.forge import start_forge
 
-_gen_cancel = threading.Event()
+_gen_cancel    = threading.Event()
+_upscaler_cache: str | None = None   # cached after first successful query; "" = none available
+
+
+def _resolve_upscaler(forge_url: str, preferred: str) -> str | None:
+    """Return a valid upscaler name, or None if hires fix should be skipped."""
+    global _upscaler_cache
+    if _upscaler_cache is not None:
+        return _upscaler_cache or None
+    try:
+        r     = req.get(f"{forge_url}/sdapi/v1/upscalers", timeout=5)
+        names = [u.get("name") for u in r.json() if isinstance(u.get("name"), str) and u.get("name")]
+        if preferred in names:
+            _upscaler_cache = preferred
+            return preferred
+        latent = next((n for n in names if n.lower().startswith("latent")), None)
+        if latent:
+            print(f"[image] upscaler '{preferred}' not found, using '{latent}'")
+            _upscaler_cache = latent
+            return latent
+    except Exception as e:
+        print(f"[image] could not query upscalers: {e}")
+    print("[image] no valid upscaler found — hires fix disabled")
+    _upscaler_cache = ""
+    return None
 
 
 def generate_image(prompt: str, appearance: str, negative_base: str,
@@ -39,7 +63,9 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                             r"shorts|linen|silk dress|lace|veil)\b")
         clean_appearance = re.sub(clothing_pattern + r",?\s*", "", clean_appearance,
                                   flags=re.I).strip(", ")
-        negative = "clothed, dressed, clothing, dress, gown, robe, shirt, top, covered, fabric over body, " + negative
+        negative = ("clothed, dressed, clothing, dress, gown, robe, shirt, top, covered, "
+                    "fabric over body, bra, bra straps, bikini top, lingerie top, "
+                    "covered chest, fabric on chest, " + negative)
 
     used_appearance = clean_appearance if is_explicit else appearance
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + used_appearance + ", " + img_cfg["suffix"]
@@ -59,20 +85,26 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             "seed":            seed,
         }
         if img_cfg.get("hires_fix"):
-            payload.update({
-                "enable_hr":            True,
-                "hr_scale":             img_cfg.get("hires_scale",    1.5),
-                "hr_second_pass_steps": img_cfg.get("hires_steps",    15),
-                "denoising_strength":   img_cfg.get("hires_denoising", 0.45),
-                "hr_upscaler":          img_cfg.get("hires_upscaler", "R-ESRGAN 4x+"),
-            })
+            hr_upscaler = _resolve_upscaler(forge_url, img_cfg.get("hires_upscaler", "Latent"))
+            if hr_upscaler:
+                payload.update({
+                    "enable_hr":            True,
+                    "hr_scale":             img_cfg.get("hires_scale",    1.5),
+                    "hr_second_pass_steps": img_cfg.get("hires_steps",    15),
+                    "denoising_strength":   img_cfg.get("hires_denoising", 0.45),
+                    "hr_upscaler":          hr_upscaler,
+                })
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
             payload["override_settings"] = {"CLIP_stop_at_last_layers": clip_skip}
         r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         data = r.json()
         if "images" not in data:
-            print(f"[image] Forge response (no images key): {str(data)[:300]}")
+            err_type = data.get("error", "")
+            err_msg  = data.get("errors") or data.get("message") or ""
+            forge_err = f"{err_type}: {err_msg}".strip(": ") or str(data)[:300]
+            print(f"[image] Forge error response: {forge_err}")
+            raise RuntimeError(f"Forge: {forge_err}")
         imgs = data.get("images", [])
         if imgs:
             try:
@@ -82,8 +114,11 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                 state.last_seed = -1
             print(f"[image] done — got image ({len(imgs[0])} b64 chars), seed={state.last_seed}")
         else:
-            print("[image] Forge returned no images")
+            print("[image] Forge returned empty images list")
+            raise RuntimeError("Forge returned no images")
         return imgs[0] if imgs else None
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"[image] Forge error: {e}")
-        return None
+        raise RuntimeError(str(e))

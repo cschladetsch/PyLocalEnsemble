@@ -1,9 +1,42 @@
-let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, lastAudioSrc = null;
+let mid = 0, imgAbort = null, chatAbort = null, muted = false;
 let mediaRecorder = null, audioChunks = [];
 let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
 let llmReady = false;
 let imgHistory = [];
+
+// ── Web Audio streaming TTS ───────────────────────────────────────────────────
+let _audioCtx = null, _nextStart = 0, _ttsNodes = [], _ttsGen = 0;
+
+function _stopTts() {
+  _ttsGen++;                    // invalidates any in-flight speak() loops
+  _ttsNodes.forEach(n => { try { n.stop(0); } catch {} });
+  _ttsNodes = [];
+  _nextStart = 0;
+}
+
+function _ensureAudioCtx() {
+  if (!_audioCtx || _audioCtx.state === 'closed') {
+    _audioCtx = new AudioContext();
+    _nextStart = 0;
+  }
+}
+
+async function _scheduleChunk(b64wav) {
+  _ensureAudioCtx();
+  const bytes = atob(b64wav);
+  const buf = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+  const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
+  const src = _audioCtx.createBufferSource();
+  src.buffer = audioBuf;
+  src.connect(_audioCtx.destination);
+  const now   = _audioCtx.currentTime;
+  const start = Math.max(now + 0.02, _nextStart);
+  src.start(start);
+  _nextStart = start + audioBuf.duration;
+  _ttsNodes.push(src);
+}
 
 try {
   const saved = localStorage.getItem('alice_img_history_urls');
@@ -29,9 +62,11 @@ function removeImgHistoryItem(index) {
 function renderHistory() {
   const container = document.getElementById('is');
   if (!container) return;
-  container.innerHTML = imgHistory.map((item, i) =>
-    `<img src="${item.url}" onclick="showHistImg(${i})" title="${item.prompt || ''}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`
-  ).join('');
+  container.innerHTML = imgHistory.map((item, i) => {
+    const ts  = item.ts ? new Date(item.ts).toLocaleString() : '';
+    const tip = [ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
+    return `<img src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`;
+  }).join('');
 }
 
 function showHistImg(index) {
@@ -104,35 +139,52 @@ function _updateContextMeter(msgs, max) {
 loadInfo();
 
 function resay() {
-  if (!lastAudioSrc) return;
-  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
-  ttsAudio = new Audio(lastAudioSrc);
-  ttsAudio.play();
+  if (!lastReplyText) return;
+  speak(lastReplyText);
 }
 
 function toggleMute() {
   muted = !muted;
-  if (muted && ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  if (muted) _stopTts();
   document.getElementById('mute-btn').textContent = muted ? 'Unmute' : 'Mute';
 }
 
 async function speak(text) {
   if (muted) return;
+  _stopTts();
+  lastReplyText = text;
+  const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
   try {
-    const res = await fetch('/tts', {
+    const res = await fetch('/tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
     });
-    const d = await res.json();
-    if (d.audio) {
-      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
-      lastAudioSrc = 'data:audio/wav;base64,' + d.audio;
-      ttsAudio = new Audio(lastAudioSrc);
-      ttsAudio.play(); // fire and forget — image gen starts while audio plays
-      document.getElementById('resay-btn').disabled = false;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let gotFirst = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || gen !== _ttsGen) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = JSON.parse(line.slice(6));
+        if (d.error) { console.warn('TTS error:', d.error); return; }
+        if (d.chunk) {
+          if (gen !== _ttsGen) return;
+          await _scheduleChunk(d.chunk);
+          if (!gotFirst) {
+            gotFirst = true;
+            document.getElementById('resay-btn').disabled = false;
+          }
+        }
+      }
     }
-  } catch (e) { console.warn('TTS error:', e); }
+  } catch (e) { if (gen === _ttsGen) console.warn('TTS stream error:', e); }
 }
 
 function disableAll() {
@@ -146,9 +198,10 @@ function enableAll() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') interrupt('user ESC');
-  if (e.key === 'Delete' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
-    deleteActiveImage();
-  }
+  if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'Delete') deleteActiveImage();
+  if (e.key === 'm' || e.key === 'M') toggleMute();
+  if (e.key === 'r' || e.key === 'R') resay();
 });
 
 async function deleteActiveImage() {
@@ -171,6 +224,7 @@ async function deleteActiveImage() {
 }
 
 async function interrupt(reason) {
+  _stopTts();
   if (chatAbort) {
     console.log('Aborting chat:', reason);
     chatAbort.abort();
@@ -225,7 +279,7 @@ function stopProgress() {
 }
 
 async function triggerMedia(extra = '', auto = false) {
-  await interrupt('new media request');
+  if (!auto) await interrupt('new media request');  // auto: already interrupted at chat start
   imgAbort = new AbortController();
   const { signal } = imgAbort;
 
@@ -252,13 +306,17 @@ async function triggerMedia(extra = '', auto = false) {
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
     } else if (d.url) {
-      // Preload final image before swapping — keeps preview visible until ready
+      // Stop polling before preload — frees browser connections for the image fetch
+      stopProgress();
+      // Show finalizing overlay regardless of what's currently in ic
+      const ic = document.getElementById('ic');
+      const existing = ic.innerHTML;
+      ic.innerHTML = existing + '<div class="finalizing-overlay">Finalizing...</div>';
       await new Promise(resolve => {
         const img = new Image();
         img.onload = img.onerror = resolve;
         img.src = d.url;
       });
-      const ic = document.getElementById('ic');
       ic.innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
@@ -358,6 +416,7 @@ async function switchPersona(name) {
   const rerollBtn = document.getElementById('reroll-btn');
   if (rerollBtn) rerollBtn.disabled = true;
   loadVoices();
+  loadNegative();
 }
 
 loadPersonas();
@@ -426,6 +485,16 @@ async function regenFromPrompt() {
 
 renderHistory();
 
+async function loadNegative() {
+  try {
+    const r = await fetch('/negative');
+    const d = await r.json();
+    const el = document.getElementById('neg-prompt');
+    if (el && d.negative) el.textContent = d.negative;
+  } catch (e) { console.warn('Could not load negative prompt:', e); }
+}
+loadNegative();
+
 async function _chatWith(msg, { forceImage = false } = {}) {
   await interrupt('new message sent');
   const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
@@ -471,7 +540,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (reply) { lastReplyText = reply; speak(reply); if (autoImage || forceImage) triggerMedia('', true); }
+  if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
   loadInfo();
 }
 

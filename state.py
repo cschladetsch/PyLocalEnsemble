@@ -19,14 +19,13 @@ _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
 last_seed        = -1          # seed used by the most recent successful generation
 
-
-# ── Auto-image heuristic ──────────────────────────────────────────────────────
-_AUTO_IMAGE_RE = re.compile(
-    r'\b(take off|strip|undress|remove|show me|show your|spread|bend|kneel|cup|hold|touch|'
-    r'finger|ride|suck|stroke|kiss|insert|stuff|fuck|naked|nude|topless|undressed|'
-    r'lie down|sit on|get on|turn around|open|expose|reveal|clothes off|get off|'
-    r'pull down|pull up|pull off|lift)\b',
-    re.I
+# Nudity decay — returns toward "clothed" after N consecutive non-sexual turns
+_NUDITY_ORDER   = ["clothed", "topless", "bottomless", "fully nude"]
+_nudity_turns_since_keyword = 0
+_NUDITY_KEYWORDS_RE = re.compile(
+    r'\b(nude|naked|undress|strip|topless|bottomless|disrobe|take off|remove|'
+    r'bare|expose|breasts|pussy|cock|sex|fuck|cum|blowjob|suck|lick|finger|'
+    r'dildo|insert|spread|bend|kneel|ride|stroke|kiss)\b', re.I
 )
 
 # Words that signal the user wants the character to re-clothe
@@ -35,8 +34,28 @@ _RE_CLOTHE = re.compile(
 )
 
 
+def decay_nudity_state(user_msg: str) -> None:
+    """Decay nudity floor one level toward 'clothed' after 3 non-sexual turns."""
+    global _nudity_state, _nudity_turns_since_keyword
+    if _NUDITY_KEYWORDS_RE.search(user_msg):
+        _nudity_turns_since_keyword = 0
+        return
+    _nudity_turns_since_keyword += 1
+    if _nudity_turns_since_keyword >= 3 and _nudity_state != "clothed":
+        try:
+            idx = _NUDITY_ORDER.index(_nudity_state)
+        except ValueError:
+            _nudity_state = "clothed"   # unknown value — reset to safe default
+            _nudity_turns_since_keyword = 0
+            return
+        if idx > 0:
+            _nudity_state = _NUDITY_ORDER[idx - 1]
+            _nudity_turns_since_keyword = 0
+            print(f"[state] nudity decay: → {_nudity_state!r}")
+
+
 def should_auto_image(user_msg: str) -> bool:
-    return bool(_AUTO_IMAGE_RE.search(user_msg))
+    return True  # generate a scene image on every chat turn
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

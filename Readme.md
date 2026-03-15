@@ -70,6 +70,7 @@ Key settings:
 | `stt_silence_seconds` | `3` | Seconds of mic silence before recording auto-stops |
 | `tts.voice` | `"af_nicole"` | Kokoro voice ID |
 | `tts.speed` | `0.85` | TTS speed multiplier |
+| `tts.chunk_chars` | `600` | Max characters per TTS synthesis chunk. Larger values produce more natural prosody but may cause intonation drift on long replies with small models. Set per-persona in `personas.json` to tune independently. |
 | `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
 | `llama_server.ctx_size` | `2048` | Context window in tokens |
@@ -128,7 +129,7 @@ To use a different model: set `model_path` in `alice.json` and restart.
 
 ## Personas
 
-Four personas are included out of the box. Switch between them using the dropdown in the header — switching clears history and memory.
+Four personas are included out of the box. Switch between them using the dropdown in the header. History is preserved across switches — a styled divider marks the transition. The SD checkpoint and TTS voice switch automatically.
 
 | Persona | Character |
 |---------|-----------|
@@ -190,8 +191,19 @@ Alice speaks every reply using Kokoro neural TTS.
 | Control | Action |
 |---------|--------|
 | Voice dropdown | Switch TTS voice instantly |
-| Mute | Toggle voice on/off |
-| Re-say | Replay the last spoken reply |
+| Mute / **M** | Toggle voice on/off |
+| Re-say / **R** | Replay the last spoken reply |
+
+TTS is streamed sentence-by-sentence — speech starts within the first sentence, while the rest is still being synthesised.
+
+**Keyboard shortcuts** (when the text box is not focused):
+
+| Key | Action |
+|-----|--------|
+| `M` | Toggle mute |
+| `R` | Re-say last reply |
+| `Delete` | Delete current image |
+| `Esc` | Stop / interrupt |
 
 Available voices: `af_nicole`, `af_bella`, `af_sarah`, `af_sky` (American female) · `am_adam`, `am_michael` (American male) · `bf_emma`, `bf_isabella` (British female) · `bm_george`, `bm_lewis` (British male). Each persona sets its own default voice; the dropdown overrides it for the session.
 
@@ -201,7 +213,9 @@ The right panel shows the generated scene. Click **+** to open the prompt editor
 
 Press **Delete** while an image is displayed to remove it from disk and history.
 
-Thumbnail strips at the bottom show the image history for the session. Click any thumbnail to view it.
+Thumbnail strips at the bottom show the image history for the session. Click any thumbnail to view it. Hovering shows the SD prompt and timestamp.
+
+Click **+** to expand the prompt editor. At the bottom of the editor, expand **Negative prompt** to see what the current negative prompt is.
 
 ### Manual image generation
 
@@ -401,7 +415,7 @@ flowchart TD
 python -m pytest tests/ -v
 ```
 
-94 tests covering config loading, image tag utilities, SD prompt extraction, installer asset selection, TTS effects, and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
+153 tests covering config loading, image tag utilities, SD prompt extraction, installer asset selection, TTS effects (android, cathedral, crossfade), and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
 
 ---
 

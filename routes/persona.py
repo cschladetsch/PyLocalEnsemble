@@ -54,9 +54,10 @@ async def switch_persona(name: str):
         print(f"[{config.NAME}] SD model switch queued: {sd_model!r}")
 
     # Reset image session state (new persona = new scene)
-    state._nudity_state    = "clothed"
-    state._character_seed  = -1
-    state._seed_pinned     = False
+    state._nudity_state              = "clothed"
+    state._nudity_turns_since_keyword = 0
+    state._character_seed            = -1
+    state._seed_pinned               = False
 
     print(f"\n[{config.NAME}] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name, "sd_model": sd_model})

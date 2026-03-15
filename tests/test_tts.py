@@ -1,7 +1,7 @@
 """Tests for tts.py utilities."""
 import numpy as np
 import pytest
-from tts import _android_effect, _cathedral_effect, _sentence_chunks
+from tts import _android_effect, _cathedral_effect, _sentence_chunks, _crossfade
 
 
 def _sine(sr=24000, freq=440, duration=0.5):
@@ -115,3 +115,36 @@ def test_chunks_preserves_all_content():
     joined = " ".join(result)
     for word in ["One", "Two", "Three", "Four", "Five"]:
         assert word in joined
+
+
+# ── _crossfade ─────────────────────────────────────────────────────────────────
+
+def test_crossfade_single_part_unchanged():
+    a = _sine()
+    result = _crossfade([a], 24000)
+    assert np.allclose(result, a)
+
+def test_crossfade_two_parts_length():
+    sr = 24000
+    a = _sine(sr=sr, duration=0.3)
+    b = _sine(sr=sr, duration=0.3, freq=880)
+    result = _crossfade([a, b], sr, fade_ms=25)
+    fade_n = int(sr * 0.025)
+    assert len(result) == len(a) + len(b) - fade_n
+
+def test_crossfade_empty_returns_empty():
+    result = _crossfade([], 24000)
+    assert len(result) == 0
+
+def test_crossfade_preserves_dtype():
+    sr = 24000
+    a = _sine(sr=sr)
+    b = _sine(sr=sr, freq=880)
+    result = _crossfade([a, b], sr)
+    assert result.dtype == np.float32
+
+def test_crossfade_short_parts_no_crash():
+    sr = 24000
+    tiny = np.zeros(10, dtype=np.float32)
+    result = _crossfade([tiny, tiny], sr, fade_ms=25)
+    assert len(result) > 0

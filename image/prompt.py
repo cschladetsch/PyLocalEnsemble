@@ -54,6 +54,8 @@ _PROSE_RE = re.compile(
     r'\b(I|me|my\b|thee|thou|thy|down spine|tease shivers|'
     r'escaping|streaming through|weaving together)\b', re.I
 )
+# Matches verb phrases that indicate narrative prose rather than SD tags
+_VERB_PHRASE_RE = re.compile(r'\b\w+(?:ed|ened|ened)\s+\w+\b', re.I)
 
 # Weights applied programmatically by position (LLM only outputs plain tags)
 _WEIGHTS = [1.7, 1.6, 1.4, 1.3, 1.2, 1.1]
@@ -118,6 +120,29 @@ _FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "PROP", "EXTRA", "SETTI
 # Nudity states ordered from least to most undressed; used for floor logic
 _NUDITY_ORDER = ["clothed", "topless", "bottomless", "fully nude"]
 
+# Normalise LLM nudity variants to canonical keys before map/floor lookup
+_NUDITY_NORM = {
+    "full nudity":        "fully nude",
+    "full nude":          "fully nude",
+    "completely nude":    "fully nude",
+    "completely naked":   "fully nude",
+    "naked":              "fully nude",
+    "nude":               "fully nude",
+    "no clothes":         "fully nude",
+    "no clothing":        "fully nude",
+    "bare":               "topless",
+    "topless nude":       "topless",
+    "half nude":          "topless",
+    "bare breasts":       "topless",
+    "exposed breasts":    "topless",
+}
+
+# Reject SETTING/LIGHTING values that are LLM meta-commentary rather than scene tags
+_META_RE = re.compile(
+    r'\b(not specified|no specification|unspecified|unknown|unclear|assumed|'
+    r'n/?a|none given|not mentioned|not stated|not provided|not applicable)\b', re.I
+)
+
 # Pattern → (action_tags_list, body_tag, camera_hint)
 # Multiple action tags reinforce the same pose from different angles in training data.
 # Checked against the user's command; first match wins.
@@ -149,7 +174,8 @@ _ACTION_PATTERNS = [
         "pussy", "from below"),
     (r'\bride\b|\briding\b|\bsit on\b',
         ["riding", "cowgirl position", "straddling"],
-        "pussy", "from below"),
+        "pussy", "from below",
+        r'\bhorse\b|\bpony\b|\bstallion\b|\bmare\b|\bequine\b|\bbicycle\b|\bbike\b|\bmotor'),
     (r'\bbend\w*\s+over\b',
         ["bent over", "doggy style position"],
         "ass", "from behind"),
@@ -173,8 +199,12 @@ _ACTION_PATTERNS = [
 
 def _detect_action(msg: str):
     """Return (actions_list, body, camera) from pattern match, or None if no match."""
-    for pattern, actions, body, camera in _ACTION_PATTERNS:
+    for entry in _ACTION_PATTERNS:
+        pattern, actions, body, camera = entry[0], entry[1], entry[2], entry[3]
+        exclude = entry[4] if len(entry) > 4 else None
         if re.search(pattern, msg, re.I):
+            if exclude and re.search(exclude, msg, re.I):
+                continue
             return actions, body, camera
     return None
 
@@ -220,6 +250,17 @@ def _parse_template(raw: str) -> dict:
                 if re.search(r"[^a-zA-Z0-9 \-]", val):
                     print(f"[image] dropped tag with special chars: {val!r}")
                     break
+                # EXTRA: reject verb-phrase narrative ("grip tightened further")
+                if field == "EXTRA" and _VERB_PHRASE_RE.search(val):
+                    print(f"[image] dropped narrative EXTRA: {val!r}")
+                    break
+                # SETTING/LIGHTING: reject LLM meta-commentary placeholders
+                if field in ("SETTING", "LIGHTING") and _META_RE.search(val):
+                    print(f"[image] dropped meta-commentary {field}: {val!r}")
+                    break
+                # NUDITY: normalise LLM variants to canonical keys
+                if field == "NUDITY":
+                    val = _NUDITY_NORM.get(val.lower(), val)
                 if val and not _PROSE_RE.search(val):
                     result[field] = val
                 break
@@ -307,7 +348,7 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "        topless = top removed, breasts bare\n"
             "        fully nude = all clothes removed\n"
             "PROP: any held or inserted object from USER message (banana / dildo / none)\n"
-            "      Use 'none' if no object. One word only.\n"
+            "      Use 'none' if no object. 1-4 words.\n"
             "EXTRA: one secondary visual detail (nipples visible / hands on hips / etc.)\n"
             "SETTING: one word (bedroom / outdoors / forest / etc.)\n"
             "LIGHTING: two words (soft lighting / moonlight / candlelight / etc.)\n\n"
@@ -334,9 +375,15 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "LIGHTING: soft lighting"
         )
 
+        floor_hint = (
+            f"\nCURRENT NUDITY FLOOR: {nudity_floor} — she is at least this undressed already; "
+            f"NUDITY must be '{nudity_floor}' or more exposed."
+            if nudity_floor != "clothed" else ""
+        )
         user_msg = (
             f"Conversation:\n{text}\n\n"
-            f"LATEST USER MESSAGE: \"{last_user_msg}\"\n\n"
+            f"LATEST USER MESSAGE: \"{last_user_msg}\"\n"
+            f"{floor_hint}\n"
             "Fill in the nine fields above for the current scene:"
         )
 

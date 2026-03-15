@@ -35,8 +35,9 @@ _DEFAULT_CONFIG = {
         "threads":      8,
     },
     "tts": {
-        "voice": "af_nicole",
-        "speed": 0.85,
+        "voice":       "af_nicole",
+        "speed":       0.85,
+        "chunk_chars": 600,   # max chars per TTS synthesis chunk; larger = more natural flow
     },
     "image": {
         "steps":        25,

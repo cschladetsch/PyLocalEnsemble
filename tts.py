@@ -46,20 +46,30 @@ def load_tts():
 
 
 def _android_effect(samples, sr):
-    """Ring modulation + mild overdrive for a robotic voice character."""
+    """Classic robot voice: low-freq ring mod + comb filter + overdrive."""
     import numpy as np
-    t        = np.arange(len(samples)) / sr
-    carrier  = np.sin(2 * np.pi * 60 * t)   # 60 Hz buzz
+    t = np.arange(len(samples)) / sr
+
+    # --- Ring modulation at 30 Hz: the canonical deep robot buzz ---
+    carrier  = np.sin(2 * np.pi * 30 * t)
     ring_mod = samples * carrier
-    # Blend: 40% dry + 60% ring-modulated
-    blended  = 0.4 * samples + 0.6 * ring_mod
-    # Mild overdrive — soft-clip to add harmonics
-    blended  = np.tanh(blended * 1.8) / np.tanh(np.float32(1.8))
+    # 55% dry + 45% ring — clearly robotic but voice still intelligible
+    blended  = 0.55 * samples + 0.45 * ring_mod
+
+    # --- Comb filter (6 ms delay): adds metallic resonance on top ---
+    delay_smp = int(sr * 0.006)
+    delayed   = np.zeros_like(blended)
+    delayed[delay_smp:] = blended[:-delay_smp]
+    combed = 0.75 * blended + 0.25 * delayed
+
+    # --- Soft overdrive: synthesizer harmonic saturation ---
+    driven = np.tanh(combed * 2.2) / np.tanh(np.float32(2.2))
+
     # Normalise to original peak
     peak = np.max(np.abs(samples))
     if peak > 0:
-        blended *= peak / max(np.max(np.abs(blended)), 1e-6)
-    return blended.astype(samples.dtype)
+        driven = (driven * peak / max(np.max(np.abs(driven)), 1e-6))
+    return driven.astype(samples.dtype)
 
 
 def _cathedral_effect(samples, sr):
@@ -105,6 +115,50 @@ def _sentence_chunks(text: str, max_chars: int) -> list:
     return chunks or [text[:max_chars]]
 
 
+def _crossfade(parts: list, sr: int, fade_ms: int = 25) -> "np.ndarray":
+    """Blend chunk boundaries with a short linear crossfade to remove prosody seams."""
+    import numpy as np
+    if not parts:
+        return np.zeros(0, dtype=np.float32)
+    if len(parts) == 1:
+        return parts[0]
+    fade_n   = int(sr * fade_ms / 1000)
+    fade_out = np.linspace(1.0, 0.0, fade_n, dtype=np.float32)
+    fade_in  = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+    result = parts[0]
+    for p in parts[1:]:
+        if len(result) < fade_n or len(p) < fade_n:
+            result = np.concatenate([result, p])
+            continue
+        overlap = result[-fade_n:] * fade_out + p[:fade_n] * fade_in
+        result  = np.concatenate([result[:-fade_n], overlap, p[fade_n:]])
+    return result
+
+
+def tts_wav_b64_stream(text: str):
+    """Yield (b64_wav_str, is_last) for each sentence chunk — enables low-latency streaming."""
+    import numpy as np
+    tts_cfg = config.CFG.get("tts", {})
+    voice   = tts_cfg.get("voice", "af_nicole")
+    speed   = _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    effects = tts_cfg.get("effects", "")
+    chunks  = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
+    total   = len(chunks)
+    for i, chunk in enumerate(chunks):
+        s, sr = TTS.create(chunk, voice=voice, speed=speed, lang="en-us")
+        if effects == "android":
+            s = _android_effect(s, sr)
+        elif effects == "cathedral":
+            s = _cathedral_effect(s, sr)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes((s * 32767).astype(np.int16).tobytes())
+        yield base64.b64encode(buf.getvalue()).decode(), (i == total - 1)
+
+
 def tts_wav_b64(text: str) -> str:
     import numpy as np
     tts_cfg  = config.CFG.get("tts", {})
@@ -113,12 +167,12 @@ def tts_wav_b64(text: str) -> str:
     effects  = tts_cfg.get("effects", "")
     print(f"[tts] voice={voice}, speed={speed}, effects={effects!r}, {len(text)} chars")
 
-    chunks = _sentence_chunks(text, max_chars=300)
+    chunks = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
     parts, sr = [], None
     for chunk in chunks:
         s, sr = TTS.create(chunk, voice=voice, speed=speed, lang="en-us")
         parts.append(s)
-    samples = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+    samples = _crossfade(parts, sr) if parts else np.zeros(0, dtype=np.float32)
 
     if effects == "android":
         samples = _android_effect(samples, sr)

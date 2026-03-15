@@ -40,10 +40,13 @@ async def image_from_history(body: ImageRequest):
             _parts = [p.strip() for p in re.split(r'\b(?:and|then)\b|[;]', last_user_full, flags=re.I) if p.strip()]
             last_user = ", ".join([_parts[-1]] + _parts[:-1]) if len(_parts) > 1 else last_user_full
 
-            # Re-clothing resets nudity state
+            # Re-clothing resets nudity state; otherwise decay if conversation went off-topic
             if state._RE_CLOTHE.search(last_user):
                 state._nudity_state = "clothed"
+                state._nudity_turns_since_keyword = 0
                 print("[image] re-clothing detected — nudity state reset")
+            else:
+                state.decay_nudity_state(last_user)
 
             messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
             print("[image] extracting SD prompt via LLM...")

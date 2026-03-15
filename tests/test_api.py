@@ -267,3 +267,93 @@ def test_personas_list_includes_known_personas():
     names = [p["name"] for p in res.json()["personas"]]
     for key in config.PERSONAS:
         assert key in names
+
+
+def test_switch_persona_resets_decay_counter():
+    import state
+    state._nudity_state = "topless"
+    state._nudity_turns_since_keyword = 2
+    persona_name = list(config.PERSONAS.keys())[0]
+    client.post(f"/persona/{persona_name}")
+    assert state._nudity_turns_since_keyword == 0
+
+
+# ── GET /negative ──────────────────────────────────────────────────────────────
+
+def test_negative_returns_string():
+    res = client.get("/negative")
+    assert res.status_code == 200
+    assert "negative" in res.json()
+    assert isinstance(res.json()["negative"], str)
+
+
+def test_negative_matches_state():
+    import state
+    res = client.get("/negative")
+    assert res.json()["negative"] == state.BASE_NEGATIVE
+
+
+# ── state.decay_nudity_state ───────────────────────────────────────────────────
+
+@pytest.fixture()
+def clean_nudity_state():
+    """Restore nudity state globals after each decay test."""
+    import state
+    saved_state   = state._nudity_state
+    saved_counter = state._nudity_turns_since_keyword
+    yield
+    state._nudity_state              = saved_state
+    state._nudity_turns_since_keyword = saved_counter
+
+
+def test_decay_no_change_on_sexual_keyword(clean_nudity_state):
+    import state
+    state._nudity_state = "topless"
+    state._nudity_turns_since_keyword = 0
+    state.decay_nudity_state("show me your breasts")
+    assert state._nudity_state == "topless"
+    assert state._nudity_turns_since_keyword == 0
+
+
+def test_decay_increments_counter_on_non_sexual(clean_nudity_state):
+    import state
+    state._nudity_state = "topless"
+    state._nudity_turns_since_keyword = 0
+    state.decay_nudity_state("how are you today")
+    assert state._nudity_turns_since_keyword == 1
+    assert state._nudity_state == "topless"   # not yet decayed
+
+
+def test_decay_fires_after_three_turns(clean_nudity_state):
+    import state
+    state._nudity_state = "topless"
+    state._nudity_turns_since_keyword = 0
+    for msg in ["hello", "nice day", "tell me a story"]:
+        state.decay_nudity_state(msg)
+    assert state._nudity_state == "clothed"
+    assert state._nudity_turns_since_keyword == 0
+
+
+def test_decay_does_not_go_below_clothed(clean_nudity_state):
+    import state
+    state._nudity_state = "clothed"
+    state._nudity_turns_since_keyword = 5
+    state.decay_nudity_state("hello")
+    assert state._nudity_state == "clothed"
+
+
+def test_decay_unknown_state_resets_to_clothed(clean_nudity_state):
+    import state
+    state._nudity_state = "semi-nude"   # invalid — not in _NUDITY_ORDER
+    state._nudity_turns_since_keyword = 3
+    state.decay_nudity_state("good morning")
+    assert state._nudity_state == "clothed"
+
+
+def test_decay_fully_nude_decays_one_step(clean_nudity_state):
+    import state
+    state._nudity_state = "fully nude"
+    state._nudity_turns_since_keyword = 0
+    for msg in ["hello", "how are you", "nice weather"]:
+        state.decay_nudity_state(msg)
+    assert state._nudity_state == "bottomless"

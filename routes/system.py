@@ -66,6 +66,11 @@ async def info():
     })
 
 
+@router.get("/negative")
+async def get_negative():
+    return JSONResponse({"negative": state.BASE_NEGATIVE})
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index():
     static_dir = os.path.join(config.ALICE_DIR, "static")

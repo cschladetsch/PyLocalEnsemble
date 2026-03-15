@@ -1,6 +1,6 @@
-import re, asyncio
+import re, asyncio, json, queue, threading
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import config
@@ -54,6 +54,54 @@ async def speak(body: TtsRequest):
         return JSONResponse({"audio": audio})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/tts/stream")
+async def speak_stream(body: TtsRequest):
+    import sys
+    if "--no-speech" in sys.argv:
+        async def _empty():
+            yield 'data: {"done":true}\n\n'
+        return StreamingResponse(_empty(), media_type="text/event-stream")
+    if tts.TTS is None:
+        async def _err():
+            yield 'data: {"error":"TTS not ready"}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream", status_code=503)
+
+    clean = _tts_clean(body.text)
+    q:    queue.Queue     = queue.Queue()
+    stop: threading.Event = threading.Event()
+
+    def _worker():
+        try:
+            for b64, is_last in tts.tts_wav_b64_stream(clean):
+                if stop.is_set():
+                    break
+                q.put(('chunk', b64, is_last))
+        except Exception as e:
+            q.put(('error', str(e), True))
+        q.put(('done', None, True))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    async def _stream():
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                kind, data, _ = item
+                if kind == 'done':
+                    break
+                elif kind == 'error':
+                    yield f'data: {json.dumps({"error": data})}\n\n'
+                    break
+                else:
+                    yield f'data: {json.dumps({"chunk": data})}\n\n'
+        finally:
+            stop.set()          # tell worker to stop generating
+            q.put(('done', None, True))  # unblock any pending q.get in the executor
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 @router.post("/stt")
