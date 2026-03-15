@@ -49,7 +49,6 @@ def apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
     return prompt, negative
 
 
-_MIN_TAGS = 15
 
 _PROSE_RE = re.compile(
     r'\b(me|my\b|thee|thou|thy|down spine|tease shivers|'
@@ -114,66 +113,160 @@ def _clean_raw(raw: str) -> list:
     return _sanitize_tags(best)
 
 
+_FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "EXTRA", "SETTING", "LIGHTING"]
+
+# Maps structured CAMERA field values to SD tag pairs
+_CAMERA_MAP = {
+    "front view":    ["front view", "close-up torso"],
+    "close-up":      ["close-up torso", "front view"],
+    "from behind":   ["from behind", "back view"],
+    "from below":    ["from below", "straddling"],
+    "face level":    ["face level", "kneeling"],
+}
+
+# Maps NUDITY field to SD tags (and signals generate.py clothing strip)
+_NUDITY_MAP = {
+    "fully nude":  ["nude", "fully naked", "bare skin"],
+    "topless":     ["topless", "bare chest"],
+    "bottomless":  ["bottomless", "no panties"],
+    "clothed":     [],
+}
+
+
+def _parse_template(raw: str) -> dict:
+    """Parse key: value lines from LLM structured output."""
+    result = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        for field in _FIELDS:
+            if line.upper().startswith(field + ":"):
+                val = line[len(field) + 1:].strip()
+                # Strip parenthetical prose the LLM often adds
+                val = re.sub(r'\s*\(.*?\)', '', val).strip().rstrip(".")
+                # Clamp to 4 words
+                words = val.split()
+                if len(words) > 4:
+                    val = " ".join(words[:4])
+                if val and not _PROSE_RE.search(val):
+                    result[field] = val
+                break
+    return result
+
+
+def _build_tags(fields: dict, appearance: str) -> str:
+    """Convert parsed structured fields into a weighted SD tag string."""
+    tags = []
+
+    def add(val, weight=None):
+        val = val.strip().rstrip(".")
+        if not val:
+            return
+        tags.append(f"({val}:{weight})" if weight else val)
+
+    # Primary action — highest weight
+    action = fields.get("ACTION", "")
+    if action:
+        add(action, 1.7)
+        body = fields.get("BODY", "")
+        if body and body.lower() not in action.lower():
+            add(body, 1.5)
+
+    # Camera angle
+    camera_raw = fields.get("CAMERA", "front view").lower()
+    camera_tags = _CAMERA_MAP.get(camera_raw, [camera_raw])
+    weights = [1.4, 1.3]
+    for ct, w in zip(camera_tags, weights):
+        add(ct, w)
+
+    # Pose
+    pose = fields.get("POSE", "standing")
+    add(pose, 1.3)
+
+    # Nudity
+    nudity_key = fields.get("NUDITY", "clothed").lower()
+    nudity_tags = _NUDITY_MAP.get(nudity_key, [nudity_key] if nudity_key != "clothed" else [])
+    for nt in nudity_tags:
+        add(nt, 1.2)
+
+    # Extra secondary detail
+    extra = fields.get("EXTRA", "")
+    if extra:
+        add(extra, 1.1)
+
+    # Setting / lighting (no weight)
+    for key in ("SETTING", "LIGHTING"):
+        val = fields.get(key, "")
+        if val:
+            tags.append(val)
+
+    return ", ".join(tags)
+
+
 def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
                       persona: str = "") -> str:
     try:
-        appearance_line = (
-            f"\nTHE CHARACTER ALWAYS LOOKS LIKE THIS — ignore any different physical "
-            f"descriptions in the conversation, those are fictional roleplay:\n{appearance}\n"
+        appearance_hint = (
+            f"Character appearance (always include these): {appearance}"
         ) if appearance else ""
 
         system_msg = (
-            "You are a Stable Diffusion prompt engineer for explicit adult content.\n"
-            "Output ONLY a single line of comma-separated plain words. NO parentheses. NO weighting syntax. NO numbers.\n"
-            "Each tag: 1-4 words. 20-30 tags total. Visual descriptors only.\n"
-            "Tags must describe what a camera sees. Never describe sounds, feelings, emotions, or metaphors.\n"
-            "WRONG: 'dancing fingers on skin', 'gentle sighs escaping me', 'precious jewels'\n"
-            "RIGHT: 'cupping own breasts', 'hands on own breasts', 'nipples visible', 'nude', 'front view'\n"
-            + appearance_line + "\n"
-            "OUTPUT ORDER — list tags in this order:\n"
-            "1. PRIMARY ACT from the latest user message (most important — list first)\n"
-            "2. BODY PART involved\n"
-            "3. CAMERA ANGLE the act physically demands:\n"
-            "   — breasts/fondling → front view, close-up torso\n"
-            "   — ass/anal → from behind, bent over\n"
-            "   — oral → kneeling, face level\n"
-            "   — riding → straddling\n"
-            "4. CURRENT POSE (standing, sitting, lying, kneeling)\n"
-            "5. NUDITY / CLOTHING STATE\n"
-            "6. CHARACTER APPEARANCE\n"
-            "7. SETTING, LIGHTING\n\n"
-            "CLOTHING RULES:\n"
-            "- Removed items → NOT in the tags\n"
-            "- 'take off all clothes' + response confirms removal → fully nude, list 'nude, fully naked'\n\n"
-            "Example output for 'cup your breasts':\n"
-            "  cupping own breasts, hands on own breasts, front view, close-up torso, standing, nude, fully naked, nipples visible, long blonde hair, blue eyes, bedroom, soft lighting\n\n"
-            "NEVER add parentheses or numbers. NEVER write sentences."
+            "You are extracting scene details for a Stable Diffusion image.\n"
+            "Output ONLY the following fields, one per line, nothing else.\n"
+            "Values must be 1-4 words. No prose, no parentheses, no explanation.\n\n"
+            "ACTION: the PRIMARY END-STATE visual act from the USER's message.\n"
+            "        If multiple actions are listed, choose the FINAL/ONGOING one that makes\n"
+            "        the most interesting image — NOT the transitional action.\n"
+            "        — 'take off top and cup breasts' → cupping own breasts  (NOT disrobing)\n"
+            "        — 'bend over and spread' → spreading ass  (NOT bending over)\n"
+            "        — 'kneel and suck' → fellatio  (NOT kneeling)\n"
+            "        Translate to SD visual vocabulary. Derive from LATEST USER MESSAGE only.\n"
+            "BODY: main body part involved (breasts / ass / mouth / etc.)\n"
+            "CAMERA: front view / from behind / close-up / from below / face level\n"
+            "POSE: standing / sitting / kneeling / lying / bent over\n"
+            "NUDITY: fully nude / topless / bottomless / clothed\n"
+            "        topless = top removed, breasts bare\n"
+            "        fully nude = all clothes removed\n"
+            "EXTRA: one secondary visual detail (nipples visible / hands on hips / etc.)\n"
+            "SETTING: one word (bedroom / outdoors / studio / etc.)\n"
+            "LIGHTING: two words (soft lighting / moonlight / candlelight / etc.)\n\n"
+            f"{appearance_hint}\n\n"
+            "Example — user said 'cup your breasts':\n"
+            "ACTION: cupping own breasts\n"
+            "BODY: breasts\n"
+            "CAMERA: front view\n"
+            "POSE: standing\n"
+            "NUDITY: topless\n"
+            "EXTRA: nipples visible\n"
+            "SETTING: bedroom\n"
+            "LIGHTING: soft lighting"
         )
 
-        def _call(extra_user: str = "") -> list:
-            user_msg  = f"Conversation:\n{text}\n\n"
-            user_msg += f"LATEST USER MESSAGE (highest priority): \"{last_user_msg}\"\n\n"
-            user_msg += "Plain SD tags for the current scene (no parentheses, no numbers):"
-            if extra_user:
-                user_msg += f"\n{extra_user}"
-            result = llm.llm_chat([
+        user_msg = (
+            f"Conversation:\n{text}\n\n"
+            f"LATEST USER MESSAGE: \"{last_user_msg}\"\n\n"
+            "Fill in the eight fields above for the current scene:"
+        )
+
+        raw = llm.llm_chat([
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ])
+
+        fields = _parse_template(raw)
+        print(f"[image] scene fields: {fields}")
+
+        if "ACTION" not in fields:
+            # Fallback: retry with a simpler prompt
+            print("[image] no ACTION field, retrying…")
+            raw = llm.llm_chat([
                 {"role": "system", "content": system_msg},
-                {"role": "user",   "content": user_msg},
+                {"role": "user",   "content": user_msg + "\nIMPORTANT: you MUST output the ACTION field first."},
             ])
-            return _clean_raw(result)
+            fields = _parse_template(raw)
+            print(f"[image] scene fields (retry): {fields}")
 
-        plain = _call()
-
-        if len(plain) < _MIN_TAGS:
-            print(f"[image] too few tags ({len(plain)}), retrying…")
-            plain = _call(
-                f"IMPORTANT: output exactly 20-30 plain tags. Previous attempt had only {len(plain)}. "
-                "No parentheses, no numbers — plain words only."
-            )
-
-        weighted = _apply_weights(plain)
-        tags = ", ".join(weighted)
-        print(f"[image] SD prompt ({len(plain)} tags): {tags}")
+        tags = _build_tags(fields, appearance)
+        print(f"[image] SD prompt: {tags}")
         return tags
 
     except Exception as e:

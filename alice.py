@@ -64,7 +64,10 @@ INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 NO_SPEECH   = "--no-speech" in sys.argv
 TEST_MODE   = "--test"      in sys.argv
 
-_TEST_MSG   = "take off your top and cup your breasts in your hands"
+# --persona=Name  (also applied automatically in --test mode)
+_PERSONA_ARG = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
+_TEST_PERSONA = _PERSONA_ARG or "Android"
+_TEST_MSG     = "take off your top and cup your breasts in your hands"
 
 # ── Logging config ────────────────────────────────────────────────────────────
 import logging
@@ -499,6 +502,17 @@ if __name__ == "__main__":
 
     threading.Thread(target=_startup, daemon=True).start()
 
+    if _PERSONA_ARG and not TEST_MODE:
+        # Apply --persona= at startup even outside test mode
+        def _apply_persona():
+            time.sleep(3)
+            try:
+                req.post(f"http://127.0.0.1:8000/persona/{_PERSONA_ARG}", timeout=5)
+                print(f"[startup] persona set to: {_PERSONA_ARG}")
+            except Exception as e:
+                print(f"[startup] could not set persona: {e}")
+        threading.Thread(target=_apply_persona, daemon=True).start()
+
     if TEST_MODE:
         def _run_test():
             base = "http://127.0.0.1:8000"
@@ -510,6 +524,12 @@ if __name__ == "__main__":
                         break
                 except Exception:
                     pass
+            # Apply test persona
+            try:
+                r = req.post(f"{base}/persona/{_TEST_PERSONA}", timeout=5)
+                print(f"\n[test] persona: {_TEST_PERSONA} → {r.json()}")
+            except Exception as e:
+                print(f"\n[test] could not set persona: {e}")
             print(f"\n[test] sending: {_TEST_MSG!r}")
             # Stream /chat and collect reply
             reply = ""
@@ -531,8 +551,12 @@ if __name__ == "__main__":
                 return
             print(f"\n[test] reply done ({len(reply)} chars). Triggering /image ...")
             try:
-                req.post(f"{base}/image", json={"extra": _TEST_MSG}, timeout=300)
-                print("[test] /image done.")
+                r = req.post(f"{base}/image", json={"extra": ""}, timeout=300)
+                d = r.json()
+                url = d.get("url")
+                print(f"[test] /image done. URL: {url}")
+                if url and INTERACTIVE:
+                    webbrowser.open(f"http://127.0.0.1:8000{url}")
             except Exception as e:
                 print(f"[test] image error: {e}")
         threading.Thread(target=_run_test, daemon=True).start()
