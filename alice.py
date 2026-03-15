@@ -59,6 +59,7 @@ ALICE_APPEARANCE   = config.CFG["appearance"]
 SYSTEM_PROMPT      = config.CFG["system_prompt"]
 BASE_NEGATIVE      = config.CFG["negative_prompt"]
 IMAGE_SUFFIX       = config.CFG.get("image", {}).get("suffix", "")
+_BASE_IMAGE_CFG    = {**config.CFG.get("image", {})}   # snapshot before any persona mutates it
 _auto_image_counter = 0
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
@@ -386,11 +387,11 @@ async def switch_persona(name: str):
     p = config.PERSONAS[name]
     ALICE_APPEARANCE = p.get("appearance", config.CFG["appearance"])
     SYSTEM_PROMPT    = p.get("system_prompt", config.CFG["system_prompt"])
-    # Persona image overrides (e.g. suffix for android sci-fi style)
-    img_base = {**config.CFG.get("image", {})}
-    img_base.update(p.get("image", {}))
-    config.CFG["image"] = img_base
-    IMAGE_SUFFIX = img_base.get("suffix", config.CFG.get("image", {}).get("suffix", ""))
+    # Persona image overrides — start from base snapshot so previous persona's suffix doesn't leak
+    img_cfg = {**_BASE_IMAGE_CFG}
+    img_cfg.update(p.get("image", {}))
+    config.CFG["image"] = img_cfg
+    IMAGE_SUFFIX = img_cfg.get("suffix", "")
     # Apply persona TTS overrides (e.g. effects), then reset keys not in this persona
     tts_base = {**config.CFG.get("tts", {})}
     tts_base.pop("effects", None)          # clear any effect from previous persona

@@ -66,6 +66,41 @@ def test_parse_trailing_period_stripped():
     assert r["POSE"] == "standing"
 
 
+def test_parse_drops_apostrophe_tag():
+    raw = "EXTRA: nature's hidden treasures visible\nSETTING: forest"
+    r = _parse_template(raw)
+    assert "EXTRA" not in r
+    assert r.get("SETTING") == "forest"
+
+
+def test_parse_drops_or_uncertainty():
+    raw = "POSE: kneeling or bent over"
+    r = _parse_template(raw)
+    assert "POSE" not in r
+
+
+def test_parse_strips_dangling_preposition():
+    raw = "SETTING: mossy forest clearing with"
+    r = _parse_template(raw)
+    assert r.get("SETTING") == "mossy forest clearing"
+
+
+def test_prop_gets_weight():
+    tags = _tags({"PROP": "banana"})
+    assert "(banana:1.4)" in tags
+
+
+def test_prop_none_excluded():
+    tags = _tags({"PROP": "none"})
+    assert "none" not in tags
+
+
+def test_prop_empty_excluded():
+    tags = _tags({})
+    # no PROP key → nothing added
+    assert "none" not in tags
+
+
 # ── _build_tags ───────────────────────────────────────────────────────────────
 
 def _tags(fields, appearance=""):

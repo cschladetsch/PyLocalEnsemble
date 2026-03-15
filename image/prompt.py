@@ -113,7 +113,7 @@ def _clean_raw(raw: str) -> list:
     return _sanitize_tags(best)
 
 
-_FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "EXTRA", "SETTING", "LIGHTING"]
+_FIELDS = ["ACTION", "BODY", "CAMERA", "POSE", "NUDITY", "PROP", "EXTRA", "SETTING", "LIGHTING"]
 
 # Pattern → (action_tags_list, body_tag, camera_hint)
 # Multiple action tags reinforce the same pose from different angles in training data.
@@ -190,6 +190,8 @@ _NUDITY_MAP = {
 }
 
 
+_STOP_WORDS = re.compile(r'\b(with|the|a|an|of|in|on|at|and|or|but|from|into|by)\s*$', re.I)
+
 def _parse_template(raw: str) -> dict:
     """Parse key: value lines from LLM structured output."""
     result = {}
@@ -200,10 +202,18 @@ def _parse_template(raw: str) -> dict:
                 val = line[len(field) + 1:].strip()
                 # Strip parenthetical prose the LLM often adds
                 val = re.sub(r'\s*\(.*?\)', '', val).strip().rstrip(".")
-                # Clamp to 4 words
+                # Reject if LLM expressed uncertainty ("kneeling or bent over")
+                if re.search(r'\bor\b', val, re.I):
+                    break
+                # Clamp to 4 words, then strip dangling stop words
                 words = val.split()
                 if len(words) > 4:
                     val = " ".join(words[:4])
+                val = _STOP_WORDS.sub('', val).strip()
+                # Reject if contains non-tag characters (apostrophes, quotes, etc.)
+                if re.search(r"[^a-zA-Z0-9 \-]", val):
+                    print(f"[image] dropped tag with special chars: {val!r}")
+                    break
                 if val and not _PROSE_RE.search(val):
                     result[field] = val
                 break
@@ -247,6 +257,11 @@ def _build_tags(fields: dict, appearance: str) -> str:
     for nt in nudity_tags:
         add(nt, 1.2)
 
+    # Prop — key object from user command (banana, dildo, etc.)
+    prop = fields.get("PROP", "").strip().lower()
+    if prop and prop != "none":
+        add(prop, 1.4)
+
     # Extra secondary detail
     extra = fields.get("EXTRA", "")
     if extra:
@@ -285,16 +300,29 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "NUDITY: fully nude / topless / bottomless / clothed\n"
             "        topless = top removed, breasts bare\n"
             "        fully nude = all clothes removed\n"
+            "PROP: any held or inserted object from USER message (banana / dildo / none)\n"
+            "      Use 'none' if no object. One word only.\n"
             "EXTRA: one secondary visual detail (nipples visible / hands on hips / etc.)\n"
-            "SETTING: one word (bedroom / outdoors / studio / etc.)\n"
+            "SETTING: one word (bedroom / outdoors / forest / etc.)\n"
             "LIGHTING: two words (soft lighting / moonlight / candlelight / etc.)\n\n"
             f"{appearance_hint}\n\n"
+            "Example — user said 'stuff a banana in your pussy':\n"
+            "ACTION: vaginal insertion\n"
+            "BODY: pussy\n"
+            "CAMERA: from below\n"
+            "POSE: kneeling\n"
+            "NUDITY: fully nude\n"
+            "PROP: banana\n"
+            "EXTRA: legs spread\n"
+            "SETTING: bedroom\n"
+            "LIGHTING: soft lighting\n\n"
             "Example — user said 'cup your breasts':\n"
             "ACTION: cupping own breasts\n"
             "BODY: breasts\n"
             "CAMERA: front view\n"
             "POSE: standing\n"
             "NUDITY: topless\n"
+            "PROP: none\n"
             "EXTRA: nipples visible\n"
             "SETTING: bedroom\n"
             "LIGHTING: soft lighting"
@@ -303,7 +331,7 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
         user_msg = (
             f"Conversation:\n{text}\n\n"
             f"LATEST USER MESSAGE: \"{last_user_msg}\"\n\n"
-            "Fill in the eight fields above for the current scene:"
+            "Fill in the nine fields above for the current scene:"
         )
 
         raw = llm.llm_chat([
