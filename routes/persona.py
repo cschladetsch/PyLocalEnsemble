@@ -36,8 +36,9 @@ async def switch_persona(name: str):
     config.CFG["image"] = img_cfg
     state.IMAGE_SUFFIX = img_cfg.get("suffix", "")
 
-    # Per-persona negative prompt
-    state.BASE_NEGATIVE = p.get("negative_prompt", state._BASE_NEGATIVE)
+    # Per-persona negative appends to base so anatomy terms are never lost
+    persona_neg = p.get("negative_prompt", "")
+    state.BASE_NEGATIVE = (state._BASE_NEGATIVE + ", " + persona_neg) if persona_neg else state._BASE_NEGATIVE
 
     # TTS overrides — clear previous persona's effects before applying new ones
     tts_base = {**config.CFG.get("tts", {})}

@@ -18,7 +18,7 @@ _DEFAULT_CONFIG = {
     "llama_model":        "mistral-nemo",
     "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "(deformed iris, deformed pupils), semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime, text, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, bad anatomy, bad proportions, extra limbs, disfigured, gross proportions, malformed limbs, extra legs, extra arms, extra feet, four legs, six legs, too many limbs, fused limbs, missing arms, fused fingers, too many fingers, long neck, watermark, signature",
+    "negative_prompt": "(worst quality:2), (low quality:2), lowres, (bad anatomy:1.5), (bad hands:1.6), (mutated hands:1.5), (extra fingers:1.5), (missing fingers:1.4), (fused fingers:1.5), (too many fingers:1.5), poorly drawn hands, poorly drawn face, (deformed iris:1.4), (deformed pupils:1.4), mutation, deformed, blurry, bad proportions, (extra limbs:1.4), disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, floating limbs, disconnected limbs, out of frame, cropped, duplicate, morbid, mutilated, cloned face, long neck, text, signature, watermark, username, jpeg artifacts, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime",
     "system_prompt": (
         "You are Alice. Respond always in first person as Alice — never narrate in third person.\n"
         "You are enigmatic, sensual, intelligent, and fully present.\n"
