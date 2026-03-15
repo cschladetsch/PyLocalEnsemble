@@ -245,6 +245,27 @@ def test_detect_fellatio():
     assert camera == "face level"
 
 
+def test_detect_finger_in_mouth():
+    actions, body, camera = _detect_action("put your finger in your mouth")
+    assert actions[0] == "finger in mouth"
+    assert body   == "mouth"
+    assert camera == "face level"
+
+
+def test_detect_finger_in_mouth_reversed():
+    # "suck your finger" — mouth word comes first
+    actions, body, camera = _detect_action("suck your finger slowly")
+    assert actions[0] == "finger in mouth"
+    assert camera == "face level"
+
+
+def test_detect_finger_pussy_not_confused():
+    # plain "finger" with no mouth context → fingering
+    actions, body, _ = _detect_action("finger me")
+    assert actions[0] == "fingering"
+    assert body == "pussy"
+
+
 def test_detect_bend_over():
     actions, body, camera = _detect_action("bend over and show me")
     assert actions[0] == "bent over"
