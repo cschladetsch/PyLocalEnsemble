@@ -5,7 +5,7 @@ let charName = 'Alice';
 let llmReady = false;
 let _activePersona = '';
 let imgHistory = [];
-let _demoMode = false, _demoTimer = null, _demoSkip = false;
+let _demoMode = false, _demoTimer = null, _demoSkip = false, _demoPaused = false;
 
 const ENTRANCE_LINES = [
   "Hello. I've been waiting for you...",
@@ -279,8 +279,7 @@ document.addEventListener('keydown', e => {
 });
 
 // Auto-stop demo if the user takes over — focus input or type a printable char into it
-document.getElementById('inp')?.addEventListener('focus', () => { if (_demoMode) stopDemo(); });
-document.getElementById('inp')?.addEventListener('input',  () => { if (_demoMode) stopDemo(); });
+// Demo mode is not stopped by typing — only by actually sending a message or pressing the Demo button.
 
 async function deleteActiveImage() {
   const img = document.querySelector('#ic img');
@@ -667,7 +666,16 @@ async function send() {
   lastUserMsg = msg;
   addMsg('user', 'You', msg);
   inp.focus();
+  if (_demoMode) {
+    // Pause demo and abort its current turn so our message goes through cleanly
+    _demoPaused = true;
+    _demoSkip = true;
+    _stopTts();
+    if (chatAbort) { chatAbort.abort(); chatAbort = null; }
+    if (imgAbort)  { imgAbort.abort();  imgAbort  = null; }
+  }
   await _chatWith(msg);
+  if (_demoMode) _demoPaused = false;  // let demo resume after Alice replies
   inp.focus();
 }
 
@@ -685,6 +693,7 @@ function startDemo() {
 
 function stopDemo() {
   _demoMode = false;
+  _demoPaused = false;
   if (_demoTimer) { clearTimeout(_demoTimer); _demoTimer = null; }
   _updateDemoBtn();
 }
@@ -709,6 +718,11 @@ let _demoTurn = 0;
 
 async function demoLoop() {
   if (!_demoMode) return;
+  // If user is sending a message, hold here until they're done
+  while (_demoPaused) {
+    if (!_demoMode) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
   _demoSkip = false;
   try {
     // Fetch the next user-side prompt, passing turn for mood-arc
