@@ -1,9 +1,11 @@
+import asyncio
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 import config
 import llm
 import state
+import image
 
 router = APIRouter()
 
@@ -37,6 +39,13 @@ async def switch_persona(name: str):
     tts_base.update(p.get("tts", {}))
     config.CFG["tts"] = tts_base
 
+    # Per-persona SD model — switch in background so persona switch returns immediately
+    sd_model = p.get("sd_model", "")
+    if sd_model:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, image.set_forge_model, sd_model)
+        print(f"[{config.NAME}] SD model switch queued: {sd_model!r}")
+
     # Reset session state
     state._nudity_state    = "clothed"
     state._character_seed  = -1
@@ -44,4 +53,4 @@ async def switch_persona(name: str):
 
     llm.clear_history()
     print(f"\n[{config.NAME}] Switched to persona: {name}")
-    return JSONResponse({"status": "ok", "persona": name})
+    return JSONResponse({"status": "ok", "persona": name, "sd_model": sd_model})
