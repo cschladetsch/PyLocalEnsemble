@@ -12,7 +12,21 @@ if not LLAMA_URL.startswith("http"):
     LLAMA_URL = "http://" + LLAMA_URL
 
 
+_DETECTED_MODEL = None
+
 def llm_model() -> str:
+    global _DETECTED_MODEL
+    if _DETECTED_MODEL:
+        return _DETECTED_MODEL
+    try:
+        r = req.get(f"{LLAMA_URL}/v1/models", timeout=2)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                _DETECTED_MODEL = data[0]["id"]
+                return _DETECTED_MODEL
+    except Exception:
+        pass
     return config.CFG.get("llama_model", "mistral-nemo")
 
 
@@ -36,8 +50,8 @@ def _start_server():
         warn("llama-server not found — run install.py or start it manually.")
         return
     sc = {**config._DEFAULT_CONFIG["llama_server"], **config.CFG.get("llama_server", {})}
-    ok(f"Starting llama-server with {os.path.basename(model_path)} "
-       f"(ngl={sc['n_gpu_layers']}, ctx={sc['ctx_size']})...")
+    print(f"        server: using config: {sc}")
+    ok(f"Starting llama-server with {os.path.basename(model_path)} (ngl={sc['n_gpu_layers']}, ctx={sc['ctx_size']})...")
     flags = [
         exe, "-m", model_path,
         "--host", "127.0.0.1", "--port", "8080",
@@ -87,16 +101,37 @@ def load_llm():
 
 
 def llm_chat(messages: list) -> str:
-    r = req.post(f"{LLAMA_URL}/v1/chat/completions", json={
-        "model":            llm_model(),
+    # Try to get the actual model name from the server to avoid 400 errors
+    model = llm_model()
+    
+    payload = {
+        "model":            model,
         "messages":         messages,
         "stream":           False,
         "temperature":      0.9,
-        "top_p":            0.95,
-        "repeat_penalty":   1.15,
-        "presence_penalty": 0.6,
-    }, timeout=120)
-    r.raise_for_status()
+        "top_p":            0.92,
+        "repeat_penalty":   1.25,
+        "presence_penalty": 0.8,
+        "frequency_penalty": 0.5,
+    }
+    
+    r = req.post(f"{LLAMA_URL}/v1/chat/completions", json=payload, timeout=120)
+    
+    # If 400, try a minimal payload (some versions don't like certain parameters)
+    if r.status_code == 400:
+        print(f"[llm] 400 Bad Request. Retrying with minimal payload... Server said: {r.text}")
+        minimal = {
+            "model":    model,
+            "messages": messages,
+            "stream":   False,
+        }
+        r = req.post(f"{LLAMA_URL}/v1/chat/completions", json=minimal, timeout=120)
+
+    if r.status_code != 200:
+        print(f"[llm] Error {r.status_code}: {r.text}")
+        print(f"[llm] Payload was: {json.dumps(payload, indent=2)}")
+        r.raise_for_status()
+        
     return r.json()["choices"][0]["message"]["content"]
 
 

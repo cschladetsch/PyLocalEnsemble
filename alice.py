@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Alice — run with: python alice.py
-Run install.py first if this is a fresh clone.
+Runs install.py automatically on first use if dependencies are missing.
 """
 import subprocess, sys, time, os, re, json, webbrowser, threading, asyncio
+import requests as req
 import queue as _queue
 
 # ── Windows CUDA DLL path fix ─────────────────────────────────────────────────
@@ -22,17 +23,24 @@ if os.name == "nt":
                 except (AttributeError, OSError):
                     pass
 
-# ── Dependency check ──────────────────────────────────────────────────────────
-try:
-    import fastapi, uvicorn, pydantic
-    import requests as req
-    from kokoro_onnx import Kokoro as _Kokoro  # noqa: F401
-    import faster_whisper as _fw               # noqa: F401
-    import av as _av                           # noqa: F401
-except ImportError as _e:
-    print(f"\nERROR: Missing dependency: {_e}")
-    print("Run:  python install.py")
-    sys.exit(1)
+# ── Auto-install if needed ────────────────────────────────────────────────────
+def _needs_install() -> bool:
+    try:
+        import fastapi, uvicorn, pydantic, requests
+        from kokoro_onnx import Kokoro        # noqa: F401
+        import faster_whisper, av             # noqa: F401
+        return False
+    except ImportError:
+        return True
+
+if _needs_install():
+    _install = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install.py")
+    print("\nDependencies missing — running install.py first...\n")
+    result = subprocess.run([sys.executable, _install])
+    if result.returncode != 0:
+        print("\ninstall.py failed. Fix the errors above and try again.")
+        sys.exit(1)
+    print("\nInstall complete — starting Alice...\n")
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -53,6 +61,43 @@ BASE_NEGATIVE      = config.CFG["negative_prompt"]
 _auto_image_counter = 0
 
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
+
+# ── Logging config ────────────────────────────────────────────────────────────
+import logging
+
+class _NoSpamFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "/progress" not in msg and "/favicon" not in msg
+
+_LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "\033[33m[%(asctime)s]\033[0m %(levelprefix)s %(message)s",
+            "datefmt": "%H:%M:%S",
+            "use_colors": None,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": '\033[33m[%(asctime)s]\033[0m %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            "datefmt": "%H:%M:%S",
+        },
+    },
+    "handlers": {
+        "default": {"formatter": "default", "class": "logging.StreamHandler", "stream": "ext://sys.stderr"},
+        "access":  {"formatter": "access",  "class": "logging.StreamHandler", "stream": "ext://sys.stdout",
+                    "filters": ["no_spam"]},
+    },
+    "filters": {"no_spam": {"()": _NoSpamFilter}},
+    "loggers": {
+        "uvicorn":        {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "uvicorn.error":  {"level": "INFO"},
+        "uvicorn.access": {"handlers": ["access"],  "level": "INFO", "propagate": False},
+    },
+}
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI()
@@ -80,125 +125,151 @@ class TtsRequest(BaseModel):
     text: str
 
 
+def save_generated_image(b64_data: str) -> str:
+    import base64
+    out_dir = os.path.join(config.ALICE_DIR, "static", "outputs")
+    os.makedirs(out_dir, exist_ok=True)
+    fname = f"img_{int(time.time() * 1000)}.png"
+    fpath = os.path.join(out_dir, fname)
+    with open(fpath, "wb") as f:
+        f.write(base64.b64decode(b64_data))
+    return f"/static/outputs/{fname}"
+
+
 @app.post("/chat")
 async def chat(body: ChatRequest):
     global _auto_image_counter
+    print(f"\n[backend] Received /chat request: {body.message[:50]}...")
     if not llm.LLM_READY:
         async def _not_ready():
             yield f"data: {json.dumps({'error': 'LLM server is still starting up — please wait a moment and try again.'})}\n\n"
         return StreamingResponse(_not_ready(), media_type="text/event-stream")
 
-    llm.history.append({"role": "user", "content": body.message})
-    sys_prompt = SYSTEM_PROMPT
-    if llm.memory:
-        sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
-    messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)
-    print(f"\n[chat] user: {body.message[:120]!r}")
+    try:
+        llm.history.append({"role": "user", "content": body.message})
+        sys_prompt = SYSTEM_PROMPT
+        if llm.memory:
+            sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
+        messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)
+        print(f"[chat] user: {body.message!r}")
 
-    async def generate():
-        global _auto_image_counter
-        q = _queue.Queue()
-        collected = []
+        async def generate():
+            global _auto_image_counter
+            q = _queue.Queue()
+            collected = []
 
-        def _run():
-            try:
-                r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
-                    "model":            llm.llm_model(),
-                    "messages":         messages,
-                    "stream":           True,
-                    "temperature":      0.9,
-                    "top_p":            0.95,
-                    "repeat_penalty":   1.15,
-                    "presence_penalty": 0.6,
-                }, stream=True, timeout=120)
-                r.raise_for_status()
-                for line in r.iter_lines():
-                    if not line:
-                        continue
-                    if isinstance(line, bytes):
-                        line = line.decode("utf-8")
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[6:]
-                    if payload == "[DONE]":
-                        break
-                    data = json.loads(payload)
-                    delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                    if delta:
-                        collected.append(delta)
-                        q.put(delta)
-            except Exception as e:
-                q.put(e)
-            q.put(None)
+            def _run():
+                try:
+                    r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
+                        "model":            llm.llm_model(),
+                        "messages":         messages,
+                        "stream":           True,
+                        "temperature":      0.9,
+                        "top_p":            0.92,
+                        "repeat_penalty":   1.25,
+                        "presence_penalty": 0.8,
+                        "frequency_penalty": 0.5,
+                    }, stream=True, timeout=120)
+                    if r.status_code != 200:
+                        print(f"[chat] Error {r.status_code}: {r.text}")
+                        r.raise_for_status()
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        if isinstance(line, bytes):
+                            line = line.decode("utf-8")
+                        if not line.startswith("data: "):
+                            continue
+                        payload = line[6:]
+                        if payload == "[DONE]":
+                            break
+                        data = json.loads(payload)
+                        delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            collected.append(delta)
+                            q.put(delta)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    q.put(e)
+                q.put(None)
 
-        loop = asyncio.get_running_loop()
-        fut  = loop.run_in_executor(None, _run)
+            loop = asyncio.get_running_loop()
+            fut  = loop.run_in_executor(None, _run)
 
-        while True:
-            try:
-                item = q.get_nowait()
-            except _queue.Empty:
-                await asyncio.sleep(0.005)
-                continue
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                llm.history.pop()
-                yield f"data: {json.dumps({'error': str(item)})}\n\n"
-                return
-            yield f"data: {json.dumps({'delta': item})}\n\n"
+            while True:
+                try:
+                    item = q.get_nowait()
+                except _queue.Empty:
+                    await asyncio.sleep(0.005)
+                    continue
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    if llm.history: llm.history.pop()
+                    yield f"data: {json.dumps({'error': str(item)})}\n\n"
+                    return
+                yield f"data: {json.dumps({'delta': item})}\n\n"
 
-        await fut
+            await fut
 
-        reply = "".join(collected)
-        print(f"[chat] raw reply ({len(reply)} chars): {reply[:80]!r}{'...' if len(reply)>80 else ''}")
-        reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
-        reply = re.sub(
-            r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
-            r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
-            r'Here\'s a revised\b|Here is a revised\b).*',
-            '', reply, flags=re.DOTALL | re.IGNORECASE
-        ).strip()
+            reply = "".join(collected)
+            print(f"[chat] raw reply ({len(reply)} chars): {reply!r}")
+            reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
+            reply = re.sub(
+                r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
+                r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
+                r'Here\'s a revised\b|Here is a revised\b).*',
+                '', reply, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
 
-        llm.history.append({"role": "assistant", "content": reply})
-        await loop.run_in_executor(None, llm.compress_history)
-        llm.save_history()
+            llm.history.append({"role": "assistant", "content": reply})
+            await loop.run_in_executor(None, llm.compress_history)
+            llm.save_history()
 
-        _auto_image_counter += 1
-        auto_every = config.CFG.get("image", {}).get("auto_every", 1)
-        auto_img   = (_auto_image_counter % auto_every == 0)
-        print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
-        yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
+            _auto_image_counter += 1
+            auto_every = config.CFG.get("image", {}).get("auto_every", 1)
+            auto_img   = (_auto_image_counter % auto_every == 0)
+            print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
+            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/generate")
 async def generate_raw(body: GenerateRequest):
     loop = asyncio.get_running_loop()
-    img  = await loop.run_in_executor(None, lambda: image.generate_image(
-        body.prompt, ALICE_APPEARANCE, BASE_NEGATIVE,
-        steps=body.steps, cfg_scale=body.cfg_scale,
-    ))
-    if img:
-        return JSONResponse({"image": img})
+    def _regen():
+        img = image.generate_image(
+            body.prompt, ALICE_APPEARANCE, BASE_NEGATIVE,
+            steps=body.steps, cfg_scale=body.cfg_scale,
+        )
+        return save_generated_image(img) if img else None
+
+    url = await loop.run_in_executor(None, _regen)
+    if url:
+        return JSONResponse({"url": url})
     return JSONResponse({"error": "No image generated."}, status_code=500)
 
 
 @app.post("/interrupt")
 async def interrupt():
     image._gen_cancel.set()
-    try:
-        req.post(f"{config.CFG['forge_url']}/sdapi/v1/interrupt", timeout=5)
-    except Exception as e:
-        print(f"Interrupt Forge error: {e}")
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, lambda: req.post(
+        f"{config.CFG['forge_url']}/sdapi/v1/interrupt", timeout=5
+    ))
     return {"status": "interrupted"}
 
 
 @app.get("/progress")
 async def get_progress():
     try:
-        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress", timeout=3)
+        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=false", timeout=3)
         return JSONResponse(r.json())
     except Exception:
         return JSONResponse({"progress": 0, "state": {}})
@@ -206,40 +277,50 @@ async def get_progress():
 
 @app.post("/image")
 async def image_from_history(body: ImageRequest):
+    print(f"\n[backend] Received /image request, extra='{body.extra}'")
     if not llm.history:
         return JSONResponse({"error": "No conversation history yet."}, status_code=400)
 
-    def _run():
-        image._gen_cancel.clear()
-        recent    = llm.history[-6:]
-        messages  = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
-        last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-        print("[image] extracting SD prompt via LLM...")
-        base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
-                                               last_user_msg=last_user, persona=SYSTEM_PROMPT)
-        if image._gen_cancel.is_set():
-            print("[image] cancelled before Forge call")
-            return None, None
-        positive_parts, negative_parts = [], []
-        for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
-            if token.lower().startswith("no "):
-                negative_parts.append(token[3:].strip())
-            else:
-                positive_parts.append(token)
-        base_prompt = image.clean_tags(base_prompt)
-        positive_extra = ", ".join(positive_parts)
-        extra_negative = ", ".join(negative_parts)
-        prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-        prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
-        img = image.generate_image(prompt, ALICE_APPEARANCE, BASE_NEGATIVE, extra_negative=extra_negative)
-        return prompt, img
+    try:
+        def _run():
+            image._gen_cancel.clear()
+            recent    = llm.history[-8:]
+            if not recent:
+                return None, None
+            messages  = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
+            last_user = next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+            print("[image] extracting SD prompt via LLM...")
+            base_prompt = image.extract_sd_prompt(messages, appearance=ALICE_APPEARANCE,
+                                                   last_user_msg=last_user, persona=SYSTEM_PROMPT)
+            if image._gen_cancel.is_set():
+                print("[image] cancelled before Forge call")
+                return None, None
+            positive_parts, negative_parts = [], []
+            for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
+                if token.lower().startswith("no "):
+                    negative_parts.append(token[3:].strip())
+                else:
+                    positive_parts.append(token)
+            base_prompt = image.clean_tags(base_prompt)
+            positive_extra = ", ".join(positive_parts)
+            extra_negative = ", ".join(negative_parts)
+            prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+            prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
+            img = image.generate_image(prompt, ALICE_APPEARANCE, BASE_NEGATIVE, extra_negative=extra_negative)
+            url = save_generated_image(img) if img else None
+            return prompt, url
 
-    loop   = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, _run)
-    sd_prompt, img = result if result[0] is not None else (None, None)
-    if img is None and sd_prompt is None:
-        return JSONResponse({"error": "Cancelled."}, status_code=200)
-    return JSONResponse({"sd_prompt": sd_prompt, "image": img})
+        loop   = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, _run)
+        sd_prompt, url = result if result and result[0] is not None else (None, None)
+        if url is None and sd_prompt is None:
+            return JSONResponse({"error": "Cancelled or failed."}, status_code=200)
+
+        return JSONResponse({"sd_prompt": sd_prompt, "url": url})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/models")
@@ -339,16 +420,14 @@ async def index():
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
-
-
 def _startup():
     try:
         llm.load_llm()
         llm.load_history()
         tts.load_tts()
         image.start_forge()
-        image.set_forge_model(_RV_FILENAME)
+        sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
+        image.set_forge_model(sd_checkpoint)
     except Exception as e:
         print(f"\n[{config.NAME}] FATAL ERROR IN STARTUP THREAD: {e}")
         import traceback
@@ -374,6 +453,6 @@ if __name__ == "__main__":
         print("        NOTE: Non-interactive session detected; not opening browser.")
 
     try:
-        uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+        uvicorn.run(app, host="127.0.0.1", port=8000, log_config=_LOG_CONFIG)
     except BaseException as e:
         print(f"\n[{config.NAME}] Server failed: {type(e).__name__}: {e}")

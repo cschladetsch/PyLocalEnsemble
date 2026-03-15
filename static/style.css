@@ -22,12 +22,17 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .ir button{background:var(--accent2);border:none;color:var(--text);padding:.7rem 1.4rem;cursor:pointer;font-family:'Montserrat',sans-serif;font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;transition:background .2s}
 .ir button:hover{background:var(--accent)}
 .ir button:disabled{opacity:.4;cursor:not-allowed}
-.ip{width:420px;flex-shrink:0;display:flex;flex-direction:column;background:var(--panel)}
+.ip{width:540px;flex-shrink:0;display:flex;flex-direction:column;background:var(--panel)}
 .ih{padding:.8rem 1.2rem;border-bottom:1px solid var(--border);font-size:.65rem;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
-.pd-toggle{background:none;border:1px solid var(--border);color:var(--muted);width:1.4rem;height:1.4rem;cursor:pointer;font-size:.8rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.ic-wrap{flex:1;display:flex;overflow:hidden;border-bottom:1px solid var(--border)}
+.ic{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1rem;overflow:hidden;gap:.5rem;position:relative}
+.is{width:110px;border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;gap:.6rem;padding:.6rem;scrollbar-width:thin;scrollbar-color:var(--border) transparent;background:var(--bg)}
+.is img{width:100%;aspect-ratio:1/1;object-fit:cover;border:1px solid var(--border);cursor:pointer;opacity:.6;transition:all .2s;flex-shrink:0}
+.is img:hover{opacity:1;border-color:var(--accent2)}
+.is img.active{opacity:1;border-color:var(--accent);box-shadow:0 0 8px var(--accent2)}
+.pd-toggle{background:none;border:1px solid var(--border);color:var(--muted);width:auto;min-width:1.4rem;height:1.4rem;padding:0 .4rem;cursor:pointer;font-size:.8rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .pd-toggle:hover{border-color:var(--accent2);color:var(--accent)}
-.ic{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1rem;overflow:hidden;gap:.5rem}
-.ic img,.ic video{max-width:100%;max-height:calc(100% - 2.5rem);object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}.ph{color:var(--muted);text-align:center;font-style:italic;font-family:'Cormorant Garamond',serif;font-size:1rem}
+.ic img,.ic video{max-width:100%;max-height:calc(100% - 2rem);object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}.ic img.preview{filter:blur(4px);opacity:.6;transition:filter .4s,opacity .4s}.ic img.final{filter:none;opacity:1}.ph{color:var(--muted);text-align:center;font-style:italic;font-family:'Cormorant Garamond',serif;font-size:1rem}
 .pd{padding:.6rem 1.2rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.4rem}
 .pd textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.68rem;font-family:'Montserrat',sans-serif;line-height:1.5;resize:vertical;min-height:60px;padding:.4rem;outline:none}
 .pd textarea:focus{border-color:var(--accent2)}
@@ -38,6 +43,9 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:1.8rem;lette
 .sliders span{min-width:2rem;text-align:right;color:var(--accent)}
 .sliders input[type=range]{flex:1;accent-color:var(--accent2);height:3px}
 #mic-btn.recording{background:var(--accent);color:var(--bg);animation:pulse .8s infinite}
+#mic-select{background:var(--accent2);border:none;border-left:1px solid var(--bg);color:var(--text);padding:.7rem .5rem;cursor:pointer;font-family:'Montserrat',sans-serif;font-size:.75rem;appearance:none;-webkit-appearance:none;width:1.6rem;text-align:center;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23e8dde4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:center}
+#mic-select:hover{background-color:var(--accent)}
+#mic-select option{background:var(--panel);color:var(--text)}
 .gen{color:var(--accent);font-style:italic;animation:pulse 1.2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .dots::after{content:'';animation:dots 1.2s steps(4,end) infinite}

@@ -24,10 +24,9 @@ _DEFAULT_MODEL_QUANT = "Q4_K_M"
 _TTS_MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
 _TTS_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
 
-# Stable Diffusion checkpoint
-_RV_FILENAME = "Realistic_Vision_V5.1_fp16-no-ema.safetensors"
-_RV_URL = ("https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE"
-           "/resolve/main/Realistic_Vision_V5.1_fp16-no-ema.safetensors")
+# Stable Diffusion checkpoint — PornMaster Pro v9 VAE (photorealistic, explicit, public HuggingFace)
+_RV_FILENAME = "pornmasterPro_v9VAE.safetensors"
+_RV_URL = "https://huggingface.co/Demo112211/pornmasterPro_v9VAE.safetensors/resolve/main/pornmasterPro_v9VAE.safetensors"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,6 +74,22 @@ def _json_get(url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "alice-installer/1.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
+
+
+def _filename_from_response(url: str) -> str:
+    """HEAD the URL and extract filename from Content-Disposition, or fall back to URL basename."""
+    try:
+        r = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "alice-installer/1.0"})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            cd = resp.headers.get("Content-Disposition", "")
+            for part in cd.split(";"):
+                part = part.strip()
+                if part.startswith("filename="):
+                    return part[9:].strip('"\'')
+    except Exception:
+        pass
+    # fall back to last path segment before query string
+    return url.split("?")[0].rstrip("/").split("/")[-1] or "model.safetensors"
 
 # ── steps ─────────────────────────────────────────────────────────────────────
 
@@ -369,14 +384,30 @@ def install_forge():
     # Download checkpoint if not present
     sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
     os.makedirs(sd_dir, exist_ok=True)
-    existing = glob.glob(os.path.join(sd_dir, "*.safetensors"))
-    if existing:
-        ok(f"Checkpoint already present: {os.path.basename(existing[0])}")
+
+    custom_url = cfg.get("sd_checkpoint_url", "")
+    if custom_url:
+        info("resolving custom checkpoint filename ...")
+        filename = cfg.get("sd_checkpoint") or _filename_from_response(custom_url)
+        if not filename.endswith(".safetensors"):
+            filename += ".safetensors"
+        dest = os.path.join(sd_dir, filename)
+        if os.path.exists(dest):
+            ok(f"Checkpoint already present: {filename}")
+        else:
+            info(f"downloading {filename} ...")
+            _download(custom_url, dest, filename)
+            ok(f"checkpoint ready: {filename}")
+        cfg["sd_checkpoint"] = filename
     else:
-        info(f"downloading Realistic Vision V5.1 (~2.1 GB) ...")
         dest = os.path.join(sd_dir, _RV_FILENAME)
-        _download(_RV_URL, dest, _RV_FILENAME)
-        ok(f"checkpoint ready: {_RV_FILENAME}")
+        if os.path.exists(dest):
+            ok(f"Checkpoint already present: {_RV_FILENAME}")
+        else:
+            info(f"downloading PornMaster Pro v9 VAE (~2.1 GB) ...")
+            _download(_RV_URL, dest, _RV_FILENAME)
+            ok(f"checkpoint ready: {_RV_FILENAME}")
+        cfg.setdefault("sd_checkpoint", _RV_FILENAME)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

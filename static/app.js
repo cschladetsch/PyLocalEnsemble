@@ -2,6 +2,49 @@ let mid = 0, imgAbort = null, chatAbort = null, muted = false, ttsAudio = null, 
 let mediaRecorder = null, audioChunks = [];
 let charName = 'Alice';
 let llmReady = false;
+let imgHistory = [];
+
+try {
+  const saved = localStorage.getItem('alice_img_history_urls');
+  if (saved) imgHistory = JSON.parse(saved);
+} catch (e) { console.warn('Failed to load image history:', e); }
+
+function saveImg(url, prompt) {
+  if (!url) return;
+  imgHistory.unshift({ url, prompt, ts: Date.now() });
+  if (imgHistory.length > 100) imgHistory.pop();
+  try {
+    localStorage.setItem('alice_img_history_urls', JSON.stringify(imgHistory));
+  } catch (e) { console.error('Failed to save history:', e); }
+  renderHistory();
+}
+
+function renderHistory() {
+  const container = document.getElementById('is');
+  if (!container) return;
+  container.innerHTML = imgHistory.map((item, i) => 
+    `<img src="${item.url}" onclick="showHistImg(${i})" title="${item.prompt || ''}" class="${i===0?'active':''}">`
+  ).join('');
+}
+
+function showHistImg(index) {
+  const item = imgHistory[index];
+  if (!item) return;
+  document.querySelectorAll('.is img').forEach((img, i) => {
+    img.classList.toggle('active', i === index);
+  });
+  document.getElementById('ic').innerHTML = `<img src="${item.url}">`;
+  setPrompt(item.prompt);
+}
+
+function clearImageHistory() {
+  if (!confirm('Clear all saved images?')) return;
+  imgHistory = [];
+  localStorage.removeItem('alice_img_history_urls');
+  renderHistory();
+  document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
+  document.getElementById('pd').value = '';
+}
 
 async function loadInfo() {
   try {
@@ -13,6 +56,7 @@ async function loadInfo() {
     if (h1) h1.textContent = charName;
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
+    window._sttSilenceMs = (d.stt_silence || 3) * 1000;
     if (!llmReady && d.llm_ready) {
       llmReady = true;
       setLLMReady(true);
@@ -107,9 +151,10 @@ function doImage() {
   triggerMedia(extra);
 }
 
-let progressTimer = null;
+let progressTimer = null, _lastPct = 0;
 function startProgress() {
   stopProgress();
+  _lastPct = 0;
   progressTimer = setInterval(async () => {
     try {
       const r = await fetch('/progress');
@@ -118,7 +163,17 @@ function startProgress() {
       const fill   = document.getElementById('img-pb');
       const status = document.getElementById('img-status');
       if (fill)   fill.style.width = pct + '%';
-      if (status) status.textContent = pct > 0 ? `Generating... ${pct}%` : 'Preparing...';
+      if (status) {
+        if (pct > 0)           status.textContent = `Generating... ${pct}%`;
+        else if (_lastPct > 0) status.textContent = 'Finishing...';
+      }
+      _lastPct = pct;
+      if (d.current_image) {
+        const ic = document.getElementById('ic');
+        if (ic && !ic.querySelector('img.final')) {
+          ic.innerHTML = `<img src="data:image/png;base64,${d.current_image}" class="preview">`;
+        }
+      }
     } catch {}
   }, 800);
 }
@@ -137,7 +192,7 @@ async function triggerMedia(extra = '', auto = false) {
   if (extra && !auto) addMsg('user', 'You', extra);
 
   document.getElementById('ic').innerHTML =
-    '<div class="ph gen" id="img-status">Generating scene...</div>' +
+    '<div class="ph gen" id="img-status">Analyzing scene...</div>' +
     '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
@@ -153,9 +208,10 @@ async function triggerMedia(extra = '', auto = false) {
     const d = await res.json();
     if (d.error) {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
-    } else if (d.image) {
-      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
+    } else if (d.url) {
+      document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final">`;
       setPrompt(d.sd_prompt);
+      saveImg(d.url, d.sd_prompt);
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
     }
@@ -163,7 +219,8 @@ async function triggerMedia(extra = '', auto = false) {
     if (e.name === 'AbortError') {
       document.getElementById('ic').innerHTML = '<div class="ph">Interrupted.</div>';
     } else {
-      document.getElementById('ic').innerHTML = '<div class="ph">Error contacting backend.</div>';
+      console.error('Image error:', e);
+      document.getElementById('ic').innerHTML = `<div class="ph">Image error: ${e.message || 'Unknown error'}. Check console.</div>`;
     }
   }
   stopProgress();
@@ -265,8 +322,9 @@ async function regenFromPrompt() {
       signal: imgAbort.signal
     });
     const d = await res.json();
-    if (d.image) {
-      document.getElementById('ic').innerHTML = `<img src="data:image/png;base64,${d.image}">`;
+    if (d.url) {
+      document.getElementById('ic').innerHTML = `<img src="${d.url}">`;
+      saveImg(d.url, prompt);
     } else {
       document.getElementById('ic').innerHTML = `<div class="ph">${d.error || 'No image generated.'}</div>`;
     }
@@ -277,6 +335,8 @@ async function regenFromPrompt() {
   imgAbort = null;
   enableAll();
 }
+
+renderHistory();
 
 async function _chatWith(msg) {
   await interrupt('new message sent');
@@ -312,14 +372,18 @@ async function _chatWith(msg) {
     }
   } catch (e) {
     document.getElementById('thinking-bar').style.display = 'none';
-    if (e.name === 'AbortError') { updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); }
-    else { updMsg(tid, '<em style="color:#c08080">Could not reach backend — is alice.py running?</em>'); }
+    if (e.name === 'AbortError') { 
+      updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); 
+    } else { 
+      console.error('Chat error:', e);
+      updMsg(tid, `<em style="color:#c08080">Chat error: ${e.message || 'Unknown error'}. Check console/terminal.</em>`); 
+    }
     chatAbort = null; enableAll(); return;
   }
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (reply) { await speak(reply); if (autoImage) triggerMedia('', true); }
+  if (reply) { speak(reply); if (autoImage) triggerMedia('', true); }
 }
 
 async function send() {
@@ -364,8 +428,7 @@ async function _sttTranscribe(webmBlob, btn) {
     const d = await res.json();
     if (d.text) {
       inp.value = d.text;
-      inp.focus();
-      inp.setSelectionRange(d.text.length, d.text.length);
+      send();
     } else {
       inp.placeholder = 'Could not hear anything — try again';
       setTimeout(() => inp.placeholder = 'Say something... or /image', 2500);
@@ -387,7 +450,7 @@ async function loadMicDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const sel = document.getElementById('mic-select');
     const saved = localStorage.getItem('micDeviceId');
-    sel.innerHTML = devices
+    sel.innerHTML = '<option value="" disabled>── Audio input ──</option>' + devices
       .filter(d => d.kind === 'audioinput')
       .map(d => `<option value="${d.deviceId}" ${d.deviceId === saved ? 'selected' : ''}>${d.label || 'Mic ' + d.deviceId.slice(0,6)}</option>`)
       .join('');
@@ -411,10 +474,32 @@ async function toggleMic() {
     });
     audioChunks = [];
 
+    // Silence-based auto-stop
+    const actx = new AudioContext();
+    await actx.resume();
+    const analyser = actx.createAnalyser();
+    analyser.fftSize = 512;
+    actx.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    let hasSpeech = false, lastSpeech = Date.now();
+    const silenceMs = window._sttSilenceMs || 3000;
+
+    const silenceTimer = setInterval(() => {
+      analyser.getByteTimeDomainData(buf);
+      const rms = Math.sqrt(buf.reduce((s, v) => s + (v - 128) ** 2, 0) / buf.length);
+      if (rms > 5) { hasSpeech = true; lastSpeech = Date.now(); }
+      if (hasSpeech && Date.now() - lastSpeech > silenceMs) {
+        clearInterval(silenceTimer);
+        if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      }
+    }, 100);
+
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = async () => {
+      clearInterval(silenceTimer);
       stream.getTracks().forEach(t => t.stop());
+      actx.close().catch(() => {});
       btn.textContent = 'STT…';
       btn.disabled = true;
       btn.classList.remove('recording');

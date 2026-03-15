@@ -5,9 +5,10 @@ _WHISPER      = None
 _whisper_lock = threading.Lock()
 
 _HALLUCINATIONS = {
-    "you", "you.", "bye", "bye.", "bye!", "thanks", "thank you",
+    "you", "you.", "you you", "you you.", "bye", "bye.", "bye!", "thanks", "thank you",
     "thank you.", "thank you!", "thanks for watching",
-    "thanks for watching!", ".", "..",
+    "thanks for watching!", "thank you for watching", "thank you for watching.",
+    ".", "..", "...", "hmmm", "uhm", "uh", "um",
 }
 
 
@@ -34,13 +35,19 @@ def transcribe(data: bytes, content_type: str = "") -> str:
     wav_tmp = tmp + ".wav"
     try:
         try:
-            _webm_to_wav(tmp, wav_tmp)
+            rms = _webm_to_wav(tmp, wav_tmp)
             src = wav_tmp
         except Exception as e:
             print(f"        Audio conversion failed: {e}, trying raw")
             src = tmp
+            rms = 9999 # skip threshold if conversion fails
+            
+        if rms < 500:
+            print(f"        STT: [silence ignored, RMS={rms:.1f}]")
+            return ""
+
         segments, _ = _WHISPER.transcribe(src, language="en", beam_size=5,
-                                          vad_filter=False, condition_on_previous_text=False)
+                                          vad_filter=True, condition_on_previous_text=False)
         raw = " ".join(s.text for s in segments).strip()
         print(f"        STT raw: {repr(raw)}")
         text = "" if raw.lower().rstrip(".! ") in _HALLUCINATIONS or len(raw) <= 2 else raw
@@ -83,3 +90,4 @@ def _webm_to_wav(src: str, dst: str):
         wf.setsampwidth(2)
         wf.setframerate(16000)
         wf.writeframes(bytes(buf))
+    return rms

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alice</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Montserrat:wght@300;400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
 <header>
@@ -28,17 +28,22 @@
     </div>
     <div class="ir">
       <input type="text" id="inp" placeholder="Say something... or /image" onkeydown="if(event.key==='Enter')send()">
-      <select id="mic-select" title="Audio input device" style="max-width:10rem"></select>
-      <button id="mic-btn" onclick="toggleMic()" title="Click to record, click again to transcribe">Mic</button>
+      <button id="mic-btn" onclick="toggleMic()" title="Click to record, click again to stop">Mic</button><select id="mic-select" title="Audio input device"></select>
       <button id="ibtn" onclick="doImage()">Image</button>
     </div>
   </div>
   <div class="ip">
     <div class="ih">
       <span id="ih">Generated Scene</span>
-      <button id="pd-toggle" class="pd-toggle" onclick="togglePromptPanel()" title="Toggle prompt editor">+</button>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        <button class="pd-toggle" onclick="clearImageHistory()" title="Clear image history" style="font-size:.6rem">Clear</button>
+        <button id="pd-toggle" class="pd-toggle" onclick="togglePromptPanel()" title="Toggle prompt editor">+</button>
+      </div>
     </div>
-    <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
+    <div class="ic-wrap">
+      <div class="ic" id="ic"><div class="ph">Awaiting your conversation...</div></div>
+      <div class="is" id="is"></div>
+    </div>
     <div class="pd" id="pd-wrap" style="display:none">
       <textarea id="pd" rows="3"></textarea>
       <div class="sliders">
@@ -53,6 +58,6 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=7"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>

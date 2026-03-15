@@ -18,7 +18,7 @@ _DEFAULT_CONFIG = {
     "llama_model":        "mistral-nemo",
     "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
-    "negative_prompt": "ugly, deformed, extra limbs, blurry, watermark, bad anatomy, low quality",
+    "negative_prompt": "worst quality, low quality, lowres, illustration, 3d, 2d, painting, cartoons, anime, CGI, 3D render, bad anatomy, deformed, blurry, extra limbs, mutation, watermark, signature, text",
     "system_prompt": (
         "You are Alice. Respond always in first person as Alice — never narrate in third person.\n"
         "You are enigmatic, sensual, intelligent, and fully present.\n"
@@ -30,7 +30,7 @@ _DEFAULT_CONFIG = {
     ),
     "llama_server": {
         "n_gpu_layers": 33,
-        "ctx_size":     2048,
+        "ctx_size":     4096,
         "batch_size":   512,
         "threads":      8,
     },
@@ -43,8 +43,8 @@ _DEFAULT_CONFIG = {
         "width":        512,
         "height":       768,
         "cfg_scale":    7,
-        "sampler_name": "DPM++ 2M Karras",
-        "suffix":       "photorealistic, highly detailed, 8k, masterpiece",
+        "sampler_name": "DPM++ SDE Karras",
+        "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2)",
         "auto_every":   1,
     },
     "memory": {
@@ -53,6 +53,16 @@ _DEFAULT_CONFIG = {
         "max_chars":   1500, # max chars in rolling memory summary (scales with ctx_size)
     },
 }
+
+
+def resolve_path(p: str) -> str:
+    if not p: return ""
+    # If it's already absolute and exists, keep it
+    if os.path.isabs(p) and os.path.exists(p):
+        return p
+    # Otherwise, try making it relative to ALICE_DIR
+    abs_p = os.path.normpath(os.path.join(ALICE_DIR, p))
+    return abs_p
 
 
 def load_config() -> dict:
@@ -67,6 +77,11 @@ def load_config() -> dict:
             merged = {**_DEFAULT_CONFIG, **data}
             for key in ("image", "tts", "llama_server", "memory"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
+            
+            # Resolve paths
+            merged["model_path"] = resolve_path(merged.get("model_path", ""))
+            merged["llama_server_path"] = resolve_path(merged.get("llama_server_path", ""))
+            
             if "system_prompt" not in data and "modelfile" in data:
                 m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
                 if m:
