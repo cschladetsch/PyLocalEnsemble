@@ -156,9 +156,13 @@ def load_history():
     try:
         with open(config.HISTORY_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        saved_persona = data.get("persona_key", "")
+        saved_persona   = data.get("persona_key", "")
         current_persona = state._active_persona_key
-        if saved_persona and current_persona and saved_persona != current_persona:
+        if not saved_persona:
+            warn("History has no persona tag — discarding to prevent lore bleed.")
+            os.remove(config.HISTORY_FILE)
+            return
+        if current_persona and saved_persona != current_persona:
             warn(f"History was for persona '{saved_persona}', current is '{current_persona}' — discarding.")
             os.remove(config.HISTORY_FILE)
             return
