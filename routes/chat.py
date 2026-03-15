@@ -3,7 +3,7 @@ import queue as _queue
 import requests as req
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config
 import llm
@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(max_length=4000)
 
 
 @router.post("/chat")
@@ -81,7 +81,8 @@ async def chat(body: ChatRequest):
                 if item is None:
                     break
                 if isinstance(item, Exception):
-                    if llm.history: llm.history.pop()
+                    if llm.history and llm.history[-1].get("role") == "user":
+                        llm.history.pop()
                     yield f"data: {json.dumps({'error': str(item)})}\n\n"
                     return
                 yield f"data: {json.dumps({'delta': item})}\n\n"

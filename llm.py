@@ -6,6 +6,7 @@ from utils import step, ok, warn, http_ok
 LLM_READY = False
 history   = []
 memory    = ""
+_history_lock = threading.Lock()
 
 LLAMA_URL = os.environ.get("LLAMA_URL", config.CFG.get("llama_url", "http://127.0.0.1:8080"))
 if not LLAMA_URL.startswith("http"):
@@ -186,17 +187,21 @@ def _summarise(messages: list) -> str:
 
 def compress_history():
     global memory
-    mem_cfg   = config.CFG.get("memory", config._DEFAULT_CONFIG["memory"])
-    max_hist  = mem_cfg["max_history"]
-    keep      = mem_cfg["keep_recent"]
-    max_chars = mem_cfg["max_chars"]
-    if len(history) <= max_hist:
-        return
-    old = history[:len(history) - keep]
-    del history[:len(history) - keep]
+    with _history_lock:
+        mem_cfg   = config.CFG.get("memory", config._DEFAULT_CONFIG["memory"])
+        max_hist  = mem_cfg["max_history"]
+        keep      = mem_cfg["keep_recent"]
+        max_chars = mem_cfg["max_chars"]
+        if len(history) <= max_hist:
+            return
+        old = history[:len(history) - keep]
+        del history[:len(history) - keep]
     summary = _summarise(old)
     if summary:
-        memory = (memory + "\n" + summary).strip() if memory else summary
-        if len(memory) > max_chars:
-            memory = memory[-max_chars:]
+        with _history_lock:
+            memory = (memory + "\n" + summary).strip() if memory else summary
+            if len(memory) > max_chars:
+                trimmed = memory[-max_chars:]
+                first_period = trimmed.find('. ')
+                memory = trimmed[first_period + 2:] if first_period != -1 else trimmed
     save_history()

@@ -7,12 +7,14 @@ let imgHistory = [];
 
 // ── Web Audio streaming TTS ───────────────────────────────────────────────────
 let _audioCtx = null, _nextStart = 0, _ttsNodes = [], _ttsGen = 0;
+let _lastChunks = [];   // decoded AudioBuffers from last speak() for instant resay
 
 function _stopTts() {
   _ttsGen++;                    // invalidates any in-flight speak() loops
   _ttsNodes.forEach(n => { try { n.stop(0); } catch {} });
   _ttsNodes = [];
   _nextStart = 0;
+  // _lastChunks is intentionally kept so resay() can replay after an interrupt
 }
 
 function _ensureAudioCtx() {
@@ -22,12 +24,7 @@ function _ensureAudioCtx() {
   }
 }
 
-async function _scheduleChunk(b64wav) {
-  _ensureAudioCtx();
-  const bytes = atob(b64wav);
-  const buf = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
-  const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
+function _playAudioBuffer(audioBuf) {
   const src = _audioCtx.createBufferSource();
   src.buffer = audioBuf;
   src.connect(_audioCtx.destination);
@@ -36,6 +33,16 @@ async function _scheduleChunk(b64wav) {
   src.start(start);
   _nextStart = start + audioBuf.duration;
   _ttsNodes.push(src);
+}
+
+async function _scheduleChunk(b64wav) {
+  _ensureAudioCtx();
+  const bytes = atob(b64wav);
+  const buf = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+  const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
+  _lastChunks.push(audioBuf);
+  _playAudioBuffer(audioBuf);
 }
 
 try {
@@ -139,8 +146,16 @@ function _updateContextMeter(msgs, max) {
 loadInfo();
 
 function resay() {
-  if (!lastReplyText) return;
-  speak(lastReplyText);
+  if (!_lastChunks.length && !lastReplyText) return;
+  if (!_lastChunks.length) { speak(lastReplyText); return; }
+  // Replay cached AudioBuffers — no server round-trip
+  _stopTts();
+  const gen = _ttsGen;
+  _ensureAudioCtx();
+  for (const audioBuf of _lastChunks) {
+    if (gen !== _ttsGen) return;
+    _playAudioBuffer(audioBuf);
+  }
 }
 
 function toggleMute() {
@@ -152,6 +167,7 @@ function toggleMute() {
 async function speak(text) {
   if (muted) return;
   _stopTts();
+  _lastChunks = [];             // discard cached chunks — new speech incoming
   lastReplyText = text;
   const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
   try {
@@ -461,6 +477,7 @@ async function regenFromPrompt() {
     '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>';
   const steps = parseInt(document.getElementById('steps').value);
   const cfg_scale = parseFloat(document.getElementById('cfg').value);
+  startProgress();
   try {
     const res = await fetch('/generate', {
       method: 'POST',
@@ -469,6 +486,7 @@ async function regenFromPrompt() {
       signal: imgAbort.signal
     });
     const d = await res.json();
+    stopProgress();
     if (d.url) {
       document.getElementById('ic').innerHTML = `<img src="${d.url}">`;
       saveImg(d.url, prompt);
@@ -479,6 +497,7 @@ async function regenFromPrompt() {
     if (e.name !== 'AbortError')
       document.getElementById('ic').innerHTML = '<div class="ph">Error.</div>';
   }
+  stopProgress();
   imgAbort = null;
   enableAll();
 }
@@ -748,4 +767,8 @@ async function clearHistory() {
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
+  lastReplyText = '';
+  _stopTts();
+  _lastChunks = [];
+  document.getElementById('resay-btn').disabled = true;
 }

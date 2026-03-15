@@ -75,7 +75,9 @@ def start_forge():
         warn(f"Forge not found at {config.FORGE_DIR} — run install.py")
         return
     env = os.environ.copy()
-    if os.name == "nt":
+    if "forge_args" in config.CFG:
+        env["COMMANDLINE_ARGS"] = config.CFG["forge_args"]
+    elif os.name == "nt":
         env["COMMANDLINE_ARGS"] = "--api --cuda-malloc --xformers"
     elif platform.system() == "Darwin":
         env["COMMANDLINE_ARGS"] = "--api --skip-torch-cuda-test"

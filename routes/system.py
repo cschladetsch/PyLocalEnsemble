@@ -24,6 +24,7 @@ async def list_models():
 @router.post("/model")
 async def switch_model(body: ModelSwitchRequest):
     config.CFG["llama_model"] = body.path
+    llm._DETECTED_MODEL = None  # force re-detect on next request
     llm.clear_history()
     print(f"\n[{config.NAME}] Switched llama model to: {body.path}")
     return JSONResponse({"status": "ok", "model": body.path})

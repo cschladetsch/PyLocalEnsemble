@@ -32,5 +32,8 @@
     "_comment_civitai": "CivitAI: go to a model page, click Download, copy the link. Append ?token=YOUR_API_KEY for gated models.",
     "_comment_civitai2": "Get your API key at: https://civitai.com/user/account (free account required)",
     "sd_checkpoint_url": "",
-    "sd_checkpoint": "epiCPhotoGasmVAE.safetensors"
+    "sd_checkpoint": "epiCPhotoGasmVAE.safetensors",
+
+    "_comment_forge_args": "Override Forge launch flags (optional). Default: --api --cuda-malloc --xformers on Windows, --api --xformers on Linux, --api --skip-torch-cuda-test on macOS.",
+    "forge_args": "--api --cuda-malloc --xformers"
 }
