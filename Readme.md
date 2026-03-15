@@ -193,7 +193,7 @@ Alice speaks every reply using Kokoro neural TTS.
 | Mute | Toggle voice on/off |
 | Re-say | Replay the last spoken reply |
 
-Available voices: `af_nicole` (breathy), `af_bella`, `af_sky`, `bf_emma` (British), `bf_isabella`.
+Available voices: `af_nicole`, `af_bella`, `af_sarah`, `af_sky` (American female) · `am_adam`, `am_michael` (American male) · `bf_emma`, `bf_isabella` (British female) · `bm_george`, `bm_lewis` (British male). Each persona sets its own default voice; the dropdown overrides it for the session.
 
 ### Image panel
 
@@ -401,7 +401,7 @@ flowchart TD
 python -m pytest tests/ -v
 ```
 
-39 tests covering config loading, image tag utilities, installer asset selection, and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
+94 tests covering config loading, image tag utilities, SD prompt extraction, installer asset selection, TTS effects, and API endpoints. No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
 
 ---
 

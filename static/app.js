@@ -255,6 +255,8 @@ async function triggerMedia(extra = '', auto = false) {
       document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
       setPrompt(d.sd_prompt);
       saveImg(d.url, d.sd_prompt);
+      const rerollBtn = document.getElementById('reroll-btn');
+      if (rerollBtn) rerollBtn.disabled = false;
     } else {
       document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
     }
@@ -336,6 +338,9 @@ async function switchPersona(name) {
   document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>Hello. I&#39;ve been waiting for you...</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
+  const rerollBtn = document.getElementById('reroll-btn');
+  if (rerollBtn) rerollBtn.disabled = true;
+  loadVoices();
 }
 
 loadPersonas();

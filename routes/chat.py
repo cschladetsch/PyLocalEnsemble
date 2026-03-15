@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+import config
 import llm
 import state
 
@@ -37,15 +38,12 @@ async def chat(body: ChatRequest):
 
             def _run():
                 try:
+                    p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
                     r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
                         "model":             llm.llm_model(),
                         "messages":          messages,
                         "stream":            True,
-                        "temperature":       0.9,
-                        "top_p":             0.92,
-                        "repeat_penalty":    1.25,
-                        "presence_penalty":  0.8,
-                        "frequency_penalty": 0.5,
+                        **p,
                     }, stream=True, timeout=120)
                     if r.status_code != 200:
                         print(f"[chat] Error {r.status_code}: {r.text}")

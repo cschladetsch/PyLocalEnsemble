@@ -52,6 +52,13 @@ _DEFAULT_CONFIG = {
         "keep_recent": 8,    # keep this many recent messages after compression
         "max_chars":   1500, # max chars in rolling memory summary (scales with ctx_size)
     },
+    "llm_params": {
+        "temperature":       0.9,
+        "top_p":             0.92,
+        "repeat_penalty":    1.25,
+        "presence_penalty":  0.8,
+        "frequency_penalty": 0.5,
+    },
 }
 
 
@@ -75,7 +82,7 @@ def load_config() -> dict:
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             merged = {**_DEFAULT_CONFIG, **data}
-            for key in ("image", "tts", "llama_server", "memory"):
+            for key in ("image", "tts", "llama_server", "memory", "llm_params"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
             
             # Resolve paths
