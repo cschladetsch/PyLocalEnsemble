@@ -41,7 +41,7 @@ async def delete_image(filename: str):
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
     if safe != filename or not safe.endswith(".png"):
         return JSONResponse({"error": "invalid filename"}, status_code=400)
-    path = os.path.join(config.ALICE_DIR, "static", "outputs", safe)
+    path = os.path.join(config.STATIC_DIR, "outputs", safe)
     if not os.path.exists(path):
         return JSONResponse({"error": "not found"}, status_code=404)
     os.remove(path)
@@ -74,7 +74,7 @@ async def get_negative():
 
 @router.get("/", response_class=HTMLResponse)
 async def index():
-    static_dir = os.path.join(config.ALICE_DIR, "static")
+    static_dir = config.STATIC_DIR
     with open(os.path.join(static_dir, "index.html"), encoding="utf-8") as f:
         html = f.read()
     for asset in ("app.js", "style.css"):

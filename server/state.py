@@ -60,7 +60,7 @@ def should_auto_image(user_msg: str) -> bool:
 
 # ── Utility ───────────────────────────────────────────────────────────────────
 def save_generated_image(b64_data: str) -> str:
-    out_dir = os.path.join(config.ALICE_DIR, "static", "outputs")
+    out_dir = os.path.join(config.STATIC_DIR, "outputs")
     os.makedirs(out_dir, exist_ok=True)
     fname = f"img_{int(time.time() * 1000)}.png"
     with open(os.path.join(out_dir, fname), "wb") as f:

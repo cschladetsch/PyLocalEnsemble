@@ -105,7 +105,7 @@ _LOG_CONFIG = {
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI()
-app.mount("/static", StaticFiles(directory=os.path.join(config.ALICE_DIR, "static")), name="static")
+app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 
 from routes.chat      import router as chat_router
 from routes.image_api import router as image_router
