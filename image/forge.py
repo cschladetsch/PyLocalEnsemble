@@ -64,6 +64,17 @@ def set_forge_model(name: str):
         warn(f"Could not set Forge model: {e}")
 
 
+def restart_forge():
+    """Ask Forge to restart via its API (picks up newly installed extensions)."""
+    forge_url = config.CFG["forge_url"]
+    try:
+        req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=10)
+    except Exception:
+        pass  # connection reset is expected on restart
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=60, delay=5):
+        warn("Forge did not come back after restart.")
+
+
 def start_forge():
     forge_url = config.CFG["forge_url"]
     step("Starting Forge...")

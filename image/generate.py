@@ -118,10 +118,21 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         if "images" not in data:
             detail = data.get("detail", "")
             if "ADetailer" in str(detail) and "alwayson_scripts" in payload:
-                print("[image] ADetailer not found — retrying without it")
-                payload.pop("alwayson_scripts")
-                r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
-                data = r.json()
+                print("[image] ADetailer not found — installing ...")
+                try:
+                    from installer.forge_install import install_adetailer
+                    from image.forge import restart_forge
+                    install_adetailer()
+                    print("[image] ADetailer installed — restarting Forge ...")
+                    restart_forge()
+                    print("[image] Forge back up — retrying with ADetailer ...")
+                    r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
+                    data = r.json()
+                except Exception as ie:
+                    print(f"[image] ADetailer install/restart failed ({ie}) — retrying without it")
+                    payload.pop("alwayson_scripts")
+                    r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
+                    data = r.json()
             if "images" not in data:
                 err_type  = data.get("error", "")
                 err_msg   = data.get("errors") or data.get("message") or ""
