@@ -55,12 +55,13 @@ function _playAudioBuffer(audioBuf) {
   _ttsNodes.push(src);
 }
 
-async function _scheduleChunk(b64wav) {
+async function _scheduleChunk(b64wav, gen) {
   _ensureAudioCtx();
   const bytes = atob(b64wav);
   const buf = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
   const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
+  if (gen !== _ttsGen) return;   // stream was cancelled while decoding
   _lastChunks.push(audioBuf);
   _playAudioBuffer(audioBuf);
 }
@@ -218,7 +219,7 @@ async function speak(text) {
         if (d.error) { console.warn('TTS error:', d.error); return; }
         if (d.chunk) {
           if (gen !== _ttsGen) return;
-          await _scheduleChunk(d.chunk);
+          await _scheduleChunk(d.chunk, gen);
           if (!gotFirst) {
             gotFirst = true;
             document.getElementById('resay-btn').disabled = false;
@@ -434,7 +435,6 @@ const _DEFAULT_FONT = _PERSONA_FONTS['default'];
 const _personaFontKeys = {};
 
 function _applyPersonaFont(name) {
-  _activePersona = name;
   const key = _personaFontKeys[name] || name.toLowerCase().replace(/\s+/g, '-');
   const f = _PERSONA_FONTS[key] || _DEFAULT_FONT;
   const b = document.body;
@@ -452,11 +452,12 @@ async function loadPersonas() {
   const sel = document.getElementById('persona-select');
   sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
   d.personas.forEach(p => { _personaFontKeys[p.name] = p.font_key; });
-  if (sel.value) _applyPersonaFont(sel.value);
+  if (sel.value) { _activePersona = sel.value; _applyPersonaFont(sel.value); }
 }
 
 async function switchPersona(name) {
   await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
+  _activePersona = name;
   _applyPersonaFont(name);
   await loadInfo();
   // Insert a divider so history is visually separated from the new persona
