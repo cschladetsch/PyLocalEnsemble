@@ -411,6 +411,19 @@ async def clear():
     return {"status": "cleared"}
 
 
+@app.delete("/image/{filename}")
+async def delete_image(filename: str):
+    # Reject any path traversal — only bare filenames like img_1234567890.png
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
+    if safe != filename or not safe.endswith(".png"):
+        return JSONResponse({"error": "invalid filename"}, status_code=400)
+    path = os.path.join(config.ALICE_DIR, "static", "outputs", safe)
+    if not os.path.exists(path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    os.remove(path)
+    return JSONResponse({"status": "deleted"})
+
+
 @app.get("/info")
 async def info():
     return JSONResponse({

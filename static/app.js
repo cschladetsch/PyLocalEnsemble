@@ -129,7 +129,29 @@ function enableAll() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') interrupt('user ESC');
+  if (e.key === 'Delete' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+    deleteActiveImage();
+  }
 });
+
+async function deleteActiveImage() {
+  const img = document.querySelector('#ic img');
+  if (!img) return;
+  const filename = img.src.split('/').pop().split('?')[0];
+  if (!filename.endsWith('.png')) return;
+  const res = await fetch(`/image/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+  if (!res.ok) { console.warn('Delete failed', await res.text()); return; }
+  const idx = imgHistory.findIndex(item => item.url.includes(filename));
+  if (idx !== -1) imgHistory.splice(idx, 1);
+  try { localStorage.setItem('alice_img_history_urls', JSON.stringify(imgHistory)); } catch {}
+  renderHistory();
+  if (imgHistory.length > 0) {
+    showHistImg(0);
+  } else {
+    document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
+    document.getElementById('pd').value = '';
+  }
+}
 
 async function interrupt(reason) {
   if (chatAbort) {
