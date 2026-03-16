@@ -3,7 +3,7 @@ let mediaRecorder = null, audioChunks = [];
 let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
 let llmReady = false;
-let _activePersona = '';
+let _activePersona = 'default';
 let imgHistory = [];
 let _demoMode = false, _demoTimer = null, _demoSkip = false, _demoPaused = false;
 
@@ -465,6 +465,7 @@ const _DEFAULT_FONT = _PERSONA_FONTS['default'];
 
 // Populated by loadPersonas() — maps persona name to font key
 const _personaFontKeys = {};
+_applyPersonaFont('default');  // apply default font immediately before loadPersonas() resolves
 
 function _applyPersonaFont(name) {
   const key = _personaFontKeys[name] || name.toLowerCase().replace(/\s+/g, '-');
