@@ -839,6 +839,7 @@ function renderMd(text) {
 }
 
 function addMsg(cls, sndr, html) {
+  if (cls === 'alice' && _activePersona) _applyPersonaFont(_activePersona);
   const id = 'm' + (mid++), d = document.createElement('div');
   d.className = 'msg ' + cls;
   d.id = id;
