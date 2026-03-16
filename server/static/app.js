@@ -430,9 +430,8 @@ async function loadModels() {
     const res = await fetch('/models');
     const d = await res.json();
     const sel = document.getElementById('model-select');
-    sel.innerHTML = d.models.map(m =>
-      `<option value="${m.path}" ${m.name === d.current ? 'selected' : ''}>${m.name}</option>`
-    ).join('');
+    sel.innerHTML = `<option value="" disabled selected>Model</option>` +
+      d.models.map(m => `<option value="${m.path}">${m.name}</option>`).join('');
   } catch (e) { console.warn('Could not load models:', e); }
 }
 
