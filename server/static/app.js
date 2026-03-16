@@ -661,6 +661,7 @@ async function send() {
   const inp = document.getElementById('inp'), msg = inp.value.trim();
   if (!msg) return;
   inp.value = '';
+  if (msg === '/export') { exportHistory(); return; }
   if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
   if (msg === '/auto-image') {
     const r = await fetch('/auto-image', { method: 'POST' });
