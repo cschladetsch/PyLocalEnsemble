@@ -222,8 +222,6 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
   _lastChunks = [];             // discard cached chunks — new speech incoming
   lastReplyText = text;
   const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
-  const stopBtn = document.getElementById('stop-btn');
-  if (stopBtn) stopBtn.disabled = false;
   try {
     const body = { text };
     if (voice   !== null) body.voice   = voice;
@@ -260,16 +258,13 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
       }
     }
   } catch (e) { if (gen === _ttsGen) console.warn('TTS stream error:', e); }
-  if (gen === _ttsGen && stopBtn) stopBtn.disabled = true;
 }
 
 function disableAll() {
   const e = document.getElementById('ibtn'); if (e) e.disabled = true;
-  const s = document.getElementById('stop-btn'); if (s) s.disabled = false;
 }
 function enableAll() {
   const e = document.getElementById('ibtn'); if (e) e.disabled = false;
-  const s = document.getElementById('stop-btn'); if (s) s.disabled = true;
 }
 
 document.addEventListener('keydown', e => {
@@ -306,6 +301,7 @@ async function deleteActiveImage() {
 async function interrupt(reason) {
   if (reason === 'user' && _demoMode) { _demoSkip = true; }  // Skip current turn, don't stop demo
   _stopTts();
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
   if (chatAbort) {
     console.log('Aborting chat:', reason);
     chatAbort.abort();
@@ -508,8 +504,9 @@ async function switchPersona(name) {
   document.getElementById('pd-wrap').style.display = 'none';
   const rerollBtn = document.getElementById('reroll-btn');
   if (rerollBtn) rerollBtn.disabled = true;
-  loadVoices();
+  await loadVoices();
   loadNegative();
+  if (lastReplyText) speak(lastReplyText);
 }
 
 loadPersonas();
