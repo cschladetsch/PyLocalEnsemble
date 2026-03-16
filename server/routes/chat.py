@@ -40,15 +40,40 @@ async def chat(body: ChatRequest):
             def _run():
                 try:
                     p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
-                    r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
-                        "model":             llm.llm_model(),
-                        "messages":          messages,
-                        "stream":            True,
-                        **p,
-                    }, stream=True, timeout=120)
-                    if r.status_code != 200:
-                        print(f"[chat] Error {r.status_code}: {r.text}")
-                        r.raise_for_status()
+                    trimmed = list(messages)
+                    r = None
+                    while True:
+                        r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
+                            "model":             llm.llm_model(),
+                            "messages":          trimmed,
+                            "stream":            True,
+                            **p,
+                        }, stream=True, timeout=120)
+                        if r.status_code == 400:
+                            try:
+                                err = r.json().get("error", {})
+                            except Exception:
+                                err = {}
+                            if "exceed_context_size" in err.get("type", "") or "exceed_context_size" in err.get("message", ""):
+                                # Calculate how much we need to free: overage + 512 token generation headroom
+                                n_prompt = err.get("n_prompt_tokens", 0)
+                                n_ctx    = err.get("n_ctx", 4096)
+                                need_free = max((n_prompt - n_ctx) + 512, 512)  # tokens to free
+                                freed = 0
+                                non_sys = [i for i, m in enumerate(trimmed) if m["role"] != "system"]
+                                while freed < need_free and len(non_sys) >= 2:
+                                    idx = non_sys.pop(0)
+                                    freed += len(trimmed[idx].get("content", "")) // 4
+                                    del trimmed[idx]
+                                    # Indices shift after deletion — recalculate
+                                    non_sys = [i for i, m in enumerate(trimmed) if m["role"] != "system"]
+                                if freed > 0:
+                                    print(f"[chat] context overflow — trimmed to {len(trimmed)} msgs (~{freed} tokens freed), retrying")
+                                    continue
+                        if r.status_code != 200:
+                            print(f"[chat] Error {r.status_code}: {r.text}")
+                            r.raise_for_status()
+                        break
                     for line in r.iter_lines():
                         if not line:
                             continue
