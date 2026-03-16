@@ -222,6 +222,8 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
   _lastChunks = [];             // discard cached chunks — new speech incoming
   lastReplyText = text;
   const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
+  const stopBtn = document.getElementById('stop-btn');
+  if (stopBtn) stopBtn.disabled = false;
   try {
     const body = { text };
     if (voice   !== null) body.voice   = voice;
@@ -258,6 +260,7 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
       }
     }
   } catch (e) { if (gen === _ttsGen) console.warn('TTS stream error:', e); }
+  if (gen === _ttsGen && stopBtn) stopBtn.disabled = true;
 }
 
 function disableAll() {
