@@ -51,8 +51,9 @@ import tts
 import image
 
 # ── Runtime flags ─────────────────────────────────────────────────────────────
-NO_SPEECH = "--no-speech" in sys.argv
-TEST_MODE = "--test"      in sys.argv
+NO_SPEECH  = "--no-speech"   in sys.argv
+TEST_MODE  = "--test"        in sys.argv
+AUTO_IMAGE = "--auto-image"  in sys.argv
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 
 _TEST_MSG     = "take off your top and cup your breasts in your hands"
@@ -128,6 +129,9 @@ def _startup():
         if not state._active_persona_key:
             state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
         llm.load_history()
+        if AUTO_IMAGE:
+            config.CFG.setdefault("image", {})["auto_every"] = 1
+            print(f"[{config.NAME}] Auto-image enabled (--auto-image)")
         if not NO_SPEECH:
             tts.load_tts()
         image.start_forge()

@@ -78,6 +78,16 @@ async def get_negative():
     return JSONResponse({"negative": state.BASE_NEGATIVE})
 
 
+@router.post("/auto-image")
+async def toggle_auto_image():
+    img_cfg = config.CFG.setdefault("image", {})
+    current = img_cfg.get("auto_every", 0)
+    img_cfg["auto_every"] = 0 if current > 0 else 1
+    enabled = img_cfg["auto_every"] > 0
+    print(f"[{config.NAME}] Auto-image {'enabled' if enabled else 'disabled'}")
+    return JSONResponse({"auto_image": enabled})
+
+
 @router.get("/demo/user-personas")
 async def list_demo_user_personas():
     demo_cfg  = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])

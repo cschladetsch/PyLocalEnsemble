@@ -664,6 +664,14 @@ async function send() {
   if (!msg) return;
   inp.value = '';
   if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
+  if (msg === '/auto-image') {
+    const r = await fetch('/auto-image', { method: 'POST' });
+    const d = await r.json();
+    const inp2 = document.getElementById('inp');
+    inp2.placeholder = `Auto-image ${d.auto_image ? 'ON' : 'OFF'}`;
+    setTimeout(() => inp2.placeholder = 'Say something... or /image', 2500);
+    return;
+  }
   lastUserMsg = msg;
   addMsg('user', 'You', msg);
   inp.focus();
