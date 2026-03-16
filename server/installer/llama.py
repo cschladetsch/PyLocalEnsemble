@@ -1,4 +1,5 @@
 """Step 3: llama.cpp server download and installation."""
+from __future__ import annotations
 import os, platform, glob, zipfile, shutil
 from installer.helpers import LLAMA_DIR, heading, ok, info, warn, _download, _json_get
 

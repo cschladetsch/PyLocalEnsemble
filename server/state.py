@@ -1,4 +1,5 @@
 """Shared mutable runtime state — imported by all route modules."""
+from __future__ import annotations
 import re, os, time, base64
 import config
 

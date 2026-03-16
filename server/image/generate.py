@@ -1,4 +1,5 @@
 """Image generation via the Forge/SD API."""
+from __future__ import annotations
 import json, os, re, threading
 import requests as req
 import config
