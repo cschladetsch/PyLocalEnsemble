@@ -7,6 +7,7 @@ personas.json
 /backups
 /models
 history.json
+history_*.json
 /static/outputs/
 /server/static/outputs/
 __pycache__/
