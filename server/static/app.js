@@ -504,7 +504,7 @@ async function switchPersona(name) {
   if (rerollBtn) rerollBtn.disabled = true;
   await loadVoices();
   loadNegative();
-  if (lastReplyText) speak(lastReplyText);
+  if (lastUserMsg) _chatWith(lastUserMsg);
 }
 
 loadPersonas();
