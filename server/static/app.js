@@ -395,10 +395,8 @@ async function triggerMedia(extra = '', auto = false) {
     } else if (d.url) {
       // Stop polling before preload — frees browser connections for the image fetch
       stopProgress();
-      // Show finalizing overlay regardless of what's currently in ic
       const ic = document.getElementById('ic');
       const existing = ic.innerHTML;
-      ic.innerHTML = existing + '<div class="finalizing-overlay">Finalizing...</div>';
       await new Promise(resolve => {
         const img = new Image();
         img.onload = img.onerror = resolve;
