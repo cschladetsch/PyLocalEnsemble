@@ -515,9 +515,8 @@ async function loadDemoPersonas() {
     const d = await r.json();
     const sel = document.getElementById('demo-persona-select');
     if (!sel) return;
-    sel.innerHTML = d.personas.map(p =>
-      `<option value="${p}" ${p === d.current ? 'selected' : ''}>${p}</option>`
-    ).join('');
+    sel.innerHTML = `<option value="" disabled selected>Type</option>` +
+      d.personas.map(p => `<option value="${p}">${p}</option>`).join('');
   } catch (e) { console.warn('Could not load demo personas:', e); }
 }
 
