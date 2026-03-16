@@ -8,6 +8,10 @@ FORGE_BAT     = os.path.join(FORGE_DIR, "webui.bat" if os.name == "nt" else "web
 MODEL_DIR     = os.path.join(ALICE_DIR, "models")
 TTS_DIR       = os.path.join(ALICE_DIR, "models", "tts")
 HISTORY_FILE  = os.path.join(ALICE_DIR, "history.json")
+
+def history_file_for(persona_key: str) -> str:
+    safe = persona_key.lower().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    return os.path.join(ALICE_DIR, f"history_{safe}.json")
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
 ALICE_URL     = "http://localhost:8000"

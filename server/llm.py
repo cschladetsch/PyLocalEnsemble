@@ -138,12 +138,14 @@ def llm_chat(messages: list) -> str:
 
 
 def save_history():
+    persona_key = state._active_persona_key
+    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
     try:
-        with open(config.HISTORY_FILE, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({
-                "history":      history,
-                "memory":       memory,
-                "persona_key":  state._active_persona_key,
+                "history":     history,
+                "memory":      memory,
+                "persona_key": persona_key,
             }, f, ensure_ascii=False)
     except Exception as e:
         warn(f"Could not save history: {e}")
@@ -151,20 +153,21 @@ def save_history():
 
 def load_history():
     global memory
-    if not os.path.exists(config.HISTORY_FILE):
+    persona_key = state._active_persona_key
+    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
+    if not os.path.exists(path):
         return
     try:
-        with open(config.HISTORY_FILE, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        saved_persona   = data.get("persona_key", "")
-        current_persona = state._active_persona_key
+        saved_persona = data.get("persona_key", "")
         if not saved_persona:
             warn("History has no persona tag — discarding to prevent lore bleed.")
-            os.remove(config.HISTORY_FILE)
+            os.remove(path)
             return
-        if current_persona and saved_persona != current_persona:
-            warn(f"History was for persona '{saved_persona}', current is '{current_persona}' — discarding.")
-            os.remove(config.HISTORY_FILE)
+        if persona_key and saved_persona != persona_key:
+            warn(f"History was for persona '{saved_persona}', current is '{persona_key}' — discarding.")
+            os.remove(path)
             return
         history.extend(data.get("history", []))
         memory = data.get("memory", "")
@@ -173,13 +176,26 @@ def load_history():
         warn(f"Could not load history: {e}")
 
 
-def clear_history():
+def switch_history(new_persona_key: str):
+    """Save current persona's history, then load the new persona's history."""
     global memory
+    if history or memory:
+        save_history()
     history.clear()
     memory = ""
+    state._active_persona_key = new_persona_key
+    load_history()
+
+
+def clear_history():
+    global memory
+    persona_key = state._active_persona_key
+    history.clear()
+    memory = ""
+    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
     try:
-        if os.path.exists(config.HISTORY_FILE):
-            os.remove(config.HISTORY_FILE)
+        if os.path.exists(path):
+            os.remove(path)
     except Exception:
         pass
 

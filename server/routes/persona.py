@@ -59,9 +59,8 @@ async def switch_persona(name: str):
     state._character_seed            = -1
     state._seed_pinned               = False
 
-    # Clear history so the previous persona's lore cannot bleed into the new one
-    state._active_persona_key = name
-    llm.clear_history()
+    # Save current history and load this persona's history
+    llm.switch_history(name)
 
     print(f"\n[{config.NAME}] Switched to persona: {name}")
     return JSONResponse({"status": "ok", "persona": name, "sd_model": sd_model})

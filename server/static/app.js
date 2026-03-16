@@ -124,7 +124,11 @@ function showHistImg(index) {
   });
   document.getElementById('ic').innerHTML = `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
   setPrompt(item.prompt);
-  if (item.persona) _applyPersonaFont(item.persona);
+  if (item.persona && item.persona !== _activePersona) {
+    switchPersona(item.persona, { reChat: false });
+    const sel = document.getElementById('persona-select');
+    if (sel) sel.value = item.persona;
+  }
 }
 
 function clearImageHistory() {
@@ -488,7 +492,7 @@ async function loadPersonas() {
   if (sel.value) { _activePersona = sel.value; _applyPersonaFont(sel.value); }
 }
 
-async function switchPersona(name) {
+async function switchPersona(name, { reChat = true } = {}) {
   await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
   _activePersona = name;
   _applyPersonaFont(name);
@@ -504,7 +508,7 @@ async function switchPersona(name) {
   if (rerollBtn) rerollBtn.disabled = true;
   await loadVoices();
   loadNegative();
-  if (lastUserMsg) _chatWith(lastUserMsg);
+  if (reChat && lastUserMsg) _chatWith(lastUserMsg);
 }
 
 loadPersonas();
