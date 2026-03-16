@@ -32,10 +32,18 @@ Powered by:
 ## Installation & Running
 
 ```
-python alice.py
+python alice.py [--auto-image] [--no-speech] [--persona=<name>]
 ```
 
-That's it. On first run, `alice.py` detects missing dependencies and runs `install.py` automatically before starting.
+That's it.
+
+**CLI flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--auto-image` | Enable auto image generation on every chat turn (overrides `auto_every: 0` in config) |
+| `--no-speech` | Disable TTS entirely |
+| `--persona=<name>` | Start with a specific persona (partial name match supported) | On first run, `alice.py` detects missing dependencies and runs `install.py` automatically before starting.
 
 `install.py` performs 6 steps:
 
@@ -74,7 +82,7 @@ Key settings:
 | `tts.chunk_chars` | `600` | Max characters per TTS synthesis chunk |
 | `image.steps` | `25` | Diffusion steps |
 | `image.suffix` | *(see example)* | Appended to every SD prompt — includes `(perfect hands:1.3), (five fingers:1.2)` |
-| `image.auto_every` | `1` | Generate an image every N chat turns (0 = disabled) |
+| `image.auto_every` | `0` | Generate an image every N chat turns (0 = disabled) |
 | `image.adetailer_hands` | `false` | Run ADetailer hand-repair pass after each generation (requires ADetailer extension) |
 | `image.hires_fix` | `true` | Enable hires fix upscale pass |
 | `forge_args` | *(platform default)* | Override Forge launch flags (e.g. `"--api --xformers"`) |
@@ -141,7 +149,7 @@ To use a different model: set `model_path` in `alice.json` and restart.
 
 ## Personas
 
-Four personas are included out of the box. Switch between them using the dropdown in the header. History is preserved across switches — a styled divider marks the transition. The SD checkpoint and TTS voice switch automatically.
+Four personas are included out of the box. Switch between them using the dropdown in the header. History is preserved across switches — a styled divider marks the transition. The SD checkpoint, TTS voice, and UI font switch automatically. The last reply is re-spoken with the new persona's voice immediately after switching.
 
 | Persona | Character |
 |---------|-----------|
@@ -190,7 +198,7 @@ Alice maintains a rolling memory so long conversations don't lose earlier contex
 
 Type a message and press **Enter**. Alice streams her reply word-by-word, speaks it aloud, then generates a contextual image.
 
-Press **ESC** or click **Stop** to interrupt at any time. Messages are capped at 4000 characters.
+Press **ESC** or click **Stop** to interrupt at any time — Stop is always enabled and halts TTS, STT recording, chat streaming, and image generation simultaneously. Messages are capped at 4000 characters.
 
 ### Microphone (push-to-talk)
 
@@ -206,7 +214,7 @@ Alice speaks every reply using Kokoro neural TTS. Speech is streamed sentence-by
 
 | Control | Action |
 |---------|--------|
-| Voice dropdown | Switch TTS voice instantly |
+| Voice dropdown | Switch TTS voice and immediately re-say the last reply with the new voice |
 | Mute / **M** | Toggle voice on/off |
 | Re-say / **R** | Replay the last spoken reply (instant — uses cached audio, no re-synthesis) |
 | Skip | Stop the current voice playback and move on — does not interrupt chat or image generation |
@@ -271,9 +279,12 @@ Use the **Image** button or type a command:
 /image
 /image candlelight, close up, warm glow
 /image no blur, no shadows
+/auto-image
 ```
 
 Prefix a token with `no ` to push it to the negative prompt. All other tokens are prepended to the positive prompt.
+
+`/auto-image` toggles automatic image generation on/off for the session (same as `--auto-image` at startup). The input placeholder briefly shows `Auto-image ON` or `Auto-image OFF` as confirmation.
 
 ### Demo mode
 
@@ -309,7 +320,7 @@ alice/
 │   ├── audio.py              ← GET /voices · POST /voice · /tts · /tts/stream · /stt
 │   ├── image_api.py          ← POST /image · /reroll · /generate · /interrupt · /seed
 │   ├── persona.py            ← GET /personas · POST /persona/{name}
-│   └── system.py             ← GET /info · /history · /negative · /demo/prompt · /demo/user-personas · POST /model · /demo/user-persona · DELETE /image
+│   └── system.py             ← GET /info · /history · /negative · /demo/prompt · /demo/user-personas · POST /model · /auto-image · /demo/user-persona · DELETE /image
 │
 ├── image/                    ← image generation package
 │   ├── prompt.py             ← SD tag utilities, LLM prompt extraction, accessory detection
