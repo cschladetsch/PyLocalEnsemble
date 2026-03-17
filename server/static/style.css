@@ -66,3 +66,16 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:700;font-size:1.8rem;lette
 .finalizing-overlay{position:absolute;bottom:.5rem;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:var(--accent2);font-size:.7rem;letter-spacing:.12em;padding:.2rem .7rem;border-radius:.3rem;pointer-events:none;white-space:nowrap}
 #seed-btn.pinned{border-color:var(--accent);color:var(--accent)}
 .persona-switch-divider{text-align:center;font-size:.65rem;letter-spacing:.2em;color:var(--accent2);padding:.4rem 0;margin:.2rem 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-family:'Montserrat',sans-serif;text-transform:uppercase;opacity:.7}
+/* ── Group chat ───────────────────────────────────────────────────────────── */
+#group-panel{padding:.5rem 1.5rem;border-bottom:1px solid var(--border);background:var(--panel);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.group-persona-list{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.group-persona-chip{display:flex;align-items:center;gap:.35rem;padding:.25rem .65rem;border:1px solid var(--border);cursor:pointer;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;font-family:'Montserrat',sans-serif;color:var(--muted);transition:all .2s;user-select:none}
+.group-persona-chip input{display:none}
+.group-persona-chip.checked{border-color:var(--accent2);color:var(--accent)}
+.group-persona-chip.checked::before{content:'✦ ';font-size:.6rem}
+.group-persona-chip:hover{border-color:var(--accent2);color:var(--text)}
+/* Group message base — color and font applied dynamically via inline style */
+.msg.group-msg{border-left-width:2px;border-left-style:solid}
+.group-to-hint{font-size:.62rem;color:var(--muted);letter-spacing:.06em;font-style:normal;margin-left:.4rem}
+.msg.group-system{border-left:2px solid var(--border);background:transparent;opacity:.55;font-size:.72rem;font-style:italic;color:var(--muted);align-self:center;padding:.3rem .8rem}
+.group-chatter-badge{font-size:.58rem;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;vertical-align:middle;margin-left:.4rem;opacity:.7}

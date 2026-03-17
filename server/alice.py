@@ -114,12 +114,14 @@ from routes.image_api import router as image_router
 from routes.persona   import router as persona_router
 from routes.audio     import router as audio_router
 from routes.system    import router as system_router
+from routes.group     import router as group_router
 
 app.include_router(chat_router)
 app.include_router(image_router)
 app.include_router(persona_router)
 app.include_router(audio_router)
 app.include_router(system_router)
+app.include_router(group_router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 def _startup():
