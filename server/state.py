@@ -23,6 +23,10 @@ last_seed        = -1          # seed used by the most recent successful generat
 # Active persona key — used to detect cross-session persona mismatch in history
 _active_persona_key: str = ""
 
+# Group chat state — mutated by routes/group.py
+GROUP_ACTIVE   = False
+GROUP_PERSONAS: dict = {}  # key → persona config dict
+
 # Demo mode — active user persona (name + description)
 _demo_user_persona_name: str = ""
 _demo_user_persona_desc: str = ""

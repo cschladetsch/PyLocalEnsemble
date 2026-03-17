@@ -675,6 +675,12 @@ async function send() {
     return;
   }
   lastUserMsg = msg;
+  if (_groupMode) {
+    inp.focus();
+    await _sendGroupMsg(msg);
+    inp.focus();
+    return;
+  }
   addMsg('user', 'You', msg);
   inp.focus();
   if (_demoMode) {
@@ -1033,6 +1039,249 @@ async function exportHistory() {
   a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(text);
   a.download = `alice_chat_${new Date().toISOString().slice(0,16).replace('T','_')}.txt`;
   a.click();
+}
+
+// ── Group Chat ─────────────────────────────────────────────────────────────────
+let _groupMode      = false;
+let _groupPersonas  = {};      // key → {name, tts, font_key}
+let _groupEvents    = null;    // EventSource for /group/events
+let _groupSelected  = new Set();
+let _groupReplies   = [];      // accumulated replies for sequential TTS
+
+async function toggleGroupMode() {
+  if (_groupMode) await _stopGroupMode();
+  else            await _startGroupMode();
+}
+
+async function _startGroupMode() {
+  _groupMode = true;
+  document.getElementById('group-btn').classList.add('demo-active');
+  document.getElementById('group-panel').style.display = 'flex';
+  document.getElementById('inp').placeholder = 'Group chat... or /image';
+
+  // Build persona chip list
+  const res = await fetch('/personas');
+  const d   = await res.json();
+  _groupSelected = new Set(d.personas.map(p => p.name));
+
+  const container = document.getElementById('group-personas');
+  container.innerHTML = d.personas.map(p =>
+    `<span class="group-persona-chip checked" data-key="${p.name}" onclick="_toggleGroupChip(this)">
+       ${p.name}
+     </span>`
+  ).join('');
+
+  await _applyGroupPersonas();
+}
+
+async function _stopGroupMode() {
+  _groupMode = false;
+  document.getElementById('group-btn').classList.remove('demo-active');
+  document.getElementById('group-panel').style.display = 'none';
+  document.getElementById('group-to-wrap').style.display = 'none';
+  document.getElementById('inp').placeholder = 'Say something... or /image';
+  if (_groupEvents) { _groupEvents.close(); _groupEvents = null; }
+  await fetch('/group/stop', { method: 'POST' }).catch(() => {});
+  _addGroupSystemMsg('Group chat ended.');
+}
+
+function _toggleGroupChip(el) {
+  const key = el.dataset.key;
+  if (_groupSelected.has(key)) {
+    if (_groupSelected.size <= 1) return; // keep at least one
+    _groupSelected.delete(key);
+    el.classList.remove('checked');
+  } else {
+    _groupSelected.add(key);
+    el.classList.add('checked');
+  }
+  _applyGroupPersonas();
+}
+
+async function _applyGroupPersonas() {
+  const r = await fetch('/group/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ personas: [..._groupSelected] }),
+  });
+  const d = await r.json();
+
+  // Refresh status for TTS configs + populate To: dropdown
+  const sr = await fetch('/group/status');
+  const sd = await sr.json();
+  _groupPersonas = {};
+  sd.personas.forEach(p => { _groupPersonas[p.key] = p; });
+
+  const toSel = document.getElementById('group-to');
+  toSel.innerHTML = '<option value="all">All</option>' +
+    sd.personas.map(p => `<option value="${p.key}">${p.name}</option>`).join('');
+
+  document.getElementById('group-to-wrap').style.display = 'flex';
+
+  // (Re)connect SSE for async chatter
+  if (_groupEvents) _groupEvents.close();
+  _groupEvents = new EventSource('/group/events');
+  _groupEvents.onmessage = _onGroupEvent;
+
+  const names = sd.personas.map(p => p.name).join(', ');
+  _addGroupSystemMsg(`Group: ${names}`);
+}
+
+function _onGroupEvent(e) {
+  let data;
+  try { data = JSON.parse(e.data); } catch { return; }
+  if (data.ping) return;
+
+  if (data.type === 'system') {
+    _addGroupSystemMsg(data.content);
+    return;
+  }
+
+  if (data.type === 'chatter') {
+    const toHint = (data.to && data.to !== 'all') ? data.to : '';
+    _addGroupMsg(data.persona, data.sender, data.content, toHint, true);
+    const tts = data.tts || {};
+    speak(data.content, tts.voice || null, tts.speed || null, null, tts.effects || null);
+  }
+}
+
+function _addGroupSystemMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg group-system';
+  d.textContent = text;
+  const c = document.getElementById('msgs');
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function _addGroupMsg(personaKey, senderName, html, toHint, isChatter) {
+  const id = 'm' + (mid++);
+  const d = document.createElement('div');
+  // Normalise key to CSS class: lower-case, spaces → hyphens
+  const cls = (personaKey || 'default').toLowerCase().replace(/\s+/g, '-');
+  d.className = `msg alice group-msg group-${cls}`;
+  d.id = id;
+  const toSpan   = toHint   ? `<span class="group-to-hint">→ ${toHint}</span>` : '';
+  const badge    = isChatter ? `<span class="group-chatter-badge">✦</span>` : '';
+  d.innerHTML = `<div class="sndr">${senderName}${toSpan}${badge}</div>${html}`;
+  const c = document.getElementById('msgs');
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+  return id;
+}
+
+async function _sendGroupMsg(msg) {
+  const toSel = document.getElementById('group-to');
+  let to  = toSel ? toSel.value : 'all';
+  let txt = msg;
+
+  // Parse @mention prefix: "@Alice: hello" → {to: Alice's key, txt: "hello"}
+  const mention = msg.match(/^@(\S+?):\s*([\s\S]+)/);
+  if (mention) {
+    const target = mention[1].toLowerCase();
+    txt = mention[2].trim();
+    for (const [key, p] of Object.entries(_groupPersonas)) {
+      if (p.name.toLowerCase() === target || key.toLowerCase() === target) {
+        to = key;
+        break;
+      }
+    }
+  }
+
+  const toName = to === 'all' ? '' : (_groupPersonas[to]?.name || to);
+  const toHtml = toName ? ` <span class="group-to-hint">→ ${toName}</span>` : '';
+  addMsg('user', 'You', txt + toHtml);
+
+  chatAbort = new AbortController();
+  disableAll();
+  document.getElementById('thinking-bar').style.display = 'block';
+
+  let personaTids    = {};  // key → msgId
+  let personaReplies = [];  // [{key, name, reply, tts}] for sequential TTS
+
+  try {
+    const res = await fetch('/group/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: txt, to }),
+      signal: chatAbort.signal,
+    });
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+
+        if (data.error) {
+          document.getElementById('thinking-bar').style.display = 'none';
+          _addGroupSystemMsg(`Error: ${data.error}`);
+        }
+        if (data.typing) {
+          document.getElementById('thinking-bar').style.display = 'none';
+          const tid = _addGroupMsg(data.persona, data.sender, '<span class="gen dots">thinking</span>', '', false);
+          personaTids[data.persona] = { tid, reply: '' };
+        }
+        if (data.delta && personaTids[data.persona]) {
+          personaTids[data.persona].reply += data.delta;
+          updMsg(personaTids[data.persona].tid, personaTids[data.persona].reply);
+        }
+        if (data.done && personaTids[data.persona]) {
+          const state = personaTids[data.persona];
+          state.reply = data.reply;
+          updMsg(state.tid, data.reply);
+          personaReplies.push({ key: data.persona, name: data.sender, reply: data.reply, tts: data.tts || {} });
+        }
+        if (data.all_done) {
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    document.getElementById('thinking-bar').style.display = 'none';
+    if (e.name !== 'AbortError') console.error('[group chat]', e);
+    chatAbort = null; enableAll(); return;
+  }
+
+  document.getElementById('thinking-bar').style.display = 'none';
+  chatAbort = null;
+  enableAll();
+
+  // Play TTS sequentially — wait for each persona to finish speaking before next
+  for (const r of personaReplies) {
+    if (!_groupMode) break;
+    const tts = r.tts;
+    speak(r.reply, tts.voice || null, tts.speed || null, null, tts.effects || null);
+    await _waitForGroupTts(_ttsGen);
+  }
+
+  loadInfo();
+}
+
+async function _waitForGroupTts(gen, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  // Wait for speak() to schedule at least one audio chunk
+  const p1 = Date.now() + 8000;
+  while (Date.now() < p1) {
+    if (_ttsGen !== gen || !_groupMode) return;
+    if (_audioCtx && _nextStart > (_audioCtx.currentTime + 0.2)) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (!_audioCtx || _nextStart <= 0.1) return;
+  // Wait for scheduled audio to finish
+  while (Date.now() < deadline) {
+    if (_ttsGen !== gen || !_groupMode) return;
+    if (_audioCtx.currentTime >= _nextStart - 0.1) return;
+    await new Promise(r => setTimeout(r, 200));
+  }
 }
 
 async function clearHistory() {

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alice</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Montserrat:wght@300;400&family=Cinzel+Decorative:wght@400&family=Pinyon+Script&family=Share+Tech+Mono&family=Almendra:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <header>
@@ -16,9 +16,13 @@
     <select id="persona-select" class="cb" onchange="switchPersona(this.value)" style="cursor:pointer"></select>
     <select id="demo-persona-select" class="cb" onchange="switchDemoPersona(this.value)" title="Your character in demo mode" style="cursor:pointer"></select>
     <button class="cb" id="demo-btn" onclick="toggleDemo()" title="Auto-pilot: Alice generates and responds to her own prompts">Demo</button>
+    <button class="cb" id="group-btn" onclick="toggleGroupMode()" title="Group chat: multiple personas in one room">Group</button>
     <button class="cb" onclick="clearHistory()">Clear</button>
   </div>
 </header>
+<div id="group-panel" style="display:none">
+  <div class="group-persona-list" id="group-personas"></div>
+</div>
 <div class="main">
   <div class="cp">
     <div id="thinking-bar"></div>
@@ -26,6 +30,10 @@
       <div class="msg alice"><div class="sndr">Alice</div>Hello. I&#39;ve been waiting for you...</div>
     </div>
     <div class="ir">
+      <div id="group-to-wrap" style="display:none;align-items:center;gap:.3rem">
+        <span style="font-size:.65rem;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;white-space:nowrap">To:</span>
+        <select id="group-to" class="cb" style="cursor:pointer"></select>
+      </div>
       <input type="text" id="inp" placeholder="Say something... or /image" onkeydown="if(event.key==='Enter')send()">
       <button id="mic-btn" onclick="toggleMic()" title="Click to record, click again to stop">Mic</button><select id="mic-select" title="Audio input device"></select>
       <button id="ibtn" onclick="doImage()">Image</button>
@@ -66,6 +74,6 @@
 <div id="fullscreen-overlay" onclick="closeFullscreen()">
   <img id="fullscreen-img" alt="">
 </div>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>
