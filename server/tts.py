@@ -192,3 +192,43 @@ def tts_wav_b64(text: str) -> str:
         wf.setframerate(sr)
         wf.writeframes((samples * 32767).astype(np.int16).tobytes())
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def tts_wav_b64_stream_contiguous(text: str, voice: str = None, speed: float = None,
+                                  pitch: float = None, effects: str = None,
+                                  slice_ms: int = 900):
+    """Yield contiguous WAV slices from a fully crossfaded utterance.
+
+    This trades a bit of startup latency for much smoother playback with no
+    large pauses between sentence chunks.
+    """
+    import numpy as np
+    tts_cfg = config.CFG.get("tts", {})
+    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_nicole")
+    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    effects = effects if effects is not None else tts_cfg.get("effects", "")
+
+    chunks = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
+    parts, sr = [], None
+    for chunk in chunks:
+        s, sr = TTS.create(chunk, voice=voice, speed=spd, lang="en-us")
+        parts.append(s)
+    samples = _crossfade(parts, sr) if parts else np.zeros(0, dtype=np.float32)
+
+    if effects == "android":
+        samples = _android_effect(samples, sr)
+    elif effects == "cathedral":
+        samples = _cathedral_effect(samples, sr)
+
+    out_sr = int(sr * pitch) if pitch and pitch != 1.0 else sr
+    slice_n = max(1, int(sr * slice_ms / 1000))
+    total = len(samples)
+    for start in range(0, total, slice_n):
+        end = min(total, start + slice_n)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(out_sr)
+            wf.writeframes((samples[start:end] * 32767).astype(np.int16).tobytes())
+        yield base64.b64encode(buf.getvalue()).decode(), (end >= total)

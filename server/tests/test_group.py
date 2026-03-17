@@ -408,6 +408,11 @@ def test_build_chatter_all_target_directive(two_personas_loaded):
     assert "group" in msgs[-1]["content"].lower()
 
 
+def test_build_chatter_all_target_is_sexy(two_personas_loaded):
+    msgs = grp._build_chatter_messages(two_personas_loaded[0], "all")
+    assert "sexy" in msgs[-1]["content"].lower() or "flirtatious" in msgs[-1]["content"].lower()
+
+
 def test_build_chatter_specific_target_names_persona(two_personas_loaded):
     key1, key2 = two_personas_loaded
     target_name = config.PERSONAS[key2].get("name", key2)
@@ -442,6 +447,21 @@ def test_build_chatter_specific_target_uses_pair_history(two_personas_loaded):
     assert "flat_only_phrase" not in all_text
 
 
+def test_record_pair_history_fans_out_group_persona_message(two_personas_loaded):
+    key1, key2 = two_personas_loaded
+    pk = grp._pair_key(key1, key2)
+    grp._pair_histories[pk] = []
+    entry = {
+        "role": "persona",
+        "sender": config.PERSONAS[key1].get("name", key1),
+        "persona": key1,
+        "content": "shared with everyone",
+        "to": "all",
+    }
+    grp._record_pair_history(entry)
+    assert grp._pair_histories[pk][-1]["content"] == "shared with everyone"
+
+
 def test_build_chatter_all_target_uses_flat_history(two_personas_loaded):
     """'all' target chatter uses the flat _history, not pair history."""
     key1, key2 = two_personas_loaded
@@ -459,6 +479,26 @@ def test_chat_not_active_returns_error_event():
     res = client.post("/group/chat", json={"message": "hi", "to": "all"})
     events = _parse_sse(res)
     assert any("error" in e for e in events)
+
+
+def test_group_message_not_active_returns_400():
+    res = client.post("/group/message", json={"message": "hi", "to": "all"})
+    assert res.status_code == 400
+
+
+def test_group_message_records_user_message(two_keys):
+    res = client.post("/group/message", json={"message": "free-form note", "to": "all"})
+    assert res.status_code == 200
+    assert grp._history[-1]["role"] == "user"
+    assert grp._history[-1]["content"] == "free-form note"
+    assert grp._history[-1]["to"] == "all"
+
+
+def test_group_message_updates_all_pair_histories(two_keys):
+    pk = grp._pair_key(two_keys[0], two_keys[1])
+    grp._pair_histories[pk] = []
+    client.post("/group/message", json={"message": "room context", "to": "all"})
+    assert grp._pair_histories[pk][-1]["content"] == "room context"
 
 
 def test_chat_llm_not_ready_returns_error_event(two_keys, monkeypatch):

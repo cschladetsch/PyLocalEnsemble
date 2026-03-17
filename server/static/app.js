@@ -29,6 +29,8 @@ function entranceLine() {
 // ── Web Audio streaming TTS ───────────────────────────────────────────────────
 let _audioCtx = null, _nextStart = 0, _ttsNodes = [], _ttsGen = 0;
 let _lastChunks = [];   // decoded AudioBuffers from last speak() for instant resay
+let _groupSpeeches = [];
+let _groupMomentum = {};
 
 function _stopTts() {
   _ttsGen++;                    // invalidates any in-flight speak() loops
@@ -38,6 +40,14 @@ function _stopTts() {
   // _lastChunks is intentionally kept so resay() can replay after an interrupt
   const skip = document.getElementById('skip-btn');
   if (skip) skip.disabled = true;
+}
+
+function _stopGroupSpeech() {
+  _groupSpeeches.forEach(speech => {
+    speech.sources.forEach(src => { try { src.stop(0); } catch {} });
+    try { speech.gain.disconnect(); } catch {}
+  });
+  _groupSpeeches = [];
 }
 
 function skipVoice() {
@@ -216,7 +226,7 @@ function resay() {
 
 function toggleMute() {
   muted = !muted;
-  if (muted) _stopTts();
+  if (muted) { _stopTts(); _stopGroupSpeech(); }
   document.getElementById('mute-btn').textContent = muted ? 'Unmute' : 'Mute';
 }
 
@@ -304,7 +314,9 @@ async function deleteActiveImage() {
 
 async function interrupt(reason) {
   if (reason === 'user' && _demoMode) { _demoSkip = true; }  // Skip current turn, don't stop demo
+  _resetGroupAudioState();
   _stopTts();
+  _stopGroupSpeech();
   if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
   if (chatAbort) {
     console.log('Aborting chat:', reason);
@@ -667,15 +679,21 @@ async function send() {
   if (msg === '/export') { exportHistory(); return; }
   if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
   if (msg === '/auto-image') {
+    const inp2 = document.getElementById('inp');
+    if (_groupMode) {
+      inp2.placeholder = 'Group chat images are manual only. Use the Image button or /image.';
+      setTimeout(() => inp2.placeholder = 'Group chat... images are manual via button or /image', 2500);
+      return;
+    }
     const r = await fetch('/auto-image', { method: 'POST' });
     const d = await r.json();
-    const inp2 = document.getElementById('inp');
     inp2.placeholder = `Auto-image ${d.auto_image ? 'ON' : 'OFF'}`;
     setTimeout(() => inp2.placeholder = 'Say something... or /image', 2500);
     return;
   }
   lastUserMsg = msg;
   if (_groupMode) {
+    await interrupt('group input');
     inp.focus();
     await _sendGroupMsg(msg);
     inp.focus();
@@ -1046,7 +1064,6 @@ let _groupMode      = false;
 let _groupPersonas  = {};      // key → {name, tts, font_key, color}
 let _groupEvents    = null;    // EventSource for /group/events
 let _groupSelected  = new Set();
-let _groupReplies   = [];      // accumulated replies for sequential TTS
 
 // Color pool — assigned dynamically to whatever personas are in the group
 const _GROUP_COLORS = [
@@ -1064,7 +1081,7 @@ async function _startGroupMode() {
   _groupMode = true;
   document.getElementById('group-btn').classList.add('demo-active');
   document.getElementById('group-panel').style.display = 'flex';
-  document.getElementById('inp').placeholder = 'Group chat... or /image';
+  document.getElementById('inp').placeholder = 'Group chat... images are manual via button or /image';
 
   // Build persona chip list
   const res = await fetch('/personas');
@@ -1083,6 +1100,7 @@ async function _startGroupMode() {
 
 async function _stopGroupMode() {
   _groupMode = false;
+  _resetGroupAudioState();
   document.getElementById('group-btn').classList.remove('demo-active');
   document.getElementById('group-panel').style.display = 'none';
   document.getElementById('group-to-wrap').style.display = 'none';
@@ -1106,6 +1124,7 @@ function _toggleGroupChip(el) {
 }
 
 async function _applyGroupPersonas() {
+  _resetGroupAudioState();
   const r = await fetch('/group/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1126,7 +1145,7 @@ async function _applyGroupPersonas() {
   toSel.innerHTML = '<option value="all">All</option>' +
     sd.personas.map(p => `<option value="${p.key}">${p.name}</option>`).join('');
 
-  document.getElementById('group-to-wrap').style.display = 'flex';
+  document.getElementById('group-to-wrap').style.display = 'none';
 
   // (Re)connect SSE for async chatter
   if (_groupEvents) _groupEvents.close();
@@ -1151,7 +1170,152 @@ function _onGroupEvent(e) {
     const toHint = (data.to && data.to !== 'all') ? data.to : '';
     _addGroupMsg(data.persona, data.sender, data.content, toHint, true);
     const tts = data.tts || {};
-    speak(data.content, tts.voice || null, tts.speed || null, null, tts.effects || null);
+    _speakGroup(data.persona, data.content, tts);
+  }
+}
+
+function _resetGroupAudioState() {
+  _groupMomentum = {};
+}
+
+function _decayGroupMomentum(now = performance.now()) {
+  for (const [key, state] of Object.entries(_groupMomentum)) {
+    const age = Math.max(0, (now - state.ts) / 1000);
+    const value = Math.max(0, state.value - age * 0.18);
+    if (value <= 0.01) delete _groupMomentum[key];
+    else _groupMomentum[key] = { value, ts: now };
+  }
+}
+
+function _groupSexinessScore(text = '') {
+  const lower = text.toLowerCase();
+  let score = 0;
+  const weighted = [
+    [/\b(fuck|cum|pussy|cock|cunt|throat|breed|ride|spread|wet|hard|orgasm)\b/g, 0.22],
+    [/\b(moan|moaning|pant|panting|breath|shiver|throb|ache|heat|need|want|taste|lick|kiss)\b/g, 0.12],
+    [/\b(good girl|good boy|come here|look at me|take it|touch me|use me|open for me)\b/g, 0.28],
+  ];
+  for (const [pattern, weight] of weighted) {
+    const hits = lower.match(pattern);
+    if (hits) score += hits.length * weight;
+  }
+  if (/[!?]/.test(text)) score += 0.08;
+  if (/\byou\b/.test(lower)) score += 0.06;
+  return Math.min(2.2, score);
+}
+
+function _groupDominanceFor(personaKey, text = '') {
+  const now = performance.now();
+  _decayGroupMomentum(now);
+  const prev = _groupMomentum[personaKey]?.value || 0;
+  const sexiness = _groupSexinessScore(text);
+  const dominance = 1 + sexiness + prev * 0.35;
+  _groupMomentum[personaKey] = { value: Math.min(2.5, prev * 0.45 + sexiness + 0.35), ts: now };
+  return dominance;
+}
+
+function _createGroupSpeech(personaKey, dominance) {
+  _ensureAudioCtx();
+  const gain = _audioCtx.createGain();
+  gain.gain.value = 1;
+  gain.connect(_audioCtx.destination);
+  const speech = {
+    personaKey,
+    dominance,
+    gain,
+    nextStart: _audioCtx.currentTime + 0.02,
+    sources: [],
+    active: true,
+  };
+  _groupSpeeches.push(speech);
+  return speech;
+}
+
+function _applyGroupMix(focusSpeech) {
+  _groupSpeeches = _groupSpeeches.filter(s => s.active);
+  const now = _audioCtx ? _audioCtx.currentTime : 0;
+  const strongerExisting = focusSpeech
+    ? _groupSpeeches.some(s => s !== focusSpeech && s.active && s.dominance > focusSpeech.dominance)
+    : false;
+
+  for (const speech of _groupSpeeches) {
+    let target = 1;
+    if (focusSpeech && speech !== focusSpeech) {
+      target = speech.dominance > focusSpeech.dominance ? 1 : 0.32;
+    } else if (focusSpeech && speech === focusSpeech && strongerExisting) {
+      target = 0.42;
+    }
+    speech.gain.gain.cancelScheduledValues(now);
+    speech.gain.gain.linearRampToValueAtTime(target, now + 0.18);
+  }
+}
+
+function _cleanupGroupSpeech(speech) {
+  speech.active = false;
+  _groupSpeeches = _groupSpeeches.filter(s => s.active);
+  _applyGroupMix(null);
+}
+
+function _playGroupAudioBuffer(speech, audioBuf) {
+  const src = _audioCtx.createBufferSource();
+  src.buffer = audioBuf;
+  src.connect(speech.gain);
+  const now = _audioCtx.currentTime;
+  const start = Math.max(now + 0.02, speech.nextStart);
+  src.start(start);
+  speech.nextStart = start + audioBuf.duration;
+  speech.sources.push(src);
+  src.onended = () => {
+    speech.sources = speech.sources.filter(s => s !== src);
+    if (!speech.sources.length && speech.nextStart <= (_audioCtx.currentTime + 0.05)) {
+      _cleanupGroupSpeech(speech);
+    }
+  };
+}
+
+async function _speakGroup(personaKey, text, tts = {}) {
+  if (muted || !_groupMode) return;
+  const dominance = _groupDominanceFor(personaKey, text);
+  const speech = _createGroupSpeech(personaKey, dominance);
+  _applyGroupMix(speech);
+
+  try {
+    const body = { text };
+    if (tts.voice   !== null && tts.voice   !== undefined) body.voice   = tts.voice;
+    if (tts.speed   !== null && tts.speed   !== undefined) body.speed   = tts.speed;
+    if (tts.effects !== null && tts.effects !== undefined) body.effects = tts.effects;
+    const res = await fetch('/tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (speech.active) {
+      const { done, value } = await reader.read();
+      if (done || !speech.active || !_groupMode) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = JSON.parse(line.slice(6));
+        if (d.error) return;
+        if (d.chunk) {
+          const bytes = atob(d.chunk);
+          const raw = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) raw[i] = bytes.charCodeAt(i);
+          const audioBuf = await _audioCtx.decodeAudioData(raw.buffer);
+          if (!speech.active || !_groupMode) return;
+          _playGroupAudioBuffer(speech, audioBuf);
+        }
+      }
+    }
+  } catch (e) {
+    if (speech.active) console.warn('Group TTS stream error:', e);
+  } finally {
+    if (!speech.sources.length) _cleanupGroupSpeech(speech);
   }
 }
 
@@ -1193,99 +1357,20 @@ function _addGroupMsg(personaKey, senderName, html, toHint, isChatter) {
 }
 
 async function _sendGroupMsg(msg) {
-  const toSel = document.getElementById('group-to');
-  let to  = toSel ? toSel.value : 'all';
-  let txt = msg;
-
-  // Parse @mention prefix: "@Alice: hello" → {to: Alice's key, txt: "hello"}
-  const mention = msg.match(/^@(\S+?):\s*([\s\S]+)/);
-  if (mention) {
-    const target = mention[1].toLowerCase();
-    txt = mention[2].trim();
-    for (const [key, p] of Object.entries(_groupPersonas)) {
-      if (p.name.toLowerCase() === target || key.toLowerCase() === target) {
-        to = key;
-        break;
-      }
-    }
-  }
-
-  const toName = to === 'all' ? '' : (_groupPersonas[to]?.name || to);
-  const toHtml = toName ? ` <span class="group-to-hint">→ ${toName}</span>` : '';
-  addMsg('user', 'You', txt + toHtml);
-
-  chatAbort = new AbortController();
-  disableAll();
-  document.getElementById('thinking-bar').style.display = 'block';
-
-  let personaTids    = {};  // key → msgId
-  let personaReplies = [];  // [{key, name, reply, tts}] for sequential TTS
+  addMsg('user', 'You', msg);
 
   try {
-    const res = await fetch('/group/chat', {
+    const res = await fetch('/group/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: txt, to }),
-      signal: chatAbort.signal,
+      body: JSON.stringify({ message: msg, to: 'all' }),
     });
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.slice(6));
-
-        if (data.error) {
-          document.getElementById('thinking-bar').style.display = 'none';
-          _addGroupSystemMsg(`Error: ${data.error}`);
-        }
-        if (data.typing) {
-          document.getElementById('thinking-bar').style.display = 'none';
-          const tid = _addGroupMsg(data.persona, data.sender, '<span class="gen dots">thinking</span>', '', false);
-          personaTids[data.persona] = { tid, reply: '' };
-        }
-        if (data.delta && personaTids[data.persona]) {
-          personaTids[data.persona].reply += data.delta;
-          updMsg(personaTids[data.persona].tid, personaTids[data.persona].reply);
-        }
-        if (data.done && personaTids[data.persona]) {
-          const state = personaTids[data.persona];
-          state.reply = data.reply;
-          updMsg(state.tid, data.reply);
-          personaReplies.push({ key: data.persona, name: data.sender, reply: data.reply, tts: data.tts || {} });
-        }
-        if (data.all_done) {
-          break;
-        }
-      }
-    }
+    const data = await res.json();
+    if (data.error) _addGroupSystemMsg(`Error: ${data.error}`);
   } catch (e) {
-    document.getElementById('thinking-bar').style.display = 'none';
-    if (e.name !== 'AbortError') console.error('[group chat]', e);
-    chatAbort = null; enableAll(); return;
+    console.error('[group message]', e);
+    _addGroupSystemMsg('Error sending message.');
   }
-
-  document.getElementById('thinking-bar').style.display = 'none';
-  chatAbort = null;
-  enableAll();
-
-  // Play TTS sequentially — wait for each persona to finish speaking before next
-  for (const r of personaReplies) {
-    if (!_groupMode) break;
-    const tts = r.tts;
-    speak(r.reply, tts.voice || null, tts.speed || null, null, tts.effects || null);
-    await _waitForGroupTts(_ttsGen);
-  }
-
-  loadInfo();
 }
 
 async function _waitForGroupTts(gen, timeoutMs = 90000) {

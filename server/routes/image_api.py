@@ -12,6 +12,44 @@ import state
 router = APIRouter()
 
 
+_GROUP_SCENE_SKIP = {
+    "candlelight", "moonlight", "firelight", "soft lighting", "dark atmosphere",
+    "egyptian temple", "dark wood panelling", "ornate fireplace",
+    "dark sci-fi lab", "holographic interface panels", "mossy forest clearing",
+    "twisted ancient trees", "floating ui panels",
+}
+
+
+def _short_group_appearance(app_str: str, limit: int = 8) -> str:
+    tags = [t.strip() for t in app_str.split(",") if t.strip()]
+    identity = [t for t in tags if t.lower() not in _GROUP_SCENE_SKIP]
+    chosen = identity[:limit] if identity else tags[:limit]
+    return ", ".join(chosen)
+
+
+def _build_group_scene_appearance(personas: dict) -> str:
+    """Build explicit multi-person scene tags so SD keeps personas separate."""
+    names = [p.get("name", key) for key, p in personas.items()]
+    count = len(names)
+    count_tag = f"{count}girls" if count != 1 else "1girl"
+    base_tags = [
+        count_tag,
+        "group scene",
+        "separate people",
+        "distinct individuals",
+        "different faces",
+        "different bodies",
+        "unique signature looks",
+        "full cast visible",
+    ]
+    persona_tags = []
+    for key, persona in personas.items():
+        name = persona.get("name", key)
+        short_app = _short_group_appearance(persona.get("appearance", ""))
+        persona_tags.append(f"{name} signature look: {short_app}" if short_app else name)
+    return ", ".join(base_tags + persona_tags)
+
+
 class ImageRequest(BaseModel):
     extra: str = ""
 
@@ -71,22 +109,10 @@ async def image_from_history(body: ImageRequest):
 
             # Aggregate all active persona appearances for the scene
             if state.GROUP_ACTIVE:
-                # Build a collective appearance string that mandates all personas appear.
-                # In group mode, we use "short appearances" to stay within prompt segment limits.
                 try:
                     import routes.group as _grp
                     _names = [p.get("name", k) for k, p in _grp._personas.items()]
-                    _count_str = f"{len(_names)} girls" if len(_names) > 1 else "1 girl"
-                    
-                    def _short_app(app_str: str) -> str:
-                        # Extract the first 4 meaningful tags to keep the group prompt manageable
-                        tags = [t.strip() for t in app_str.split(",") if t.strip()]
-                        return ", ".join(tags[:4])
-
-                    # Association format (Name: appearance) helps SD assign traits to individuals
-                    _apps = [f"({p.get('name', k)}: {_short_app(p.get('appearance', ''))})"
-                             for k, p in _grp._personas.items()]
-                    combined_appearance = f"{_count_str}, " + ", ".join(_apps)
+                    combined_appearance = _build_group_scene_appearance(_grp._personas)
                     print(f"[image] group mode — aggregated appearance: {combined_appearance}")
                 except Exception:
                     combined_appearance = state.ALICE_APPEARANCE
@@ -110,7 +136,7 @@ async def image_from_history(body: ImageRequest):
                 if state.GROUP_ACTIVE:
                     _persona_context += f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. " \
                                         "You MUST output tags that describe an interaction or pose involving EVERY persona listed. " \
-                                        "Ensure they are distinct individuals. " \
+                                        "Ensure they are distinct individuals and never merged into one person. " \
                                         "Do not omit any character from the scene description."
 
                 base_prompt, new_nudity = image.extract_sd_prompt(

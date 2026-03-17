@@ -2,8 +2,39 @@ import pytest
 import config
 from fastapi.testclient import TestClient
 from alice import app
+from routes.image_api import _build_group_scene_appearance, _short_group_appearance
 
 client = TestClient(app, raise_server_exceptions=True)
+
+
+def test_short_group_appearance_limits_tags():
+    result = _short_group_appearance("red hair, green eyes, pale skin, black dress, freckles")
+    assert result == "red hair, green eyes, pale skin, black dress, freckles"
+
+
+def test_short_group_appearance_skips_scene_tags():
+    result = _short_group_appearance(
+        "female android, white chassis plates, silver eyes, dark sci-fi lab, holographic interface panels"
+    )
+    assert "dark sci-fi lab" not in result
+    assert "holographic interface panels" not in result
+    assert "female android" in result
+    assert "white chassis plates" in result
+
+
+def test_build_group_scene_appearance_marks_distinct_people():
+    personas = {
+        "a": {"name": "Alice", "appearance": "red hair, green eyes, pale skin, black dress, freckles"},
+        "b": {"name": "Morrigan", "appearance": "black hair, amber eyes, tan skin, silver gown, jewelry"},
+    }
+    result = _build_group_scene_appearance(personas)
+    assert "2girls" in result
+    assert "separate people" in result
+    assert "distinct individuals" in result
+    assert "different faces" in result
+    assert "unique signature looks" in result
+    assert "Alice signature look: red hair, green eyes, pale skin, black dress, freckles" in result
+    assert "Morrigan signature look: black hair, amber eyes, tan skin, silver gown, jewelry" in result
 
 
 @pytest.fixture()

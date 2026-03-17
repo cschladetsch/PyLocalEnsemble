@@ -17,6 +17,7 @@ _history: list  = []   # [{role, sender, persona, content, to, _internal?}]
 _pair_histories: dict = {}  # pair_key → list of entries (per persona-pair chatter)
 _listeners: list = []  # asyncio.Queue per SSE subscriber
 _chatter_task: asyncio.Task | None = None
+_chatter_wake: asyncio.Event | None = None
 
 _DATA_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -53,6 +54,49 @@ def _add_to_pair(key: str, entry: dict):
     if key not in _pair_histories:
         _pair_histories[key] = []
     _pair_histories[key].append(entry)
+
+
+def _resolve_persona_key(name_or_key: str | None) -> str | None:
+    if not name_or_key or name_or_key == "all":
+        return None
+    if name_or_key in _personas:
+        return name_or_key
+    lowered = name_or_key.lower()
+    for key, persona in _personas.items():
+        if persona.get("name", key).lower() == lowered:
+            return key
+    return None
+
+
+def _record_pair_history(entry: dict):
+    """Fan out group events into per-pair histories so relationships stay current."""
+    keys = list(_personas.keys())
+    if len(keys) < 2:
+        return
+
+    if entry.get("role") == "persona":
+        sender_key = entry.get("persona")
+        if not sender_key:
+            return
+        target_key = _resolve_persona_key(entry.get("to"))
+        if target_key:
+            _add_to_pair(_pair_key(sender_key, target_key), entry)
+            return
+        for other_key in keys:
+            if other_key != sender_key:
+                _add_to_pair(_pair_key(sender_key, other_key), entry)
+        return
+
+    if entry.get("role") == "user":
+        target_key = _resolve_persona_key(entry.get("to"))
+        if target_key:
+            for other_key in keys:
+                if other_key != target_key:
+                    _add_to_pair(_pair_key(target_key, other_key), entry)
+            return
+        for i, key1 in enumerate(keys):
+            for key2 in keys[i + 1:]:
+                _add_to_pair(_pair_key(key1, key2), entry)
 
 
 def _broadcast(event: dict):
@@ -139,7 +183,8 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
         sys_prompt += (
             f"\n\nYou are in a group with {', '.join(others_info)} and the User. "
             f"You are {sender_name} ({sender_gender}). "
-            "Keep your response to 1-2 sentences. Be natural and in character. "
+            "Keep your response to 1-2 sentences. Be natural, sexy, and in character. "
+            "Let the group conversation feel flirtatious, sensual, and intimate rather than neutral small talk. "
             "Use correct pronouns for others based on their listed gender."
         )
 
@@ -174,10 +219,16 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
         collapsed.insert(0, ["user", "Hello."])
 
     if target_key == "all":
-        directive = "Say something interesting or thought-provoking to the group. 1-2 sentences only."
+        directive = (
+            "Say something sexy, flirtatious, or sensually provocative to the group. "
+            "Keep it natural and in character. 1-2 sentences only."
+        )
     else:
         target_name = _personas[target_key].get("name", target_key)
-        directive = f"Say something to {target_name} — a spontaneous thought or remark. 1-2 sentences only."
+        directive = (
+            f"Say something sexy, teasing, or intimate to {target_name} — "
+            "a spontaneous in-character remark. 1-2 sentences only."
+        )
     collapsed.append(["user", directive])
 
     messages = [{"role": "system", "content": sys_prompt}]
@@ -202,8 +253,15 @@ async def _chatter_loop():
     """Background task: personas spontaneously speak to each other."""
     import traceback
     while _active and len(_personas) >= 2:
-        delay = 35 + random.random() * 85
-        await asyncio.sleep(delay)
+        global _chatter_wake
+        if _chatter_wake is None:
+            _chatter_wake = asyncio.Event()
+        delay = 8 + random.random() * 10 if _history else 2 + random.random() * 3
+        try:
+            await asyncio.wait_for(_chatter_wake.wait(), timeout=delay)
+            _chatter_wake.clear()
+        except asyncio.TimeoutError:
+            pass
         if not _active or len(_personas) < 2:
             break
 
@@ -232,8 +290,7 @@ async def _chatter_loop():
                 "to": target_name,
             }
             _history.append(entry)
-            if target_key != "all":
-                _add_to_pair(_pair_key(sender_key, target_key), entry)
+            _record_pair_history(entry)
             tts_cfg = _personas[sender_key].get("tts", {})
             _broadcast({
                 "type": "chatter",
@@ -345,6 +402,23 @@ class GroupChatRequest(BaseModel):
     to: str = "all"  # "all" or a persona key
 
 
+@router.post("/group/message")
+async def group_message(body: GroupChatRequest):
+    if not _active:
+        return JSONResponse({"error": "Group chat not active"}, status_code=400)
+
+    _history.append({
+        "role": "user",
+        "sender": "User",
+        "content": body.message,
+        "to": "all",
+    })
+    _record_pair_history(_history[-1])
+    if _chatter_wake:
+        _chatter_wake.set()
+    return JSONResponse({"status": "ok"})
+
+
 @router.post("/group/chat")
 async def group_chat(body: GroupChatRequest):
     if not _active:
@@ -363,6 +437,7 @@ async def group_chat(body: GroupChatRequest):
         "content": body.message,
         "to": body.to,
     })
+    _record_pair_history(_history[-1])
 
     # Determine which personas respond
     if body.to == "all":
@@ -437,6 +512,7 @@ async def group_chat(body: GroupChatRequest):
                 "content": reply,
                 "to": body.to,
             })
+            _record_pair_history(_history[-1])
             tts_cfg = p.get("tts", {})
             _broadcast({
                 "type": "message",
