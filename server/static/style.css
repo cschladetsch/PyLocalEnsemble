@@ -74,13 +74,8 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:700;font-size:1.8rem;lette
 .group-persona-chip.checked{border-color:var(--accent2);color:var(--accent)}
 .group-persona-chip.checked::before{content:'✦ ';font-size:.6rem}
 .group-persona-chip:hover{border-color:var(--accent2);color:var(--text)}
-/* Per-persona accent colors in group chat */
+/* Group message base — color and font applied dynamically via inline style */
 .msg.group-msg{border-left-width:2px;border-left-style:solid}
-.msg.group-default{border-left-color:#c084a0}.msg.group-default .sndr{color:#c084a0}
-.msg.group-android{border-left-color:#4fc3f7;font-family:'Share Tech Mono',monospace;font-style:normal;font-size:.82rem}.msg.group-android .sndr{color:#4fc3f7}
-.msg.group-victorian-lady{border-left-color:#daa520}.msg.group-victorian-lady .sndr{color:#daa520}
-.msg.group-egyptian-goddess{border-left-color:#e8b86a}.msg.group-egyptian-goddess .sndr{color:#e8b86a}
-.msg.group-forest-witch{border-left-color:#7cb984}.msg.group-forest-witch .sndr{color:#7cb984}
 .group-to-hint{font-size:.62rem;color:var(--muted);letter-spacing:.06em;font-style:normal;margin-left:.4rem}
 .msg.group-system{border-left:2px solid var(--border);background:transparent;opacity:.55;font-size:.72rem;font-style:italic;color:var(--muted);align-self:center;padding:.3rem .8rem}
 .group-chatter-badge{font-size:.58rem;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;vertical-align:middle;margin-left:.4rem;opacity:.7}

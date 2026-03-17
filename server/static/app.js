@@ -1043,10 +1043,17 @@ async function exportHistory() {
 
 // ── Group Chat ─────────────────────────────────────────────────────────────────
 let _groupMode      = false;
-let _groupPersonas  = {};      // key → {name, tts, font_key}
+let _groupPersonas  = {};      // key → {name, tts, font_key, color}
 let _groupEvents    = null;    // EventSource for /group/events
 let _groupSelected  = new Set();
 let _groupReplies   = [];      // accumulated replies for sequential TTS
+
+// Color pool — assigned dynamically to whatever personas are in the group
+const _GROUP_COLORS = [
+  '#c084a0', '#4fc3f7', '#daa520', '#7cb984', '#e8b86a',
+  '#b39ddb', '#f48fb1', '#80cbc4', '#ffcc80', '#ce93d8',
+  '#90caf9', '#a5d6a7',
+];
 
 async function toggleGroupMode() {
   if (_groupMode) await _stopGroupMode();
@@ -1110,7 +1117,10 @@ async function _applyGroupPersonas() {
   const sr = await fetch('/group/status');
   const sd = await sr.json();
   _groupPersonas = {};
-  sd.personas.forEach(p => { _groupPersonas[p.key] = p; });
+  sd.personas.forEach((p, i) => {
+    p.color = _GROUP_COLORS[i % _GROUP_COLORS.length];
+    _groupPersonas[p.key] = p;
+  });
 
   const toSel = document.getElementById('group-to');
   toSel.innerHTML = '<option value="all">All</option>' +
@@ -1157,13 +1167,25 @@ function _addGroupSystemMsg(text) {
 function _addGroupMsg(personaKey, senderName, html, toHint, isChatter) {
   const id = 'm' + (mid++);
   const d = document.createElement('div');
-  // Normalise key to CSS class: lower-case, spaces → hyphens
-  const cls = (personaKey || 'default').toLowerCase().replace(/\s+/g, '-');
-  d.className = `msg alice group-msg group-${cls}`;
+  d.className = 'msg alice group-msg';
   d.id = id;
-  const toSpan   = toHint   ? `<span class="group-to-hint">→ ${toHint}</span>` : '';
-  const badge    = isChatter ? `<span class="group-chatter-badge">✦</span>` : '';
-  d.innerHTML = `<div class="sndr">${senderName}${toSpan}${badge}</div>${html}`;
+
+  // Dynamic color — assigned from pool when group started, no hardcoded names
+  const color = _groupPersonas[personaKey]?.color || _GROUP_COLORS[0];
+  d.style.borderLeftColor = color;
+
+  // Apply the persona's own font (falls back to default)
+  const fontKey = _groupPersonas[personaKey]?.font_key;
+  const f = _PERSONA_FONTS[fontKey] || _DEFAULT_FONT;
+  d.style.fontFamily     = f.family;
+  d.style.fontStyle      = f.style;
+  d.style.fontSize       = f.size;
+  d.style.fontWeight     = f.weight;
+  d.style.letterSpacing  = f.spacing;
+
+  const toSpan = toHint   ? `<span class="group-to-hint">→ ${toHint}</span>` : '';
+  const badge  = isChatter ? `<span class="group-chatter-badge">✦</span>` : '';
+  d.innerHTML = `<div class="sndr" style="color:${color}">${senderName}${toSpan}${badge}</div>${html}`;
   const c = document.getElementById('msgs');
   c.appendChild(d);
   c.scrollTop = c.scrollHeight;
