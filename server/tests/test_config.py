@@ -59,9 +59,9 @@ def test_load_personas_includes_default(tmp_path):
     with patch("config.PERSONAS_FILE", str(tmp_path / "personas.json")):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Default" in personas
-    assert "system_prompt" in personas["Default"]
-    assert "appearance" in personas["Default"]
+    assert "Alice" in personas
+    assert "system_prompt" in personas["Alice"]
+    assert "appearance" in personas["Alice"]
 
 
 def test_load_personas_merges_file(tmp_path):
@@ -72,7 +72,7 @@ def test_load_personas_merges_file(tmp_path):
     with patch("config.PERSONAS_FILE", str(pf)):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Default" in personas
+    assert "Alice" in personas
     assert "TestChar" in personas
     assert personas["TestChar"]["system_prompt"] == "You are test."
 
@@ -83,4 +83,4 @@ def test_load_personas_handles_corrupt_file(tmp_path, capsys):
     with patch("config.PERSONAS_FILE", str(pf)):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Default" in personas                   # falls back gracefully
+    assert "Alice" in personas                   # falls back gracefully

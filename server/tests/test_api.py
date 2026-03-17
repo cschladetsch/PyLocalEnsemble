@@ -79,8 +79,8 @@ def test_personas_returns_list():
 def test_personas_default_has_font_key():
     res = client.get("/personas")
     personas = {p["name"]: p for p in res.json()["personas"]}
-    assert "Default" in personas
-    assert personas["Default"]["font_key"] == "default"
+    assert "Alice" in personas
+    assert personas["Alice"]["font_key"] == "default"
 
 
 def test_personas_font_key_derived_from_name():

@@ -139,7 +139,7 @@ def save_config(cfg: dict):
 
 def load_personas(cfg: dict) -> dict:
     defaults = {
-        "Default": {
+        "Alice": {
             "system_prompt": cfg["system_prompt"],
             "appearance":    cfg["appearance"],
             "font_key":      "default",
