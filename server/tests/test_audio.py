@@ -62,6 +62,13 @@ def test_tts_clean_empty_string():
     assert _tts_clean("") == ""
 
 
+def test_tts_clean_preserves_bracketed_content():
+    # Arbitrary bracketed text is NOT stripped — only exact persona names are,
+    # and that happens in _clean_reply, not here.
+    text = "[Morrigan's analysis reveals ARIA-7]: data logged"
+    assert _tts_clean(text) == text
+
+
 def test_tts_clean_mixed_markdown():
     result = _tts_clean("## Header\n**bold** and _italic_ text")
     assert "Header" in result

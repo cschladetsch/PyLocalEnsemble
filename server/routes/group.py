@@ -1,5 +1,5 @@
 """Group chat — multiple personas sharing a conversation, with async inter-persona chatter."""
-import asyncio, json, random, re
+import asyncio, json, os, random, re
 import queue as _queue
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,8 +14,45 @@ router = APIRouter()
 _active         = False
 _personas: dict = {}   # key → persona config dict
 _history: list  = []   # [{role, sender, persona, content, to, _internal?}]
+_pair_histories: dict = {}  # pair_key → list of entries (per persona-pair chatter)
 _listeners: list = []  # asyncio.Queue per SSE subscriber
 _chatter_task: asyncio.Task | None = None
+
+_DATA_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+
+# ── Per-pair history helpers ───────────────────────────────────────────────────
+
+def _pair_key(a: str, b: str) -> str:
+    """Canonical sorted key for a persona pair, e.g. 'alice|morrigan'."""
+    return "|".join(sorted([a.lower(), b.lower()]))
+
+
+def _pair_file(key: str) -> str:
+    safe = key.replace("|", "_to_")
+    return os.path.join(_DATA_DIR, f"history_group_{safe}.json")
+
+
+def _load_pair(key: str) -> list:
+    try:
+        with open(_pair_file(key)) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_pair(key: str):
+    try:
+        with open(_pair_file(key), "w") as f:
+            json.dump(_pair_histories.get(key, []), f, indent=2)
+    except Exception as e:
+        print(f"[group] failed to save pair history {key}: {e}")
+
+
+def _add_to_pair(key: str, entry: dict):
+    if key not in _pair_histories:
+        _pair_histories[key] = []
+    _pair_histories[key].append(entry)
 
 
 def _broadcast(event: dict):
@@ -94,8 +131,16 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
             "Keep your response to 1-2 sentences. Be natural and in character."
         )
 
+    # Use pair-specific history for targeted chatter to avoid cross-persona phrase bleed.
+    # For "all" target, fall back to recent flat history for group context.
+    if target_key != "all":
+        pk = _pair_key(sender_key, target_key)
+        source = _pair_histories.get(pk, [])[-12:]
+    else:
+        source = (_history or [])[-12:]
+
     raw: list[tuple[str, str]] = []
-    for entry in (_history or [])[-12:]:
+    for entry in source:
         if entry.get("_internal"):
             continue
         if entry["role"] == "persona":
@@ -129,6 +174,7 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
 
 
 def _clean_reply(reply: str, persona_name: str) -> str:
+    reply = re.sub(rf'^\[{re.escape(persona_name)}\]\s*:\s*', '', reply).strip()
     reply = re.sub(rf'^{re.escape(persona_name)}\s*[:"]\s*', '', reply).strip()
     reply = re.sub(
         r'\s*(Please note\b|Note that\b|As an AI\b|I\'m an AI\b).*',
@@ -165,13 +211,16 @@ async def _chatter_loop():
             reply = _clean_reply(reply, sender_name)
             if not reply or len(reply) < 4:
                 continue
-            _history.append({
+            entry = {
                 "role": "persona",
                 "sender": sender_name,
                 "persona": sender_key,
                 "content": reply,
                 "to": target_name,
-            })
+            }
+            _history.append(entry)
+            if target_key != "all":
+                _add_to_pair(_pair_key(sender_key, target_key), entry)
             tts_cfg = _personas[sender_key].get("tts", {})
             _broadcast({
                 "type": "chatter",
@@ -196,12 +245,20 @@ class StartRequest(BaseModel):
 
 @router.post("/group/start")
 async def group_start(body: StartRequest):
-    global _active, _personas, _history, _chatter_task
+    global _active, _personas, _history, _pair_histories, _chatter_task
     _active = True
     _personas = {k: config.PERSONAS[k] for k in body.personas if k in config.PERSONAS}
     _history = []
     state.GROUP_ACTIVE = True
     state.GROUP_PERSONAS = _personas
+
+    # Load persisted pair histories for every persona↔persona combination
+    _pair_histories = {}
+    keys = list(_personas.keys())
+    for i, k1 in enumerate(keys):
+        for k2 in keys[i + 1:]:
+            pk = _pair_key(k1, k2)
+            _pair_histories[pk] = _load_pair(pk)
 
     if _chatter_task and not _chatter_task.done():
         _chatter_task.cancel()
@@ -215,8 +272,12 @@ async def group_start(body: StartRequest):
 
 @router.post("/group/stop")
 async def group_stop():
-    global _active, _personas, _chatter_task
+    global _active, _personas, _pair_histories, _chatter_task
     _active   = False
+    # Save all pair histories to disk before clearing
+    for key in list(_pair_histories.keys()):
+        _save_pair(key)
+    _pair_histories = {}
     _personas = {}
     state.GROUP_ACTIVE   = False
     state.GROUP_PERSONAS = {}

@@ -16,9 +16,10 @@ client = TestClient(app, raise_server_exceptions=True)
 def reset_group_state():
     """Isolate every test: wipe module-level group state before and after."""
     def _clear():
-        grp._active   = False
-        grp._personas = {}
-        grp._history  = []
+        grp._active        = False
+        grp._personas      = {}
+        grp._history       = []
+        grp._pair_histories = {}
         if grp._chatter_task and not grp._chatter_task.done():
             grp._chatter_task.cancel()
         grp._chatter_task = None
@@ -164,6 +165,22 @@ def test_stop_updates_state_module(two_keys):
     assert state.GROUP_PERSONAS == {}
 
 
+def test_stop_clears_pair_histories(two_keys):
+    # Populate a pair history in memory, then stop — pair_histories should be cleared
+    pk = grp._pair_key(two_keys[0], two_keys[1])
+    grp._pair_histories[pk] = [{"role": "persona", "sender": "X", "content": "hi", "to": "Y"}]
+    client.post("/group/stop")
+    assert grp._pair_histories == {}
+
+
+def test_start_populates_pair_histories(two_keys):
+    # After a start, pair_histories should have an entry for each pair of personas
+    keys = list(config.PERSONAS.keys())[:2]
+    client.post("/group/start", json={"personas": keys})
+    pk = grp._pair_key(keys[0], keys[1])
+    assert pk in grp._pair_histories
+
+
 # ── GET /group/status ──────────────────────────────────────────────────────────
 
 def test_status_shape():
@@ -212,6 +229,14 @@ def test_status_tts_is_dict(two_keys):
 
 
 # ── _clean_reply ───────────────────────────────────────────────────────────────
+
+def test_clean_reply_strips_bracketed_name_prefix():
+    assert grp._clean_reply("[Alice]: hello", "Alice") == "hello"
+
+
+def test_clean_reply_strips_bracketed_name_with_spaces():
+    assert grp._clean_reply("[Forest Witch]: greetings", "Forest Witch") == "greetings"
+
 
 def test_clean_reply_strips_name_colon_prefix():
     assert grp._clean_reply("Alice: hello", "Alice") == "hello"
@@ -398,6 +423,34 @@ def test_build_chatter_second_message_is_user(two_personas_loaded):
 def test_build_chatter_ends_with_user(two_personas_loaded):
     msgs = grp._build_chatter_messages(two_personas_loaded[0], "all")
     assert msgs[-1]["role"] == "user"
+
+
+def test_build_chatter_specific_target_uses_pair_history(two_personas_loaded):
+    """Specific-target chatter draws from the pair history, not flat _history."""
+    key1, key2 = two_personas_loaded
+    name1 = config.PERSONAS[key1].get("name", key1)
+    # Add something to flat history only (should NOT appear in pair context)
+    grp._history.append({"role": "persona", "sender": name1, "persona": key1,
+                          "content": "flat_only_phrase", "to": "all"})
+    # Add something to the pair history (SHOULD appear)
+    pk = grp._pair_key(key1, key2)
+    grp._pair_histories[pk] = [{"role": "persona", "sender": name1, "persona": key1,
+                                  "content": "pair_specific_phrase", "to": key2}]
+    msgs = grp._build_chatter_messages(key1, key2)
+    all_text = " ".join(m["content"] for m in msgs)
+    assert "pair_specific_phrase" in all_text
+    assert "flat_only_phrase" not in all_text
+
+
+def test_build_chatter_all_target_uses_flat_history(two_personas_loaded):
+    """'all' target chatter uses the flat _history, not pair history."""
+    key1, key2 = two_personas_loaded
+    name1 = config.PERSONAS[key1].get("name", key1)
+    grp._history.append({"role": "persona", "sender": name1, "persona": key1,
+                          "content": "flat_group_message", "to": "all"})
+    msgs = grp._build_chatter_messages(key1, "all")
+    all_text = " ".join(m["content"] for m in msgs)
+    assert "flat_group_message" in all_text
 
 
 # ── POST /group/chat ───────────────────────────────────────────────────────────
