@@ -117,6 +117,7 @@ async def chat(body: ChatRequest):
 
             reply = "".join(collected)
             print(f"[chat] raw reply ({len(reply)} chars): {reply!r}")
+            reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
             reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
             reply = re.sub(
                 r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'

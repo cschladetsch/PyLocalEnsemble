@@ -186,6 +186,7 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
 
 
 def _clean_reply(reply: str, persona_name: str) -> str:
+    reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
     reply = re.sub(rf'^\[{re.escape(persona_name)}\]\s*:\s*', '', reply).strip()
     reply = re.sub(rf'^{re.escape(persona_name)}\s*[:"]\s*', '', reply).strip()
     reply = re.sub(
