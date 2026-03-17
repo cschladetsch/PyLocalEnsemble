@@ -71,12 +71,15 @@ async def image_from_history(body: ImageRequest):
 
             # Aggregate all active persona appearances for the scene
             if state.GROUP_ACTIVE:
-                # Build a collective appearance string: "2 girls, [Name1] is [App1], [Name2] is [App2]"
+                # Build a collective appearance string that mandates all personas appear
                 try:
                     import routes.group as _grp
+                    _keys = list(_grp._personas.keys())
                     _names = [p.get("name", k) for k, p in _grp._personas.items()]
                     _count_str = f"{len(_names)} girls" if len(_names) > 1 else "1 girl"
-                    _apps = [f"{p.get('name', k)} is {p.get('appearance', '')}"
+                    
+                    # Leading with names ensures SD pays attention to each character early in the prompt
+                    _apps = [f"{p.get('name', k)} ({p.get('appearance', '')})"
                              for k, p in _grp._personas.items()]
                     combined_appearance = f"{_count_str}, " + ", ".join(_apps)
                     print(f"[image] group mode — aggregated appearance: {combined_appearance}")
@@ -95,11 +98,12 @@ async def image_from_history(body: ImageRequest):
                 state._pre_sd_prompt = None
             else:
                 print("[image] extracting SD prompt via LLM...")
-                # If group is active, give the LLM a hint that it's a multi-character scene
+                # If group is active, give the LLM a mandatory instruction for all characters
                 _persona_context = state.SYSTEM_PROMPT
                 if state.GROUP_ACTIVE:
-                    _persona_context += "\n\nIMPORTANT: This is a GROUP scene with multiple characters. " \
-                                        "Ensure ACTION and EXTRA describe the interaction or collective pose."
+                    _persona_context += f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. " \
+                                        "You MUST output tags that describe an interaction or pose involving EVERY persona listed. " \
+                                        "Do not omit any character from the scene description."
 
                 base_prompt, new_nudity = image.extract_sd_prompt(
                     messages, appearance=combined_appearance,

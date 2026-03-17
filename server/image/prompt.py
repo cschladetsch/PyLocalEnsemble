@@ -374,6 +374,7 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "EXTRA: one secondary visual detail (nipples visible / hands on hips / etc.)\n"
             "SETTING: one word (bedroom / outdoors / forest / etc.)\n"
             "LIGHTING: two words (soft lighting / moonlight / candlelight / etc.)\n\n"
+            f"{persona}\n\n"
             f"{appearance_hint}\n\n"
             "Example — user said 'stuff a banana in your pussy':\n"
             "ACTION: vaginal insertion\n"
