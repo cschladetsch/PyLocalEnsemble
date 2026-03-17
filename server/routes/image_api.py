@@ -26,23 +26,26 @@ class GenerateRequest(BaseModel):
 async def image_from_history(body: ImageRequest):
     print(f"\n[backend] Received /image request, extra='{body.extra}'")
 
-    # In group mode, build a synthetic history from the shared group conversation
+    # Build synthetic history
+    _llm_history = []
     if state.GROUP_ACTIVE:
-        import routes.group as _grp
-        group_hist = _grp._history
-        if not group_hist and not body.extra.strip():
-            return JSONResponse({"error": "No conversation history yet."}, status_code=400)
-        # Convert group history entries to the role/content format image_api expects
-        _llm_history = [
-            {"role": "user" if e["role"] == "user" else "assistant",
-             "content": f"[{e['sender']}]: {e['content']}"}
-            for e in group_hist
-            if not e.get("_internal")
-        ]
-    else:
+        try:
+            import routes.group as _grp
+            _llm_history = [
+                {"role": "user" if e["role"] == "user" else "assistant",
+                 "content": f"[{e['sender']}]: {e['content']}"}
+                for e in _grp._history
+                if not e.get("_internal")
+            ]
+        except ImportError:
+            pass
+
+    # Fallback to normal history if group history is empty or not in group mode
+    if not _llm_history:
         _llm_history = llm.history
-        if not _llm_history and not body.extra.strip():
-            return JSONResponse({"error": "No conversation history yet."}, status_code=400)
+
+    if not _llm_history and not body.extra.strip():
+        return JSONResponse({"error": "No conversation history yet."}, status_code=400)
 
     try:
         def _run():
