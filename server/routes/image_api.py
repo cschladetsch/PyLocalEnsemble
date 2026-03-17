@@ -71,15 +71,20 @@ async def image_from_history(body: ImageRequest):
 
             # Aggregate all active persona appearances for the scene
             if state.GROUP_ACTIVE:
-                # Build a collective appearance string that mandates all personas appear
+                # Build a collective appearance string that mandates all personas appear.
+                # In group mode, we use "short appearances" to stay within prompt segment limits.
                 try:
                     import routes.group as _grp
-                    _keys = list(_grp._personas.keys())
                     _names = [p.get("name", k) for k, p in _grp._personas.items()]
                     _count_str = f"{len(_names)} girls" if len(_names) > 1 else "1 girl"
                     
-                    # Leading with names and gender ensures SD pays attention to each character correctly
-                    _apps = [f"{p.get('name', k)} ({p.get('gender', 'female')}, {p.get('appearance', '')})"
+                    def _short_app(app_str: str) -> str:
+                        # Extract the first 4 meaningful tags to keep the group prompt manageable
+                        tags = [t.strip() for t in app_str.split(",") if t.strip()]
+                        return ", ".join(tags[:4])
+
+                    # Association format (Name: appearance) helps SD assign traits to individuals
+                    _apps = [f"({p.get('name', k)}: {_short_app(p.get('appearance', ''))})"
                              for k, p in _grp._personas.items()]
                     combined_appearance = f"{_count_str}, " + ", ".join(_apps)
                     print(f"[image] group mode — aggregated appearance: {combined_appearance}")
@@ -87,6 +92,8 @@ async def image_from_history(body: ImageRequest):
                     combined_appearance = state.ALICE_APPEARANCE
             else:
                 combined_appearance = state.ALICE_APPEARANCE
+
+            state.last_appearance = combined_appearance
 
             used_pre = bool(state._pre_sd_prompt and not body.extra)
             if used_pre:
@@ -103,6 +110,7 @@ async def image_from_history(body: ImageRequest):
                 if state.GROUP_ACTIVE:
                     _persona_context += f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. " \
                                         "You MUST output tags that describe an interaction or pose involving EVERY persona listed. " \
+                                        "Ensure they are distinct individuals. " \
                                         "Do not omit any character from the scene description."
 
                 base_prompt, new_nudity = image.extract_sd_prompt(
@@ -172,10 +180,11 @@ async def reroll():
         return JSONResponse({"error": "No prompt to re-roll."}, status_code=400)
     loop = asyncio.get_running_loop()
     prompt = state.last_sd_prompt
+    app    = state.last_appearance or state.ALICE_APPEARANCE
     def _do():
         image._gen_cancel.clear()
         img = image.generate_image(
-            prompt, state.ALICE_APPEARANCE, state.BASE_NEGATIVE,
+            prompt, app, state.BASE_NEGATIVE,
             seed=-1,
         )
         return state.save_generated_image(img) if img else None
@@ -188,9 +197,10 @@ async def reroll():
 @router.post("/generate")
 async def generate_raw(body: GenerateRequest):
     loop = asyncio.get_running_loop()
+    app  = state.last_appearance or state.ALICE_APPEARANCE
     def _regen():
         img = image.generate_image(
-            body.prompt, state.ALICE_APPEARANCE, state.BASE_NEGATIVE,
+            body.prompt, app, state.BASE_NEGATIVE,
             steps=body.steps, cfg_scale=body.cfg_scale,
         )
         return state.save_generated_image(img) if img else None
