@@ -68,6 +68,23 @@ async def image_from_history(body: ImageRequest):
                 state.decay_nudity_state(last_user)
 
             messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
+
+            # Aggregate all active persona appearances for the scene
+            if state.GROUP_ACTIVE:
+                # Build a collective appearance string: "2 girls, [Name1] is [App1], [Name2] is [App2]"
+                try:
+                    import routes.group as _grp
+                    _names = [p.get("name", k) for k, p in _grp._personas.items()]
+                    _count_str = f"{len(_names)} girls" if len(_names) > 1 else "1 girl"
+                    _apps = [f"{p.get('name', k)} is {p.get('appearance', '')}"
+                             for k, p in _grp._personas.items()]
+                    combined_appearance = f"{_count_str}, " + ", ".join(_apps)
+                    print(f"[image] group mode — aggregated appearance: {combined_appearance}")
+                except Exception:
+                    combined_appearance = state.ALICE_APPEARANCE
+            else:
+                combined_appearance = state.ALICE_APPEARANCE
+
             used_pre = bool(state._pre_sd_prompt and not body.extra)
             if used_pre:
                 print("[image] using pre-extracted SD prompt (skipping LLM call)")
@@ -78,9 +95,15 @@ async def image_from_history(body: ImageRequest):
                 state._pre_sd_prompt = None
             else:
                 print("[image] extracting SD prompt via LLM...")
+                # If group is active, give the LLM a hint that it's a multi-character scene
+                _persona_context = state.SYSTEM_PROMPT
+                if state.GROUP_ACTIVE:
+                    _persona_context += "\n\nIMPORTANT: This is a GROUP scene with multiple characters. " \
+                                        "Ensure ACTION and EXTRA describe the interaction or collective pose."
+
                 base_prompt, new_nudity = image.extract_sd_prompt(
-                    messages, appearance=state.ALICE_APPEARANCE,
-                    last_user_msg=last_user, persona=state.SYSTEM_PROMPT,
+                    messages, appearance=combined_appearance,
+                    last_user_msg=last_user, persona=_persona_context,
                     nudity_floor=state._nudity_state,
                 )
                 state._nudity_state = new_nudity
@@ -107,7 +130,7 @@ async def image_from_history(body: ImageRequest):
 
             state.last_sd_prompt = prompt
             img = image.generate_image(
-                prompt, state.ALICE_APPEARANCE, state.BASE_NEGATIVE,
+                prompt, combined_appearance, state.BASE_NEGATIVE,
                 extra_negative=extra_negative,
                 seed=state._character_seed,
             )
