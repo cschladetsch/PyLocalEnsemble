@@ -215,9 +215,10 @@ async def group_start(body: StartRequest):
 
 @router.post("/group/stop")
 async def group_stop():
-    global _active, _chatter_task
-    _active = False
-    state.GROUP_ACTIVE = False
+    global _active, _personas, _chatter_task
+    _active   = False
+    _personas = {}
+    state.GROUP_ACTIVE   = False
     state.GROUP_PERSONAS = {}
     if _chatter_task and not _chatter_task.done():
         _chatter_task.cancel()
