@@ -342,7 +342,12 @@ def _build_tags(fields: dict, appearance: str) -> str:
         if val:
             tags.append(val)
 
-    return ", ".join(tags)
+    # Prepend appearance — character features (face, hair, eyes) must lead
+    # the prompt to stay consistent across turns in SD.
+    final_prompt = ", ".join(tags)
+    if appearance:
+        final_prompt = f"{appearance}, {final_prompt}"
+    return final_prompt
 
 
 def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
@@ -374,6 +379,9 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "EXTRA: one secondary visual detail (nipples visible / hands on hips / etc.)\n"
             "SETTING: one word (bedroom / outdoors / forest / etc.)\n"
             "LIGHTING: two words (soft lighting / moonlight / candlelight / etc.)\n\n"
+            "IMPORTANT for GROUP scenes: You MUST describe the physical positioning and "
+            "appearance of EACH persona separately. Ensure they are distinct individuals. "
+            "For example: 'Alice is [pose1], Morrigan is [pose2]'.\n\n"
             f"{persona}\n\n"
             f"{appearance_hint}\n\n"
             "Example — user said 'stuff a banana in your pussy':\n"

@@ -69,9 +69,9 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                     "covered chest, fabric on chest, " + negative)
 
     used_appearance = clean_appearance if is_explicit else appearance
-    # Appearance first — SD attention weights earlier tokens more heavily, so character
-    # features (face, hair, eyes) must lead the prompt to stay consistent across turns.
-    full_prompt = ("nsfw, " if is_explicit else "") + used_appearance + ", " + prompt + ", " + img_cfg["suffix"]
+    # Do NOT prepend appearance here — it's already integrated into 'prompt' via extract_sd_prompt.
+    # We only prepend 'nsfw' to signal the model's safety bypass if explicit content is detected.
+    full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
     print(f"[image] steps={_steps}, cfg={_cfg}, size={img_cfg['width']}x{img_cfg['height']}, seed={seed}")
