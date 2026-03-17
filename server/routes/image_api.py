@@ -78,8 +78,8 @@ async def image_from_history(body: ImageRequest):
                     _names = [p.get("name", k) for k, p in _grp._personas.items()]
                     _count_str = f"{len(_names)} girls" if len(_names) > 1 else "1 girl"
                     
-                    # Leading with names ensures SD pays attention to each character early in the prompt
-                    _apps = [f"{p.get('name', k)} ({p.get('appearance', '')})"
+                    # Leading with names and gender ensures SD pays attention to each character correctly
+                    _apps = [f"{p.get('name', k)} ({p.get('gender', 'female')}, {p.get('appearance', '')})"
                              for k, p in _grp._personas.items()]
                     combined_appearance = f"{_count_str}, " + ", ".join(_apps)
                     print(f"[image] group mode — aggregated appearance: {combined_appearance}")

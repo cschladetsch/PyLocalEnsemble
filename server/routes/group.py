@@ -74,13 +74,19 @@ def _build_response_messages(persona_key: str) -> list[dict]:
     """Build LLM message list for a persona responding to the current group history."""
     p = _personas.get(persona_key, {})
     persona_name = p.get("name", persona_key)
+    persona_gender = p.get("gender", "female")
     sys_prompt = p.get("system_prompt", state.SYSTEM_PROMPT)
 
-    others = [_personas[k].get("name", k) for k in _personas if k != persona_key]
-    if others:
+    others_info = [
+        f"{_personas[k].get('name', k)} ({_personas[k].get('gender', 'female')})"
+        for k in _personas if k != persona_key
+    ]
+    if others_info:
         sys_prompt += (
-            f"\n\nYou are in a group conversation with {', '.join(others)} and the User. "
-            "Address others by name when relevant. Keep responses concise for group chat."
+            f"\n\nYou are in a group conversation with {', '.join(others_info)} and the User. "
+            f"You are {persona_name} ({persona_gender}). "
+            "Address others by name when relevant. Keep responses concise for group chat. "
+            "Use correct pronouns for others based on their listed gender."
         )
 
     raw: list[tuple[str, str]] = []
@@ -122,13 +128,19 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
     """Build LLM messages prompting a persona to spontaneously say something."""
     p = _personas.get(sender_key, {})
     sender_name = p.get("name", sender_key)
+    sender_gender = p.get("gender", "female")
     sys_prompt = p.get("system_prompt", state.SYSTEM_PROMPT)
 
-    others = [_personas[k].get("name", k) for k in _personas if k != sender_key]
-    if others:
+    others_info = [
+        f"{_personas[k].get('name', k)} ({_personas[k].get('gender', 'female')})"
+        for k in _personas if k != sender_key
+    ]
+    if others_info:
         sys_prompt += (
-            f"\n\nYou are in a group with {', '.join(others)} and the User. "
-            "Keep your response to 1-2 sentences. Be natural and in character."
+            f"\n\nYou are in a group with {', '.join(others_info)} and the User. "
+            f"You are {sender_name} ({sender_gender}). "
+            "Keep your response to 1-2 sentences. Be natural and in character. "
+            "Use correct pronouns for others based on their listed gender."
         )
 
     # Use pair-specific history for targeted chatter to avoid cross-persona phrase bleed.

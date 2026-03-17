@@ -16,7 +16,11 @@ async def list_personas():
     for name, p in config.PERSONAS.items():
         # font_key: explicit in config, or derive from persona name
         font_key = p.get("font_key", name.lower().replace(" ", "-"))
-        personas.append({"name": name, "font_key": font_key})
+        personas.append({
+            "name": name,
+            "gender": p.get("gender", "female"),
+            "font_key": font_key
+        })
     return JSONResponse({"personas": personas})
 
 

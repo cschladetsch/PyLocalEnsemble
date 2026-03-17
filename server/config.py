@@ -142,6 +142,7 @@ def load_personas(cfg: dict) -> dict:
         "Alice": {
             "system_prompt": cfg["system_prompt"],
             "appearance":    cfg["appearance"],
+            "gender":        "female",
             "font_key":      "default",
         }
     }
