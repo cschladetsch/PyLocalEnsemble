@@ -1,5 +1,8 @@
 /stable-diffusion-forge
 /stable-diffusion-webui-forge
+/server/llama-cpp
+/server/models
+/server/stable-diffusion-webui-forge/
 /tmp
 alice.json
 personas.json
