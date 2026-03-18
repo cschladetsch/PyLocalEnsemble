@@ -66,9 +66,9 @@ impl LlmEngine {
     ) -> Result<String, LlmError> {
         let prompt = build_chatml_prompt(messages, system_prompt);
 
-        let ctx_params = LlamaContextParams::default().with_n_ctx(
+        let ctx_params = LlamaContextParams::default().with_n_ctx(Some(
             std::num::NonZeroU32::new(self.n_ctx).unwrap_or(std::num::NonZeroU32::new(2048).unwrap()),
-        );
+        ));
 
         let mut ctx = self
             .model
@@ -96,7 +96,7 @@ impl LlmEngine {
         loop {
             let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
             let mut candidates_arr = LlamaTokenDataArray::from_iter(candidates, false);
-            let token = ctx.sample_token_greedy(&mut candidates_arr);
+            let token = candidates_arr.sample_token_greedy();
 
             if token == self.model.token_eos() {
                 break;

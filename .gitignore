@@ -13,3 +13,5 @@ history_*.json
 __pycache__/
 *.pyc
 /llama-cpp
+log/
+/core/target/

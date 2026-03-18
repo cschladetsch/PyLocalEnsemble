@@ -9,5 +9,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 alice-core = { path = "../.." }
+log = "0.4"
 pyo3 = { version = "0.21", features = ["extension-module"] }
 parking_lot = "0.12"

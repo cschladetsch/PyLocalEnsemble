@@ -1,5 +1,4 @@
-import sys, os, time, builtins
-from datetime import datetime
+import sys, os, time
 import requests as req
 import config
 
@@ -13,17 +12,6 @@ def is_wsl() -> bool:
         return False
 
 IS_WSL = is_wsl()
-
-_real_print = builtins.print
-def _ts_print(*args, **kwargs):
-    end   = kwargs.get('end', '\n')
-    first = args[0] if args else ''
-    # Skip: empty calls, carriage-return overwrites, and partial-line writes
-    if args and end not in ('', '\r') and not (isinstance(first, str) and first.startswith('\r')):
-        kwargs = {**kwargs}
-        args = (f'\033[33m[{datetime.now().strftime("%H:%M:%S")}]\033[0m',) + args
-    _real_print(*args, **kwargs)
-builtins.print = _ts_print
 
 
 def step(msg):  print(f"\n[{config.NAME}] {msg}")

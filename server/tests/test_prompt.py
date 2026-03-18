@@ -183,10 +183,9 @@ def test_nudity_clothed_adds_no_nudity_tags():
 
 
 def test_appearance_not_included():
-    """generate.py appends appearance separately — _build_tags must not duplicate it."""
+    """Appearance tags lead the prompt for stronger identity consistency."""
     tags = _tags({"ACTION": "standing"}, appearance="long blonde hair, blue eyes")
-    assert "long blonde hair" not in tags
-    assert "blue eyes" not in tags
+    assert tags.startswith("long blonde hair, blue eyes")
 
 
 def test_setting_and_lighting_have_no_weight():

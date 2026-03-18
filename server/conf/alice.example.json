@@ -2,6 +2,7 @@
     "_comment": "Copy this file to alice.json in the repo root and edit to suit.",
 
     "name": "Alice",
+    "port": 8000,
     "forge_url": "http://localhost:7860",
     "llama_url": "http://127.0.0.1:8080",
     "model_path": "models/your-model.gguf",

@@ -14,10 +14,10 @@ def history_file_for(persona_key: str) -> str:
     return os.path.join(ALICE_DIR, f"history_{safe}.json")
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
-ALICE_URL     = "http://localhost:8000"
 
 _DEFAULT_CONFIG = {
     "name":               "Alice",
+    "port":               8000,
     "forge_url":          "http://localhost:7860",
     "llama_url":          "http://127.0.0.1:8080",
     "model_path":         "",
@@ -102,7 +102,7 @@ def resolve_path(p: str) -> str:
 
 
 def load_config() -> dict:
-    example = os.path.join(ALICE_DIR, "conf", "alice.example.json")
+    example = os.path.join(SERVER_DIR, "conf", "alice.example.json")
     if not os.path.exists(CONFIG_FILE) and os.path.exists(example):
         shutil.copy(example, CONFIG_FILE)
         print(f"        config: created {CONFIG_FILE} from example")
@@ -147,7 +147,7 @@ def load_personas(cfg: dict) -> dict:
         }
     }
     if not os.path.exists(PERSONAS_FILE):
-        example = os.path.join(ALICE_DIR, "conf", "personas.example.json")
+        example = os.path.join(SERVER_DIR, "conf", "personas.example.json")
         if os.path.exists(example):
             shutil.copy(example, PERSONAS_FILE)
             print(f"        config: created {PERSONAS_FILE} from example")
@@ -164,3 +164,5 @@ def load_personas(cfg: dict) -> dict:
 CFG      = load_config()
 NAME     = CFG.get("name", "Alice")
 PERSONAS = load_personas(CFG)
+PORT     = int(CFG.get("port", 8000))
+ALICE_URL = f"http://localhost:{PORT}"

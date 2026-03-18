@@ -11,8 +11,10 @@ edition = "2021"
 crate-type = ["rlib"]
 
 [dependencies]
+chrono = "0.4"
+fern = "0.7"
 llama-cpp-2 = "0.1"
-ort = { version = "2.0", features = ["load-dynamic"] }
+ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
 log = "0.4"
 parking_lot = "0.12"
 thiserror = "1"

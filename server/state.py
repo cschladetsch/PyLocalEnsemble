@@ -78,10 +78,17 @@ def should_auto_image(user_msg: str) -> bool:
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
+def image_output_dir() -> str:
+    repo_static = os.path.join(config.STATIC_DIR, "outputs")
+    if os.path.normpath(repo_static).startswith(os.path.normpath(config.ALICE_DIR)):
+        return repo_static
+    return os.path.join(config.ALICE_DIR, "static", "outputs")
+
+
 def save_generated_image(b64_data: str) -> str:
-    out_dir = os.path.join(config.STATIC_DIR, "outputs")
+    out_dir = image_output_dir()
     os.makedirs(out_dir, exist_ok=True)
-    fname = f"img_{int(time.time() * 1000)}.png"
+    fname = f"img_{time.time_ns()}.png"
     with open(os.path.join(out_dir, fname), "wb") as f:
         f.write(base64.b64decode(b64_data))
     return f"/static/outputs/{fname}"

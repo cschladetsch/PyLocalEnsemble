@@ -3,6 +3,8 @@
 import subprocess, sys, os, time, threading, webbrowser
 import requests as req
 
+from logging_setup import init_logging
+
 # ── Windows CUDA DLL path fix ─────────────────────────────────────────────────
 if os.name == "nt":
     _cuda_env = os.environ.get("CUDA_PATH")
@@ -42,6 +44,8 @@ if _needs_install():
         sys.exit(1)
     print("\nInstall complete — starting Alice...\n")
 
+_PYTHON_LOG_FILE = init_logging("python-server")
+
 # ── Imports (after install check) ────────────────────────────────────────────
 import json, logging
 import uvicorn
@@ -53,6 +57,9 @@ import llm
 import state
 import tts
 import image
+
+HOST = "127.0.0.1"
+PORT = int(config.CFG.get("port", getattr(config, "PORT", 8000)))
 
 # ── Runtime flags ─────────────────────────────────────────────────────────────
 NO_SPEECH  = "--no-speech"   in sys.argv
@@ -95,17 +102,19 @@ _LOG_CONFIG = {
         "access":  {"()": "uvicorn.logging.AccessFormatter",
                     "fmt": '\033[33m[%(asctime)s]\033[0m %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
                     "datefmt": "%H:%M:%S"},
+        "plain":   {"format": "%(asctime)s %(levelname)s [%(name)s] %(message)s"},
     },
     "handlers": {
         "default": {"formatter": "default", "class": "logging.StreamHandler", "stream": "ext://sys.stderr"},
         "access":  {"formatter": "access",  "class": "logging.StreamHandler", "stream": "ext://sys.stdout",
                     "filters": ["no_spam"]},
+        "file":    {"formatter": "plain", "class": "logging.FileHandler", "filename": _PYTHON_LOG_FILE, "encoding": "utf-8"},
     },
     "filters": {"no_spam": {"()": _NoSpamFilter}},
     "loggers": {
-        "uvicorn":        {"handlers": ["default"], "level": "INFO", "propagate": False},
-        "uvicorn.error":  {"level": "INFO"},
-        "uvicorn.access": {"handlers": ["access"],  "level": "INFO", "propagate": False},
+        "uvicorn":        {"handlers": ["default", "file"], "level": "INFO", "propagate": False},
+        "uvicorn.error":  {"handlers": ["default", "file"], "level": "INFO", "propagate": False},
+        "uvicorn.access": {"handlers": ["access", "file"],  "level": "INFO", "propagate": False},
     },
 }
 
@@ -149,6 +158,81 @@ def _startup():
         traceback.print_exc()
 
 
+def _listener_pid(host: str, port: int):
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if sock.connect_ex((host, port)) != 0:
+            return None
+
+    if os.name == "nt":
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(f":{port}") and parts[3].upper() == "LISTENING":
+                try:
+                    return int(parts[4])
+                except ValueError:
+                    return None
+        return None
+
+    result = subprocess.run(
+        ["lsof", "-ti", f"tcp:{port}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            return int(line)
+    return None
+
+
+def _kill_listener(host: str, port: int) -> bool:
+    pid = _listener_pid(host, port)
+    if not pid:
+        return False
+
+    print(f"[{config.NAME}] Port {port} is already in use by PID {pid}. Terminating it and retrying...")
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        else:
+            result = subprocess.run(
+                ["kill", "-TERM", str(pid)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            print(f"[{config.NAME}] Could not terminate PID {pid}: {detail or 'unknown error'}")
+            return False
+    except Exception as e:
+        print(f"[{config.NAME}] Could not terminate PID {pid}: {e}")
+        return False
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if _listener_pid(host, port) is None:
+            return True
+        time.sleep(0.2)
+
+    print(f"[{config.NAME}] Port {port} is still busy after terminating PID {pid}.")
+    return False
+
+
 if __name__ == "__main__":
     print()
     print("=" * 60)
@@ -162,17 +246,11 @@ if __name__ == "__main__":
         try:
             import socket
             wsl_ip = socket.gethostbyname(socket.gethostname())
-            print(f"        WSL2 detected. If localhost doesn't work, try http://{wsl_ip}:8000")
+            print(f"        WSL2 detected. If localhost doesn't work, try http://{wsl_ip}:{PORT}")
         except Exception:
             pass
 
-    import socket as _sock
-    with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as _s:
-        if _s.connect_ex(("127.0.0.1", 8000)) == 0:
-            print(f"\n[{config.NAME}] Port 8000 is already in use.")
-            print(f"        Alice may already be running — check {config.ALICE_URL}")
-            print(f"        If not, kill the process holding port 8000 and retry.")
-            sys.exit(1)
+    _kill_listener(HOST, PORT)
 
     threading.Thread(target=_startup, daemon=True).start()
 
@@ -181,7 +259,7 @@ if __name__ == "__main__":
             time.sleep(3)
             try:
                 resolved = _resolve_persona(_PERSONA_ARG)
-                req.post(f"http://127.0.0.1:8000/persona/{resolved}", timeout=5)
+                req.post(f"http://{HOST}:{PORT}/persona/{resolved}", timeout=5)
                 print(f"[startup] persona set to: {resolved}")
             except Exception as e:
                 print(f"[startup] could not set persona: {e}")
@@ -189,7 +267,7 @@ if __name__ == "__main__":
 
     if TEST_MODE:
         def _run_test():
-            base = "http://127.0.0.1:8000"
+            base = f"http://{HOST}:{PORT}"
             for _ in range(60):
                 time.sleep(1)
                 try:
@@ -221,7 +299,7 @@ if __name__ == "__main__":
                 url = r.json().get("url")
                 print(f"[test] /image done. URL: {url}")
                 if url and INTERACTIVE:
-                    webbrowser.open(f"http://127.0.0.1:8000{url}")
+                    webbrowser.open(f"http://{HOST}:{PORT}{url}")
             except Exception as e:
                 print(f"[test] image error: {e}")
         threading.Thread(target=_run_test, daemon=True).start()
@@ -242,6 +320,6 @@ if __name__ == "__main__":
         print("        NOTE: Non-interactive session detected; not opening browser.")
 
     try:
-        uvicorn.run(app, host="127.0.0.1", port=8000, log_config=_LOG_CONFIG)
+        uvicorn.run(app, host=HOST, port=PORT, log_config=_LOG_CONFIG)
     except BaseException as e:
         print(f"\n[{config.NAME}] Server failed: {type(e).__name__}: {e}")

@@ -1,6 +1,7 @@
 """Image generation via the Forge/SD API."""
 from __future__ import annotations
 import json, os, re, threading
+import logging
 import requests as req
 import config
 import state
@@ -9,6 +10,7 @@ from image.forge import start_forge
 
 _gen_cancel    = threading.Event()
 _upscaler_cache: str | None = None   # cached after first successful query; "" = none available
+_log = logging.getLogger("alice.image")
 
 
 def _resolve_upscaler(forge_url: str, preferred: str) -> str | None:
@@ -42,6 +44,10 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
         print("Forge down, restarting...")
         start_forge()
+        if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
+            msg = f"Forge is unavailable at {forge_url}. Start Stable Diffusion Forge or update forge_url in alice.json."
+            _log.error(msg)
+            raise RuntimeError(msg)
 
     negative = (extra_negative + ", " + negative_base) if extra_negative else negative_base
     _steps   = steps     if steps     is not None else img_cfg["steps"]
@@ -162,5 +168,9 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     except RuntimeError:
         raise
     except Exception as e:
-        print(f"[image] Forge error: {e}")
-        raise RuntimeError(str(e))
+        _log.exception("Forge image generation failed")
+        if isinstance(e, req.exceptions.ConnectionError):
+            raise RuntimeError(
+                f"Could not connect to Forge at {forge_url}. Start Forge or set forge_url correctly in alice.json."
+            ) from e
+        raise RuntimeError(str(e)) from e

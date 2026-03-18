@@ -48,10 +48,11 @@ def test_save_generated_image_unique_names(tmp_path, monkeypatch):
 
 # ── should_auto_image ─────────────────────────────────────────────────────────
 
-def test_should_auto_image_always_true():
+def test_should_auto_image_follows_config(monkeypatch):
+    monkeypatch.setitem(config.CFG.setdefault("image", {}), "auto_every", 0)
+    assert state.should_auto_image("hello") is False
+    monkeypatch.setitem(config.CFG["image"], "auto_every", 1)
     assert state.should_auto_image("hello") is True
-    assert state.should_auto_image("") is True
-    assert state.should_auto_image("show me your breasts") is True
 
 
 # ── _RE_CLOTHE ────────────────────────────────────────────────────────────────

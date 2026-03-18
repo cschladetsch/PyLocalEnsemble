@@ -1,4 +1,8 @@
-use ort::{inputs, Session};
+use ort::{
+    inputs,
+    session::Session,
+    value::{Shape, Tensor},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum TtsError {
@@ -37,7 +41,7 @@ impl TtsEngine {
     }
 
     pub fn synthesize(
-        &self,
+        &mut self,
         text: &str,
         voice_embedding: &[f32],
         speed: f32,
@@ -47,35 +51,20 @@ impl TtsEngine {
         let token_ids: Vec<i64> = text.chars().map(|c| c as i64).collect();
         let token_len = token_ids.len();
 
-        let tokens_array =
-            ndarray::Array2::from_shape_vec((1, token_len), token_ids).map_err(|e| {
-                TtsError::InferenceFailed(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                )))
-            })?;
+        let tokens_array = Tensor::<i64>::from_array((Shape::new([1_i64, token_len as i64]), token_ids))
+            .map_err(|e| TtsError::InferenceFailed(Box::new(e)))?;
 
         let style_len = voice_embedding.len();
         let style_array =
-            ndarray::Array2::from_shape_vec((1, style_len), voice_embedding.to_vec()).map_err(
-                |e| {
-                    TtsError::InferenceFailed(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        e.to_string(),
-                    )))
-                },
-            )?;
+            Tensor::<f32>::from_array((Shape::new([1_i64, style_len as i64]), voice_embedding.to_vec()))
+                .map_err(|e| TtsError::InferenceFailed(Box::new(e)))?;
 
-        let speed_array = ndarray::Array1::from_vec(vec![speed]);
+        let speed_array =
+            Tensor::<f32>::from_array((Shape::new([1]), vec![speed])).map_err(|e| TtsError::InferenceFailed(Box::new(e)))?;
 
         let outputs = self
             .session
-            .run(inputs![tokens_array, style_array, speed_array].map_err(|e| {
-                TtsError::InferenceFailed(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )))
-            })?)
+            .run(inputs![tokens_array, style_array, speed_array])
             .map_err(|e| TtsError::InferenceFailed(Box::new(e)))?;
 
         let audio_tensor = outputs
@@ -87,12 +76,12 @@ impl TtsEngine {
             .try_extract_tensor::<f32>()
             .map_err(|e| TtsError::InferenceFailed(Box::new(e)))?;
 
-        let samples: Vec<f32> = audio_f32.view().iter().copied().collect();
+        let samples: Vec<f32> = audio_f32.1.to_vec();
 
         // Normalise f32 [-1, 1] → i16
         let pcm: Vec<i16> = samples
             .iter()
-            .map(|&s| {
+            .map(|&s: &f32| {
                 let clamped = s.clamp(-1.0, 1.0);
                 (clamped * i16::MAX as f32) as i16
             })

@@ -8,6 +8,7 @@ Key features:
 - Natural language conversation via llama.cpp (GGUF models, OpenAI-compatible API)
 - Real-time image generation from conversation context via Stable Diffusion Forge
 - Neural TTS (Kokoro ONNX) and STT (Whisper) — fully offline
+- Shared runtime logging under `log/` for Python and desktop Rust components
 - NSFW capable — uncensored, fully local
 - Split UI: chat + voice on left, generated scene on right
 - Persona system — swap character, appearance, and system prompt at runtime
@@ -132,7 +133,7 @@ gantt
 - [x] `image/` package — split into `prompt.py`, `forge.py`, `generate.py`
 - [x] `installer/` package — split into `helpers`, `packages`, `llama`, `model`, `tts_install`, `forge_install`
 - [x] `conf/` directory — example configs out of root
-- [x] Test suite — 39 tests across config, image utils, installer, and API endpoints
+- [x] Expanded regression suite across config, image utils, installer, API endpoints, logging, and runtime error paths
 - [x] 4 built-in personas: Egyptian Goddess, Victorian Lady, Android, Forest Witch
 - [x] Image fix: nude characters no longer render clothed (clothing stripped from appearance when nudity detected)
 - [x] Image fix: `/image` no longer returns 400 after persona switch (history cleared)

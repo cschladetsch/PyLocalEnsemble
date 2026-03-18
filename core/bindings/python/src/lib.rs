@@ -102,7 +102,7 @@ impl PyTtsEngine {
     /// Returns:
     ///     List of i16 PCM samples at 24 kHz mono.
     fn synthesize(
-        &self,
+        &mut self,
         text: &str,
         voice_embedding_list: Vec<f32>,
         speed: f32,
@@ -120,6 +120,8 @@ impl PyTtsEngine {
 /// Native extension module `alice_core_py`.
 #[pymodule]
 fn alice_core_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    alice_core::logging::init("rust-python");
+    log::info!("alice_core_py module initialized");
     m.add_class::<PyLlmEngine>()?;
     m.add_class::<PyTtsEngine>()?;
     Ok(())

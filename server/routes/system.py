@@ -45,7 +45,7 @@ async def delete_image(filename: str):
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
     if safe != filename or not safe.endswith(".png"):
         return JSONResponse({"error": "invalid filename"}, status_code=400)
-    path = os.path.join(config.STATIC_DIR, "outputs", safe)
+    path = os.path.join(state.image_output_dir(), safe)
     if not os.path.exists(path):
         return JSONResponse({"error": "not found"}, status_code=404)
     os.remove(path)

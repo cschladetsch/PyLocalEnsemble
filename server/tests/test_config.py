@@ -17,11 +17,12 @@ def test_load_config_returns_defaults_when_no_file(tmp_path):
 
 def test_load_config_merges_user_values(tmp_path):
     cfg_file = tmp_path / "alice.json"
-    cfg_file.write_text(json.dumps({"name": "Nadia", "image": {"steps": 40}}))
+    cfg_file.write_text(json.dumps({"name": "Nadia", "port": 8012, "image": {"steps": 40}}))
     with patch("config.CONFIG_FILE", str(cfg_file)):
         import config
         cfg = config.load_config()
     assert cfg["name"] == "Nadia"
+    assert cfg["port"] == 8012
     assert cfg["image"]["steps"] == 40
     assert cfg["image"]["cfg_scale"] == 7          # default preserved
     assert "system_prompt" in cfg                  # top-level default preserved
@@ -84,3 +85,9 @@ def test_load_personas_handles_corrupt_file(tmp_path, capsys):
         import config
         personas = config.load_personas(config.CFG)
     assert "Alice" in personas                   # falls back gracefully
+
+
+def test_module_port_and_url_are_consistent():
+    import config
+    assert config.PORT == int(config.CFG.get("port", 8000))
+    assert config.ALICE_URL == f"http://localhost:{config.PORT}"

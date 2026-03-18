@@ -16,6 +16,15 @@ if not LLAMA_URL.startswith("http"):
 
 _DETECTED_MODEL = None
 
+
+def _history_path() -> str:
+    persona_key = state._active_persona_key
+    default_history = os.path.normpath(os.path.join(config.ALICE_DIR, "history.json"))
+    configured_history = os.path.normpath(config.HISTORY_FILE)
+    if persona_key and configured_history == default_history:
+        return config.history_file_for(persona_key)
+    return config.HISTORY_FILE
+
 def llm_model() -> str:
     global _DETECTED_MODEL
     if _DETECTED_MODEL:
@@ -139,7 +148,7 @@ def llm_chat(messages: list) -> str:
 
 def save_history():
     persona_key = state._active_persona_key
-    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
+    path = _history_path()
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump({
@@ -154,7 +163,7 @@ def save_history():
 def load_history():
     global memory
     persona_key = state._active_persona_key
-    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
+    path = _history_path()
     if not os.path.exists(path):
         return
     try:
@@ -189,10 +198,9 @@ def switch_history(new_persona_key: str):
 
 def clear_history():
     global memory
-    persona_key = state._active_persona_key
     history.clear()
     memory = ""
-    path = config.history_file_for(persona_key) if persona_key else config.HISTORY_FILE
+    path = _history_path()
     try:
         if os.path.exists(path):
             os.remove(path)

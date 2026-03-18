@@ -43,7 +43,9 @@ That's it.
 |------|--------|
 | `--auto-image` | Enable auto image generation on every chat turn (overrides `auto_every: 0` in config) |
 | `--no-speech` | Disable TTS entirely |
-| `--persona=<name>` | Start with a specific persona (partial name match supported) | On first run, `alice.py` detects missing dependencies and runs `install.py` automatically before starting.
+| `--persona=<name>` | Start with a specific persona (partial name match supported) |
+
+On first run, `alice.py` detects missing dependencies and runs `install.py` automatically before starting. On later runs it binds to the configured `port` from `alice.json`, terminating any stale listener already holding that port before retrying startup.
 
 `install.py` performs 6 steps:
 
@@ -64,13 +66,14 @@ You can also run `install.py` directly at any time to re-run setup or add missin
 
 ## Configuration
 
-`install.py` creates `alice.json` from `conf/alice.example.json` on first run. `alice.json` is gitignored — it is your personal config.
+`install.py` creates `alice.json` from `server/conf/alice.example.json` on first run. `alice.json` is gitignored — it is your personal config.
 
 Key settings:
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `name` | `"Alice"` | Character name shown in UI |
+| `port` | `8000` | FastAPI port for Alice itself; `ALICE_URL` is derived from this |
 | `model_path` | `""` | Absolute path to a GGUF model file (set by `install.py`) |
 | `llama_server_path` | `""` | Path to `llama-server` binary (set by `install.py`, auto-detected if blank) |
 | `system_prompt` | *(see example)* | LLM system prompt / personality |
@@ -100,6 +103,12 @@ Key settings:
 | `demo.user_personas` | *(5 built-in)* | Dict of named persona descriptions — each shapes how the user-side messages are written |
 
 Restart `alice.py` after editing `alice.json`.
+
+## Logging
+
+Runtime logs are written to `log/`, which is gitignored. The Python server writes to `log/python-server.log`, and Rust components can join the same directory via the shared `ALICE_LOG_DIR` / `ALICE_LOG_LEVEL` environment contract.
+
+Check `log/` first for startup failures, uncaught exceptions, and Forge connectivity errors.
 
 ---
 
@@ -303,6 +312,8 @@ The leftmost dropdown lists models available from the llama-server. Switching cl
 
 ## Directory Structure
 
+The current repo layout is split by runtime: `alice.py` is a thin root launcher, the Python app lives under `server/`, the Rust core/bindings live under `core/`, and runtime logs go to `log/`.
+
 ```
 alice/
 ├── alice.py                  ← entry point — FastAPI app + startup
@@ -373,7 +384,7 @@ alice/
 
 | Port | Service |
 |------|---------|
-| 8000 | Alice (FastAPI) |
+| `alice.json.port` (default `8000`) | Alice (FastAPI) |
 | 7860 | Stable Diffusion Forge |
 | 8080 | llama-server (OpenAI-compatible API) |
 
@@ -500,10 +511,10 @@ flowchart TD
 ## Testing
 
 ```
-python -m pytest tests/ -v
+python -m pytest server/tests -v
 ```
 
-247 tests covering: config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects (android, cathedral, crossfade, emotion speed), audio markdown cleaning, LLM history operations and memory compression, state utilities, and API endpoints (chat history, personas, voices, seeds, model switching). No external services required — heavy dependencies are stubbed in `tests/conftest.py`.
+Coverage includes config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects, audio markdown cleaning, LLM history operations and memory compression, state utilities, API endpoints, shared logging bootstrap, and Forge-unavailable error handling. No external services are required — heavy dependencies are stubbed in `server/tests/conftest.py`.
 
 ---
 
@@ -529,6 +540,7 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 - Visit `http://localhost:7860` — Forge should be running
 - Forge starts in a separate console window; check it for errors
 - Forge auto-restarts on the next image request if it died
+- If Alice reports `Forge is unavailable at ...`, verify `forge_url` in `alice.json` and inspect `log/python-server.log`
 
 ### ADetailer error on image generation
 - Ensure the ADetailer extension is present in `stable-diffusion-webui-forge/extensions/adetailer/`

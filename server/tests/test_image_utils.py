@@ -81,3 +81,20 @@ def test_nudity_keywords_cover_variants():
     src = inspect.getsource(generate_image)
     for kw in ("nudity", "fully nude", "naked", "topless"):
         assert kw in src, f"Missing nudity keyword: {kw!r}"
+
+
+def test_generate_image_raises_clear_error_when_forge_unavailable(monkeypatch):
+    import image.generate as gen
+
+    monkeypatch.setattr(gen, "http_ok", lambda *args, **kwargs: False)
+    monkeypatch.setattr(gen, "start_forge", lambda: None)
+
+    try:
+        gen.generate_image("nude", "android woman", "bad hands")
+    except RuntimeError as e:
+        msg = str(e)
+    else:
+        raise AssertionError("generate_image should fail when Forge stays unavailable")
+
+    assert "Forge is unavailable at" in msg
+    assert "alice.json" in msg

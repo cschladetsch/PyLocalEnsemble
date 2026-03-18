@@ -1,3 +1,4 @@
+pub mod logging;
 pub mod image;
 pub mod llm;
 pub mod stt;
