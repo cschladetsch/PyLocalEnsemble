@@ -106,9 +106,15 @@ def start_forge():
         else:
             warn("Install via: brew install python@3.11  (macOS)  or  apt install python3.11  (Linux)")
 
+    forge_venv_dir = config.CFG.get("forge_venv_dir", "").strip()
+    if forge_venv_dir:
+        env["VENV_DIR"] = forge_venv_dir
+        ok(f"Forge: using venv at {forge_venv_dir}")
+
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+
     subprocess.Popen(launcher, **kw)
     if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=60, delay=5):
         warn("Forge did not start in time - images won't generate.")
