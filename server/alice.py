@@ -137,25 +137,36 @@ app.include_router(system_router)
 app.include_router(group_router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-def _startup():
+def _startup_step(label: str, fn):
     try:
-        llm.load_llm()
-        # Initialise persona key so history mismatch detection works on first load
-        if not state._active_persona_key:
-            state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
-        llm.load_history()
-        if AUTO_IMAGE:
-            config.CFG.setdefault("image", {})["auto_every"] = 1
-            print(f"[{config.NAME}] Auto-image enabled (--auto-image)")
-        if not NO_SPEECH:
-            tts.load_tts()
-        image.start_forge()
-        sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
-        image.set_forge_model(sd_checkpoint)
+        return True, fn()
     except Exception as e:
         import traceback
-        print(f"\n[{config.NAME}] FATAL ERROR IN STARTUP THREAD: {e}")
+        print(f"[{config.NAME}] Startup warning ({label}): {e}")
         traceback.print_exc()
+        return False, None
+
+
+def _startup():
+    _startup_step("LLM", llm.load_llm)
+
+    # Initialise persona key so history mismatch detection works on first load.
+    if not state._active_persona_key:
+        state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
+
+    _startup_step("history", llm.load_history)
+
+    if AUTO_IMAGE:
+        config.CFG.setdefault("image", {})["auto_every"] = 1
+        print(f"[{config.NAME}] Auto-image enabled (--auto-image)")
+
+    if not NO_SPEECH:
+        _startup_step("TTS", tts.load_tts)
+
+    forge_ok, forge_started = _startup_step("Forge", image.start_forge)
+    if forge_ok and forge_started is not False:
+        sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
+        _startup_step("Forge model selection", lambda: image.set_forge_model(sd_checkpoint))
 
 
 def _listener_pid(host: str, port: int):
