@@ -47,6 +47,26 @@ def _find_forge_python() -> str:
     return ""
 
 
+def _python_from_venv_dir(venv_dir: str) -> str:
+    if not venv_dir:
+        return ""
+    runner = "Scripts" if os.name == "nt" else "bin"
+    exe = "python.exe" if os.name == "nt" else "python"
+    return os.path.join(venv_dir, runner, exe)
+
+
+def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
+    if not python_exe or not os.path.exists(python_exe):
+        return
+    step("Refreshing Forge pip, setuptools, and wheel")
+    try:
+        subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+                       check=True, env=env)
+        ok("Forge Python tooling is up to date.")
+    except subprocess.CalledProcessError as exc:
+        warn(f"Forge tooling upgrade failed: {exc}")
+
+
 def set_forge_model(name: str):
     forge_url = config.CFG["forge_url"]
     try:
@@ -95,10 +115,13 @@ def start_forge():
     else:
         env["COMMANDLINE_ARGS"] = "--api --xformers"
 
+    default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))
     forge_py = _find_forge_python()
+    python_for_upgrade = default_venv_python
     if forge_py:
         env["PYTHON"] = forge_py
         ok(f"Forge: using Python at {forge_py}")
+        python_for_upgrade = forge_py
     else:
         warn("Python 3.10/3.11 not found — Forge may fail with the system Python")
         if os.name == "nt":
@@ -110,6 +133,12 @@ def start_forge():
     if forge_venv_dir:
         env["VENV_DIR"] = forge_venv_dir
         ok(f"Forge: using venv at {forge_venv_dir}")
+        if not forge_py:
+            venv_python = _python_from_venv_dir(forge_venv_dir)
+            if venv_python:
+                python_for_upgrade = venv_python
+
+    _ensure_forge_tooling(python_for_upgrade, env)
 
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
