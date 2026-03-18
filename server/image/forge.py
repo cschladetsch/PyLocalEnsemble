@@ -140,6 +140,8 @@ def start_forge():
 
     _ensure_forge_tooling(python_for_upgrade, env)
 
+    env.setdefault("PIP_NO_BUILD_ISOLATION", "1")
+
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
