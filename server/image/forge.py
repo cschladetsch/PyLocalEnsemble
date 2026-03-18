@@ -60,7 +60,7 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
         return
     step("Refreshing Forge pip, setuptools, and wheel")
     try:
-        subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+        subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "pip", "setuptools<81", "wheel"],
                        check=True, env=env)
         ok("Forge Python tooling is up to date.")
     except subprocess.CalledProcessError as exc:
