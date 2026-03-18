@@ -83,5 +83,7 @@
     "sd_checkpoint": "your-checkpoint.safetensors",
 
     "_comment_forge_args": "Override Forge launch flags. Default: --api --cuda-malloc --xformers on Windows.",
-    "forge_args": "--api --cuda-malloc --xformers"
+    "forge_args": "--api --cuda-malloc --xformers",
+    "_comment_forge_venv_dir": "Optional: point at an existing Forge venv to reuse instead of creating stable-diffusion-webui-forge/venv.",
+    "forge_venv_dir": ""
 }

@@ -89,6 +89,7 @@ Key settings:
 | `image.adetailer_hands` | `false` | Run ADetailer hand-repair pass after each generation (requires ADetailer extension) |
 | `image.hires_fix` | `true` | Enable hires fix upscale pass |
 | `forge_args` | *(platform default)* | Override Forge launch flags (e.g. `"--api --xformers"`) |
+| `forge_venv_dir` | `""` | Optional path to an existing Forge virtualenv to reuse instead of creating `stable-diffusion-webui-forge/venv` |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
 | `llama_server.ctx_size` | `4096` | Context window in tokens |
 | `llama_url` | `"http://127.0.0.1:8080"` | llama-server URL (override with `LLAMA_URL` env var) |
@@ -131,6 +132,7 @@ Stable Diffusion Forge launch flags are set per-platform automatically and can b
 - **Linux / WSL2** — `--api --xformers`
 
 Forge requires Python 3.10 or 3.11 for its virtualenv. `install.py` finds it automatically from PATH, Homebrew, or pyenv.
+If you already have a working Forge virtualenv elsewhere, set `forge_venv_dir` in `alice.json` and Alice will pass that path through as Forge's `VENV_DIR`.
 
 ---
 
@@ -510,11 +512,14 @@ flowchart TD
 
 ## Testing
 
+From the repo root:
+
 ```
 python -m pytest server/tests -v
 ```
 
 ```powershell
+cd core
 $env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY='1'
 cargo test -p alice-core -p alice-core-python
 ```
@@ -546,14 +551,16 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 - Forge starts in a separate console window; check it for errors
 - Forge auto-restarts on the next image request if it died
 - If Alice reports `Forge is unavailable at ...`, verify `forge_url` in `alice.json` and inspect `log/python-server.log`
+- If Forge's local venv is broken but another checkout already works, set `forge_venv_dir` in `alice.json` to reuse that existing virtualenv
 
 ### ADetailer error on image generation
 - Ensure the ADetailer extension is present in `stable-diffusion-webui-forge/extensions/adetailer/`
 - Run `python install.py` to clone it automatically
 - If the error persists, set `"adetailer_hands": false` in `alice.json` to disable it
 
-### Forge fails to start (macOS / Linux)
+### Forge fails to start
 - Forge requires Python 3.10 or 3.11 — install via `brew install python@3.11` or `apt install python3.11`
+- On Windows, try reusing a known-good Forge venv with `forge_venv_dir`
 - On macOS, Forge uses Metal (MPS) automatically — no CUDA needed
 - Override launch flags via `forge_args` in `alice.json` if needed
 
