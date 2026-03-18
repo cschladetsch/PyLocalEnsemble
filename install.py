@@ -3,7 +3,10 @@
 Alice installer — run once to set up everything needed.
   python install.py
 """
-import os, json, shutil
+import os, json, shutil, sys
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_SCRIPT_DIR, "server"))
 
 from installer.helpers      import CONFIG_FILE, CONF_DIR, ok, info
 from installer.packages     import check_python, install_packages
@@ -14,8 +17,6 @@ from installer.forge_install import install_forge
 
 # Re-export for tests: from install import _pick_llama_asset
 from installer.llama import _pick_llama_asset  # noqa: F401
-
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _bootstrap_configs():
