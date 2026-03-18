@@ -514,6 +514,11 @@ flowchart TD
 python -m pytest server/tests -v
 ```
 
+```powershell
+$env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY='1'
+cargo test -p alice-core -p alice-core-python
+```
+
 Coverage includes config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects, audio markdown cleaning, LLM history operations and memory compression, state utilities, API endpoints, shared logging bootstrap, and Forge-unavailable error handling. No external services are required — heavy dependencies are stubbed in `server/tests/conftest.py`.
 
 ---

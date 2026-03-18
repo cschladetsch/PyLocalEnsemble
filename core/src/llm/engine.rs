@@ -92,6 +92,7 @@ impl LlmEngine {
 
         let mut output = String::new();
         let mut n_cur = tokens.len();
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
 
         loop {
             let candidates = ctx.candidates_ith(batch.n_tokens() - 1);
@@ -104,7 +105,7 @@ impl LlmEngine {
 
             let token_str = self
                 .model
-                .token_to_str(token, llama_cpp_2::model::Special::Tokenize)
+                .token_to_piece(token, &mut decoder, true, None)
                 .map_err(|e| LlmError::DecodeFailed(Box::new(e)))?;
 
             on_token(&token_str);

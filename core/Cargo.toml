@@ -12,6 +12,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 chrono = "0.4"
+encoding_rs = "0.8"
 fern = "0.7"
 llama-cpp-2 = "0.1"
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
