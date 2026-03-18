@@ -71,7 +71,7 @@ def restart_forge():
         req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=10)
     except Exception:
         pass  # connection reset is expected on restart
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=60, delay=5):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=10):
         warn("Forge did not come back after restart.")
 
 
@@ -116,5 +116,5 @@ def start_forge():
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
 
     subprocess.Popen(launcher, **kw)
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=60, delay=5):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=120, delay=10):
         warn("Forge did not start in time - images won't generate.")

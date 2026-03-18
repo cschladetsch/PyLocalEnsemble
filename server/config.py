@@ -3,10 +3,10 @@ import os, re, json, shutil
 ALICE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER_DIR    = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR    = os.path.join(SERVER_DIR, "static")
-FORGE_DIR     = os.path.join(ALICE_DIR, "stable-diffusion-webui-forge")
+FORGE_DIR     = os.path.join(SERVER_DIR, "stable-diffusion-webui-forge")
 FORGE_BAT     = os.path.join(FORGE_DIR, "webui.bat" if os.name == "nt" else "webui.sh")
-MODEL_DIR     = os.path.join(ALICE_DIR, "models")
-TTS_DIR       = os.path.join(ALICE_DIR, "models", "tts")
+MODEL_DIR     = os.path.join(SERVER_DIR, "models")
+TTS_DIR       = os.path.join(SERVER_DIR, "models", "tts")
 HISTORY_FILE  = os.path.join(ALICE_DIR, "history.json")
 
 def history_file_for(persona_key: str) -> str:

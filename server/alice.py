@@ -35,7 +35,7 @@ def _tts_assets_present() -> bool:
 
 
 def _llama_server_present() -> bool:
-    base = os.path.join(_ROOT_DIR, "llama-cpp")
+    base = os.path.join(_SERVER_DIR, "llama-cpp")
     return any(
         os.path.isfile(os.path.join(base, exe))
         for exe in ("llama-server.exe", "llama-server")
@@ -43,7 +43,7 @@ def _llama_server_present() -> bool:
 
 
 def _forge_present() -> bool:
-    return os.path.isdir(os.path.join(_ROOT_DIR, "stable-diffusion-webui-forge"))
+    return os.path.isdir(os.path.join(_SERVER_DIR, "stable-diffusion-webui-forge"))
 
 
 def _needs_install() -> bool:
