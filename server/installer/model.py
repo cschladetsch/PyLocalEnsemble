@@ -1,5 +1,5 @@
 """Step 4: LLM model selection and download."""
-import os, glob, urllib.request
+import glob, os, sys, urllib.request
 from installer.helpers import MODELS_DIR, heading, ok, info, warn, _download, _json_get
 
 _DEFAULT_MODEL_REPO  = "bartowski/dolphin-2.9.4-mistral-nemo-12b-GGUF"
@@ -49,6 +49,9 @@ def _hf_gguf_url(repo_id: str, quant: str) -> tuple:
     return match, f"https://huggingface.co/{repo_id}/resolve/main/{match}"
 
 
+INTERACTIVE = sys.stdin.isatty()
+
+
 def setup_model(cfg: dict):
     heading("4/6", "Model")
 
@@ -64,6 +67,10 @@ def setup_model(cfg: dict):
             print(f"    [{i}] {p}")
         print(f"    [0] Download the default NSFW model instead")
         print()
+        if not INTERACTIVE:
+            cfg["model_path"] = existing[0]
+            ok(f"model set: {os.path.basename(cfg['model_path'])}")
+            return
         while True:
             raw = input(f"  Select [1-{len(existing)}, or 0 to download]: ").strip()
             if raw == "0":
