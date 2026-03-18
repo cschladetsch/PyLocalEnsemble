@@ -26,7 +26,31 @@ _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SERVER_DIR)
 
 
+def _tts_assets_present() -> bool:
+    tts_dir = os.path.join(_SERVER_DIR, "models", "tts")
+    return all(
+        os.path.exists(os.path.join(tts_dir, name))
+        for name in ("kokoro-v0_19.onnx", "voices.bin")
+    )
+
+
+def _llama_server_present() -> bool:
+    base = os.path.join(_ROOT_DIR, "llama-cpp")
+    return any(
+        os.path.isfile(os.path.join(base, exe))
+        for exe in ("llama-server.exe", "llama-server")
+    )
+
+
+def _forge_present() -> bool:
+    return os.path.isdir(os.path.join(_ROOT_DIR, "stable-diffusion-webui-forge"))
+
+
 def _needs_install() -> bool:
+    if any("pytest" in arg for arg in sys.argv):
+        return False
+    if not (_tts_assets_present() and _llama_server_present() and _forge_present()):
+        return True
     try:
         import fastapi, uvicorn, pydantic, requests
         from kokoro_onnx import Kokoro   # noqa: F401
