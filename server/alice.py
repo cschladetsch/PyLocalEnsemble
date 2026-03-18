@@ -20,6 +20,10 @@ if os.name == "nt":
                     pass
 
 # ── Auto-install if needed ────────────────────────────────────────────────────
+_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SERVER_DIR)
+
+
 def _needs_install() -> bool:
     try:
         import fastapi, uvicorn, pydantic, requests
@@ -30,7 +34,7 @@ def _needs_install() -> bool:
         return True
 
 if _needs_install():
-    _install = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install.py")
+    _install = os.path.join(_ROOT_DIR, "install.py")
     print("\nDependencies missing — running install.py first...\n")
     result = subprocess.run([sys.executable, _install])
     if result.returncode != 0:
