@@ -67,19 +67,9 @@ def setup_model(cfg: dict):
             print(f"    [{i}] {p}")
         print(f"    [0] Download the default NSFW model instead")
         print()
-        if not INTERACTIVE:
-            cfg["model_path"] = existing[0]
-            ok(f"model set: {os.path.basename(cfg['model_path'])}")
-            return
-        while True:
-            raw = input(f"  Select [1-{len(existing)}, or 0 to download]: ").strip()
-            if raw == "0":
-                break
-            if raw.isdigit() and 1 <= int(raw) <= len(existing):
-                cfg["model_path"] = existing[int(raw) - 1]
-                ok(f"model set: {os.path.basename(cfg['model_path'])}")
-                return
-            print("  Invalid selection.")
+        cfg["model_path"] = existing[0]
+        ok(f"model set: {os.path.basename(cfg['model_path'])}")
+        return
 
     info(f"resolving {_DEFAULT_MODEL_REPO} ({_DEFAULT_MODEL_QUANT}) ...")
     try:
