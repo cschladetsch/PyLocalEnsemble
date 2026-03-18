@@ -137,36 +137,41 @@ app.include_router(system_router)
 app.include_router(group_router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-def _startup_step(label: str, fn):
-    try:
-        return True, fn()
-    except Exception as e:
-        import traceback
-        print(f"[{config.NAME}] Startup warning ({label}): {e}")
-        traceback.print_exc()
-        return False, None
+def _ensure_llm_ready(timeout: int = 120):
+    llm.load_llm()
+    if not llm.wait_until_ready(timeout):
+        raise RuntimeError("llama.cpp server did not become ready; check llama-server output.")
+
+
+def _ensure_tts_ready():
+    if not tts.load_tts():
+        raise RuntimeError("TTS assets not available or failed to load.")
+
+
+def _ensure_forge_ready():
+    if not image.start_forge():
+        raise RuntimeError("Failed to launch Stable Diffusion Forge.")
+    sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
+    if not image.set_forge_model(sd_checkpoint):
+        raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
 
 
 def _startup():
-    _startup_step("LLM", llm.load_llm)
+    _ensure_llm_ready()
 
-    # Initialise persona key so history mismatch detection works on first load.
     if not state._active_persona_key:
         state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
 
-    _startup_step("history", llm.load_history)
+    llm.load_history()
 
     if AUTO_IMAGE:
         config.CFG.setdefault("image", {})["auto_every"] = 1
         print(f"[{config.NAME}] Auto-image enabled (--auto-image)")
 
     if not NO_SPEECH:
-        _startup_step("TTS", tts.load_tts)
+        _ensure_tts_ready()
 
-    forge_ok, forge_started = _startup_step("Forge", image.start_forge)
-    if forge_ok and forge_started is not False:
-        sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
-        _startup_step("Forge model selection", lambda: image.set_forge_model(sd_checkpoint))
+    _ensure_forge_ready()
 
 
 def _listener_pid(host: str, port: int):
@@ -263,7 +268,11 @@ if __name__ == "__main__":
 
     _kill_listener(HOST, PORT)
 
-    threading.Thread(target=_startup, daemon=True).start()
+    try:
+        _startup()
+    except RuntimeError as exc:
+        print(f"\n[{config.NAME}] Preflight failed: {exc}")
+        sys.exit(1)
 
     if _PERSONA_ARG and not TEST_MODE:
         def _apply_persona():

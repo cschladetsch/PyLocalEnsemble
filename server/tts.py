@@ -24,14 +24,14 @@ VOICES = ["af_nicole", "af_bella", "af_sarah", "af_sky",
           "bm_george", "bm_lewis"]
 
 
-def load_tts():
+def load_tts() -> bool:
     global TTS
     step("Loading TTS (Kokoro)...")
     model_path  = os.path.join(config.TTS_DIR, "kokoro-v0_19.onnx")
     voices_path = os.path.join(config.TTS_DIR, "voices.bin")
     if not os.path.exists(model_path) or not os.path.exists(voices_path):
         warn("TTS models not found — run install.py. Audio will be disabled.")
-        return
+        return False
     try:
         import numpy as np
         _orig_load = np.load
@@ -41,8 +41,10 @@ def load_tts():
         finally:
             np.load = _orig_load
         ok("TTS ready.")
+        return True
     except Exception as e:
         warn(f"TTS failed to load: {e} — audio will be disabled.")
+        return False
 
 
 def _android_effect(samples, sr):

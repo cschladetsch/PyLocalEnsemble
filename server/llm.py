@@ -92,6 +92,17 @@ def _try_connect(silent=False) -> bool:
         return False
 
 
+def wait_until_ready(timeout: int = 120) -> bool:
+    if LLM_READY:
+        return True
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _try_connect(silent=True):
+            return True
+        time.sleep(2)
+    return False
+
+
 def load_llm():
     step(f"Connecting to llama.cpp server at {LLAMA_URL} ...")
     if not http_ok(LLAMA_URL + "/health", timeout=2):
