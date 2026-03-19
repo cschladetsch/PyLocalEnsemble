@@ -67,7 +67,7 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
         warn(f"Forge tooling upgrade failed: {exc}")
 
 
-def set_forge_model(name: str):
+def set_forge_model(name: str) -> bool:
     forge_url = config.CFG["forge_url"]
     try:
         req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=30)
@@ -78,10 +78,13 @@ def set_forge_model(name: str):
             req.post(f"{forge_url}/sdapi/v1/options",
                      json={"sd_model_checkpoint": match}, timeout=30)
             ok(f"Forge model set to: {match}")
+            return True
         else:
             warn(f"Model '{name}' not found in Forge model list.")
+            return False
     except Exception as e:
         warn(f"Could not set Forge model: {e}")
+        return False
 
 
 def restart_forge():
@@ -95,16 +98,16 @@ def restart_forge():
         warn("Forge did not come back after restart.")
 
 
-def start_forge():
+def start_forge() -> bool:
     forge_url = config.CFG["forge_url"]
     step("Starting Forge...")
     if http_ok(f"{forge_url}/sdapi/v1/sd-models"):
         ok("Forge already running.")
-        return
+        return True
     launcher = config.FORGE_BAT
     if not os.path.exists(launcher):
         warn(f"Forge not found at {config.FORGE_DIR} — run install.py")
-        return
+        return False
     env = os.environ.copy()
     if "forge_args" in config.CFG:
         env["COMMANDLINE_ARGS"] = config.CFG["forge_args"]
@@ -149,3 +152,5 @@ def start_forge():
     subprocess.Popen(launcher, **kw)
     if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=120, delay=10):
         warn("Forge did not start in time - images won't generate.")
+        return False
+    return True
