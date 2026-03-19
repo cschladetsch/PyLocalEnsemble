@@ -1145,7 +1145,7 @@ async function _applyGroupPersonas() {
   toSel.innerHTML = '<option value="all">All</option>' +
     sd.personas.map(p => `<option value="${p.key}">${p.name}</option>`).join('');
 
-  document.getElementById('group-to-wrap').style.display = 'none';
+  document.getElementById('group-to-wrap').style.display = 'flex';
 
   // (Re)connect SSE for async chatter
   if (_groupEvents) _groupEvents.close();
@@ -1357,13 +1357,14 @@ function _addGroupMsg(personaKey, senderName, html, toHint, isChatter) {
 }
 
 async function _sendGroupMsg(msg) {
+  const to = document.getElementById('group-to').value;
   addMsg('user', 'You', msg);
 
   try {
     const res = await fetch('/group/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, to: 'all' }),
+      body: JSON.stringify({ message: msg, to: to }),
     });
     const data = await res.json();
     if (data.error) _addGroupSystemMsg(`Error: ${data.error}`);

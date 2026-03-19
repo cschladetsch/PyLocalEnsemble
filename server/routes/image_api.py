@@ -60,6 +60,51 @@ class GenerateRequest(BaseModel):
     cfg_scale: float = None
 
 
+def _get_relevant_personas(llm_history: list, last_user: str) -> dict:
+    """Determine which personas should be in the image based on history and user request."""
+    # 1. Identify all personas mentioned or speaking in recent history
+    recent = llm_history[-10:]
+    involved_keys = set()
+    
+    # Always include the current active persona if not in group mode
+    if not state.GROUP_ACTIVE:
+        involved_keys.add(state._active_persona_key or "Alice")
+
+    # If in group mode, start with all personas in the group
+    if state.GROUP_ACTIVE:
+        involved_keys.update(state.GROUP_PERSONAS.keys())
+
+    # Scan history for other personas who spoke
+    for msg in recent:
+        content = msg.get("content", "")
+        # Look for [PersonaName]: pattern which is used in group history
+        m = re.match(r'^\[(.*?)\].*', content)
+        if m:
+            name = m.group(1)
+            for key, p in config.PERSONAS.items():
+                if p.get("name", key).lower() == name.lower():
+                    involved_keys.add(key)
+                    break
+    
+    # 2. Check for "explicitly otherwise" (user wants only one person)
+    # Examples: "just Alice", "only Morrigan", "alone", "solo"
+    user_lower = last_user.lower()
+    explicit_single = None
+    if re.search(r'\b(just|only|alone|solo)\b', user_lower):
+        for key, p in config.PERSONAS.items():
+            name = p.get("name", key).lower()
+            if name in user_lower:
+                explicit_single = key
+                break
+    
+    if explicit_single:
+        print(f"[image] explicit single persona requested: {explicit_single}")
+        return {explicit_single: config.PERSONAS[explicit_single]}
+
+    # Return all involved personas
+    return {k: config.PERSONAS[k] for k in involved_keys if k in config.PERSONAS}
+
+
 @router.post("/image")
 async def image_from_history(body: ImageRequest):
     print(f"\n[backend] Received /image request, extra='{body.extra}'")
@@ -88,7 +133,7 @@ async def image_from_history(body: ImageRequest):
     try:
         def _run():
             image._gen_cancel.clear()
-            recent = _llm_history[-8:]
+            recent = _llm_history[-10:]
             last_user_full = (
                 next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
                 if recent else body.extra
@@ -107,17 +152,16 @@ async def image_from_history(body: ImageRequest):
 
             messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
 
-            # Aggregate all active persona appearances for the scene
-            if state.GROUP_ACTIVE:
-                try:
-                    import routes.group as _grp
-                    _names = [p.get("name", k) for k, p in _grp._personas.items()]
-                    combined_appearance = _build_group_scene_appearance(_grp._personas)
-                    print(f"[image] group mode — aggregated appearance: {combined_appearance}")
-                except Exception:
-                    combined_appearance = state.ALICE_APPEARANCE
+            # Determine relevant personas for the scene
+            relevant_personas = _get_relevant_personas(_llm_history, last_user)
+            _names = [p.get("name", k) for k, p in relevant_personas.items()]
+            
+            if len(relevant_personas) > 1:
+                combined_appearance = _build_group_scene_appearance(relevant_personas)
+                print(f"[image] multi-persona mode ({len(relevant_personas)}) — aggregated appearance: {combined_appearance}")
             else:
-                combined_appearance = state.ALICE_APPEARANCE
+                p_key = list(relevant_personas.keys())[0] if relevant_personas else (state._active_persona_key or "Alice")
+                combined_appearance = config.PERSONAS.get(p_key, {}).get("appearance", state.ALICE_APPEARANCE)
 
             state.last_appearance = combined_appearance
 
@@ -131,9 +175,9 @@ async def image_from_history(body: ImageRequest):
                 state._pre_sd_prompt = None
             else:
                 print("[image] extracting SD prompt via LLM...")
-                # If group is active, give the LLM a mandatory instruction for all characters
+                # If multiple personas are involved, give the LLM a mandatory instruction for all characters
                 _persona_context = state.SYSTEM_PROMPT
-                if state.GROUP_ACTIVE:
+                if len(relevant_personas) > 1:
                     _persona_context += f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. " \
                                         "You MUST output tags that describe an interaction or pose involving EVERY persona listed. " \
                                         "Ensure they are distinct individuals and never merged into one person. " \
