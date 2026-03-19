@@ -18,3 +18,4 @@ __pycache__/
 /llama-cpp
 log/
 /core/target/
+/notes.md
