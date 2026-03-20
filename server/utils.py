@@ -28,14 +28,14 @@ def http_ok(url, timeout=2):
         return False
 
 
-def wait_for(url, label, retries=40, delay=3):
+def wait_for(url, label, retries=60, delay=2):
     spin = iter("|/-\\|/-\\".__mul__(999))
-    for _ in range(retries):
+    for i in range(retries):
         if http_ok(url, timeout=2):
             print(f"\r        {label} ready.{' ' * 20}")
             return True
         ch = next(spin)
-        print(f"\r        {ch}  Waiting for {label}...", end="", flush=True)
+        print(f"\r        {ch}  Waiting for {label}... ({i+1}/{retries})", end="", flush=True)
         time.sleep(delay)
     print(f"\r        Waiting for {label}... timed out.{' ' * 10}")
     return False

@@ -87,6 +87,7 @@ PORT = int(config.CFG.get("port", getattr(config, "PORT", 8000)))
 
 # ── Runtime flags ─────────────────────────────────────────────────────────────
 NO_SPEECH  = "--no-speech"   in sys.argv
+NO_FORGE   = "--no-forge"    in sys.argv
 TEST_MODE  = "--test"        in sys.argv
 AUTO_IMAGE = "--auto-image"  in sys.argv
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
@@ -195,7 +196,10 @@ def _startup():
     if not NO_SPEECH:
         _ensure_tts_ready()
 
-    _ensure_forge_ready()
+    if not NO_FORGE:
+        _ensure_forge_ready()
+    else:
+        print(f"[{config.NAME}] Skipping Forge startup (--no-forge)")
 
 
 def _listener_pid(host: str, port: int):

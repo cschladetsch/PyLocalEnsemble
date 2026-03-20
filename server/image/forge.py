@@ -58,11 +58,9 @@ def _python_from_venv_dir(venv_dir: str) -> str:
 def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
     if not python_exe or not os.path.exists(python_exe):
         return
-    step("Refreshing Forge pip, setuptools, and wheel")
     try:
-        subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "pip", "setuptools<81", "wheel"],
-                       check=True, env=env)
-        ok("Forge Python tooling is up to date.")
+        subprocess.run([python_exe, "-m", "pip", "install", "--upgrade", "--quiet", "pip", "setuptools<81", "wheel"],
+                       check=True, env=env, capture_output=True)
     except subprocess.CalledProcessError as exc:
         warn(f"Forge tooling upgrade failed: {exc}")
 
@@ -150,7 +148,7 @@ def start_forge() -> bool:
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
 
     subprocess.Popen(launcher, **kw)
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=120, delay=10):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=4):
         warn("Forge did not start in time - images won't generate.")
         return False
     return True
