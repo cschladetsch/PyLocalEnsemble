@@ -3,9 +3,12 @@ import os, platform, shutil, subprocess
 from installer.helpers import (FORGE_DIR, FORGE_BAT, CONF_DIR,
                                 heading, ok, info, warn, _download, _filename_from_response)
 
-_RV_FILENAME = "pornmasterPro_v9VAE.safetensors"
-_RV_URL      = ("https://huggingface.co/Demo112211/pornmasterPro_v9VAE.safetensors"
-                "/resolve/main/pornmasterPro_v9VAE.safetensors")
+_MODELS = [
+    ("pornmasterPro_v9VAE.safetensors", "https://huggingface.co/Demo112211/pornmasterPro_v9VAE.safetensors/resolve/main/pornmasterPro_v9VAE.safetensors"),
+    ("Realistic_Vision_V5.1.safetensors", "https://huggingface.co/SG161222/Realistic_Vision_V5.1_noVAE/resolve/main/Realistic_Vision_V5.1.safetensors"),
+    ("epicphotogasm_v1.safetensors", "https://huggingface.co/Yntec/epiCPhotoGasm/resolve/main/epicphotogasm_v1.safetensors"),
+    ("DreamShaper_8_pruned.safetensors", "https://huggingface.co/Lykon/DreamShaper/resolve/main/DreamShaper_8_pruned.safetensors"),
+]
 
 
 def _find_forge_python() -> str:
@@ -130,7 +133,7 @@ def install_forge(cfg: dict):
     else:
         ok(f"Forge-compatible Python found: {forge_py}")
 
-    # Download checkpoint if not present
+    # Download checkpoints if not present
     sd_dir = os.path.join(FORGE_DIR, "models", "Stable-diffusion")
     os.makedirs(sd_dir, exist_ok=True)
 
@@ -149,13 +152,20 @@ def install_forge(cfg: dict):
             ok(f"checkpoint ready: {filename}")
         cfg["sd_checkpoint"] = filename
     else:
-        dest = os.path.join(sd_dir, _RV_FILENAME)
-        if os.path.exists(dest):
-            ok(f"Checkpoint already present: {_RV_FILENAME}")
-        else:
-            info(f"downloading PornMaster Pro v9 VAE (~2.1 GB) ...")
-            _download(_RV_URL, dest, _RV_FILENAME)
-            ok(f"checkpoint ready: {_RV_FILENAME}")
-        cfg.setdefault("sd_checkpoint", _RV_FILENAME)
+        for filename, url in _MODELS:
+            dest = os.path.join(sd_dir, filename)
+            if os.path.exists(dest):
+                ok(f"Checkpoint already present: {filename}")
+            else:
+                info(f"downloading {filename} (~2-4 GB) ...")
+                try:
+                    _download(url, dest, filename)
+                    ok(f"checkpoint ready: {filename}")
+                except Exception as e:
+                    warn(f"Failed to download {filename}: {e}")
+        
+        # Set default checkpoint in config if not present
+        if not cfg.get("sd_checkpoint"):
+            cfg["sd_checkpoint"] = _MODELS[0][0]
 
     install_adetailer()

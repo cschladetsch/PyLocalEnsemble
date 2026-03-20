@@ -29,8 +29,7 @@ def _short_group_appearance(app_str: str, limit: int = 8) -> str:
 
 def _build_group_scene_appearance(personas: dict) -> str:
     """Build explicit multi-person scene tags so SD keeps personas separate."""
-    names = [p.get("name", key) for key, p in personas.items()]
-    count = len(names)
+    count = len(personas)
     count_tag = f"{count}girls" if count != 1 else "1girl"
     base_tags = [
         count_tag,
@@ -39,15 +38,16 @@ def _build_group_scene_appearance(personas: dict) -> str:
         "distinct individuals",
         "different faces",
         "different bodies",
-        "unique signature looks",
         "full cast visible",
     ]
     persona_tags = []
     for key, persona in personas.items():
-        name = persona.get("name", key)
         short_app = _short_group_appearance(persona.get("appearance", ""))
-        persona_tags.append(f"{name} signature look: {short_app}" if short_app else name)
-    return ", ".join(base_tags + persona_tags)
+        # Use '1woman' as the anchor for each slot instead of the persona name.
+        # This is more SD-native and prevents 'Alice' from being treated as a token.
+        persona_tags.append(f"(1woman, {short_app}:1.2)" if short_app else "1woman")
+    
+    return ", ".join(base_tags) + ", " + ", ".join(persona_tags)
 
 
 class ImageRequest(BaseModel):
@@ -187,6 +187,8 @@ async def image_from_history(body: ImageRequest):
                     messages, appearance=combined_appearance,
                     last_user_msg=last_user, persona=_persona_context,
                     nudity_floor=state._nudity_state,
+                    interaction_priority=(len(relevant_personas) > 1),
+                    names=_names,
                 )
                 state._nudity_state = new_nudity
 

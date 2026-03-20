@@ -89,10 +89,14 @@ async function _scheduleChunk(b64wav, gen) {
   const bytes = atob(b64wav);
   const buf = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
-  const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
-  if (gen !== _ttsGen) return;   // stream was cancelled while decoding
-  _lastChunks.push(audioBuf);
-  _playAudioBuffer(audioBuf);
+  try {
+    const audioBuf = await _audioCtx.decodeAudioData(buf.buffer);
+    if (gen !== _ttsGen) return;   // stream was cancelled while decoding
+    _lastChunks.push(audioBuf);
+    _playAudioBuffer(audioBuf);
+  } catch (e) {
+    console.error('Audio decode failed:', e);
+  }
 }
 
 try {
@@ -723,6 +727,7 @@ function startDemo() {
   _demoMode = true;
   _demoTurn = 0;
   _updateDemoBtn();
+  fetch('/demo/start', { method: 'POST' }).catch(() => {});
   demoLoop();
 }
 
@@ -731,6 +736,7 @@ function stopDemo() {
   _demoPaused = false;
   if (_demoTimer) { clearTimeout(_demoTimer); _demoTimer = null; }
   _updateDemoBtn();
+  fetch('/demo/stop', { method: 'POST' }).catch(() => {});
 }
 
 function _updateDemoBtn() {
@@ -1359,18 +1365,75 @@ function _addGroupMsg(personaKey, senderName, html, toHint, isChatter) {
 async function _sendGroupMsg(msg) {
   const to = document.getElementById('group-to').value;
   addMsg('user', 'You', msg);
+  document.getElementById('thinking-bar').style.display = 'block';
+  disableAll();
 
   try {
-    const res = await fetch('/group/message', {
+    const res = await fetch('/group/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg, to: to }),
     });
-    const data = await res.json();
-    if (data.error) _addGroupSystemMsg(`Error: ${data.error}`);
+    
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let currentTids = {}; // personaKey -> messageId
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = JSON.parse(line.slice(6));
+        
+        if (d.error) {
+          _addGroupSystemMsg(`Error (${d.sender}): ${d.error}`);
+          continue;
+        }
+
+        if (d.typing) {
+          document.getElementById('thinking-bar').style.display = 'none';
+          const tid = _addGroupMsg(d.persona, d.sender, '<span class="gen dots">thinking</span>', (to !== 'all' && to === d.persona) ? '' : to, false);
+          currentTids[d.persona] = { id: tid, content: '' };
+        }
+
+        if (d.delta && currentTids[d.persona]) {
+          currentTids[d.persona].content += d.delta;
+          const e = document.getElementById(currentTids[d.persona].id);
+          if (e) {
+            const color = _groupPersonas[d.persona]?.color || _GROUP_COLORS[0];
+            const toHint = (to !== 'all' && (to === d.persona || to === d.sender)) ? '' : to;
+            const toSpan = toHint ? `<span class="group-to-hint">→ ${toHint}</span>` : '';
+            e.innerHTML = `<div class="sndr" style="color:${color}">${d.sender}${toSpan}</div>${renderMd(currentTids[d.persona].content)}`;
+            document.getElementById('msgs').scrollTop = document.getElementById('msgs').scrollHeight;
+          }
+        }
+
+        if (d.done && currentTids[d.persona]) {
+          const tid = currentTids[d.persona].id;
+          const reply = d.reply;
+          const e = document.getElementById(tid);
+          if (e) {
+            const color = _groupPersonas[d.persona]?.color || _GROUP_COLORS[0];
+            const toHint = (to !== 'all' && (to === d.persona || to === d.sender)) ? '' : to;
+            const toSpan = toHint ? `<span class="group-to-hint">→ ${toHint}</span>` : '';
+            e.innerHTML = `<div class="sndr" style="color:${color}">${d.sender}${toSpan}<span class="group-chatter-badge">✦</span></div>${renderMd(reply)}`;
+          }
+          if (d.tts) _speakGroup(d.persona, reply, d.tts);
+          delete currentTids[d.persona];
+        }
+      }
+    }
   } catch (e) {
-    console.error('[group message]', e);
-    _addGroupSystemMsg('Error sending message.');
+    console.error('[group chat]', e);
+    _addGroupSystemMsg('Error during group chat.');
+  } finally {
+    document.getElementById('thinking-bar').style.display = 'none';
+    enableAll();
   }
 }
 

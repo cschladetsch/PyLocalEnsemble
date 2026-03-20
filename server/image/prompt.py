@@ -143,69 +143,68 @@ _META_RE = re.compile(
     r'n/?a|none given|not mentioned|not stated|not provided|not applicable)\b', re.I
 )
 
-# Pattern → (action_tags_list, body_tag, camera_hint)
-# Multiple action tags reinforce the same pose from different angles in training data.
-# Checked against the user's command; first match wins.
-# Bypasses the LLM for ACTION to avoid hallucination from Alice's prose.
+# Pattern → (action_tags_list, body_tag, camera_hint, nudity_hint)
 _ACTION_PATTERNS = [
     (r'\bcup(?:ping)?\b.{0,30}\bbreast',
         ["cupping breasts", "hands on breasts", "holding breasts", "breast grab"],
-        "breasts", "front view"),
+        "breasts", "face level", "topless"),
     (r'\bhold(?:ing)?\b.{0,30}\bbreast',
         ["holding breasts", "cupping breasts", "hands on breasts", "breast grab"],
-        "breasts", "front view"),
+        "breasts", "face level", "topless"),
     (r'\bsqueez\w*\b.{0,30}\bbreast',
         ["squeezing breasts", "hands on breasts", "breast grab"],
-        "breasts", "front view"),
+        "breasts", "face level", "topless"),
     (r'\btouch\w*\b.{0,30}\bbreast',
         ["hands on breasts", "cupping breasts"],
-        "breasts", "front view"),
+        "breasts", "face level", "topless"),
     (r'\bfinger\w*\b.{0,20}\b(?:mouth|lips|suck|lick|tongue)\b|\b(?:mouth|lips|suck|lick|tongue)\b.{0,20}\bfinger\w*\b',
         ["one finger in mouth", "index finger", "lips parted", "looking at viewer"],
-        "mouth", "face level"),
+        "mouth", "face level", None),
     (r'\bsuck\b|\bblowjob\b|\bfellatio\b',
         ["fellatio", "penis in mouth", "oral sex"],
-        "mouth", "face level"),
+        "mouth", "face level", "fully nude"),
     (r'\banal\b|\bbutt plug\b',
         ["anal insertion", "ass penetration"],
-        "ass", "from behind"),
+        "ass", "from behind", "fully nude"),
     (r'\bfinger\w*\b',
         ["fingering", "fingers in pussy"],
-        "pussy", "from below"),
+        "pussy", "from below", "fully nude"),
     (r'\bride\b|\briding\b|\bsit on\b',
         ["riding", "cowgirl position", "straddling"],
-        "pussy", "from below",
-        r'\bhorse\b|\bpony\b|\bstallion\b|\bmare\b|\bequine\b|\bbicycle\b|\bbike\b|\bmotor'),
+        "pussy", "from below", "fully nude"),
     (r'\bbend\w*\s+over\b',
         ["bent over", "doggy style position"],
-        "ass", "from behind"),
+        "ass", "from behind", None),
     (r'\bspread\w*\s+(?:(?:her|your|my)\s+)?legs?\b',
         ["spreading legs", "legs spread wide"],
-        "pussy", "from below"),
+        "pussy", "from below", "fully nude"),
     (r'\bkneel\b|\bkneeling\b',
         ["kneeling"],
-        "body", "front view"),
+        "body", "front view", None),
     (r'\bstroke\b|\bstroking\b',
         ["stroking penis", "handjob"],
-        "cock", "front view"),
+        "cock", "front view", "fully nude"),
     (r'\bkiss\w*\b',
         ["kissing", "lips touching"],
-        "lips", "face level"),
+        "lips", "face level", None),
+    (r'\b(?:take off|remove|strip|undress)\b.{0,20}\b(?:clothes|clothing|outfit|dress|top|shirt|bra|panties|underwear|stockings|gown)\b',
+        ["disrobing", "removing clothes", "nude", "naked"],
+        "body", "front view", "fully nude"),
     (r'\bstrip\b|\bstripping\b|\bundress\b',
-        ["disrobing", "removing clothes"],
-        "body", "front view"),
+        ["disrobing", "removing clothes", "nude", "naked"],
+        "body", "front view", "fully nude"),
 ]
 
 
 def _detect_action(msg: str):
-    """Return (actions_list, body, camera) from pattern match, or None if no match."""
+    """Return (actions_list, body, camera, nudity) from pattern match, or None if no match."""
     for entry in _ACTION_PATTERNS:
-        pattern, actions, body, camera = entry[0], entry[1], entry[2], entry[3]
-        exclude = entry[4] if len(entry) > 4 else None
+        pattern, actions, body, camera, nudity = entry[0], entry[1], entry[2], entry[3], entry[4]
+        exclude = entry[5] if len(entry) > 5 else None
         if re.search(pattern, msg, re.I):
             if exclude and re.search(exclude, msg, re.I):
                 continue
-            return actions, body, camera
+            return actions, body, camera, nudity
     return None
 
 # Maps structured CAMERA field values to SD tag pairs
@@ -285,22 +284,59 @@ def _parse_template(raw: str) -> dict:
     return result
 
 
-def _build_tags(fields: dict, appearance: str) -> str:
+_CLOTHING_RE = re.compile(
+    r"\b(dress|gown|robe|skirt|blouse|shirt|top|corset|bodice|stockings|lingerie|bra|underwear|panties|trousers|pants|shorts|linen|silk dress|lace|veil|outfit|clothes|clothing)\b",
+    re.I
+)
+
+def _strip_distractions(text: str) -> str:
+    """Remove non-visual personality words that confuse SD 1.5."""
+    return re.sub(r"\b(elegant|poised|refined|sophisticated|mystical|ethereal|divine|regal|divine|sensual|timeless)\b,?\s*", "", text, flags=re.I).strip(", ")
+
+def _strip_clothing(text: str) -> str:
+    """Remove clothing words from an appearance string."""
+    return _CLOTHING_RE.sub("", text).replace(", ,", ",").strip(", ")
+
+
+def _build_tags(fields: dict, appearance: str, interaction_priority: bool = False) -> str:
     """Convert parsed structured fields into a weighted SD tag string."""
     tags = []
-
+    
     def add(val, weight=None):
-        val = val.strip().rstrip(".")
-        if not val:
+        val = val.strip().rstrip(".,")
+        if not val or val.lower() == "none":
             return
+        # Clean dangling conjunctions and common typos (kneeling, knelng, etc.)
+        val = re.sub(r'\s+\b(and|with|of|the|then)\b$', '', val, flags=re.I)
+        val = re.sub(r'\bkneal\w*\b', 'kneeling', val, flags=re.I)
+        val = val.replace("knelng", "kneeling").replace("kneelng", "kneeling")
         tags.append(f"({val}:{weight})" if weight else val)
 
-    # Primary action — one or more tags, descending weights from 1.7
+    # 1. Determine if we are undressed
+    nudity_key = fields.get("NUDITY", "clothed").lower()
+    is_nude = nudity_key in ("fully nude", "topless", "bottomless")
+    
+    # 2. Clean appearance string
+    clean_app = _strip_distractions(appearance)
+    if is_nude:
+        clean_app = _strip_clothing(clean_app)
+
+    # 3. Handle Pose Conflicts
+    # If ACTION contains a specific pose, it must override the POSE field
     action_val = fields.get("ACTION", "")
+    action_text = " ".join(action_val) if isinstance(action_val, list) else str(action_val)
+    pose = fields.get("POSE", "standing")
+    
+    # If we are kneeling/sitting in action, we cannot be standing in pose
+    if any(p in action_text.lower() for p in ("kneel", "sit", "lie", "bent over", "spread")):
+        pose = pose.replace("standing", "").strip(", ")
+    
+    # Primary action
     action_list = action_val if isinstance(action_val, list) else ([action_val] if action_val else [])
     action_weights = [1.7, 1.6, 1.5, 1.4]
     for act, w in zip(action_list, action_weights):
         add(act, w)
+    
     body = fields.get("BODY", "")
     if body and not any(body.lower() in a.lower() for a in action_list):
         add(body, 1.3)
@@ -312,22 +348,21 @@ def _build_tags(fields: dict, appearance: str) -> str:
     for ct, w in zip(camera_tags, weights):
         add(ct, w)
 
-    # Pose
-    pose = fields.get("POSE", "standing")
-    add(pose, 1.3)
+    # Pose (now conflict-cleaned)
+    if pose:
+        add(pose, 1.3)
 
     # Nudity
-    nudity_key = fields.get("NUDITY", "clothed").lower()
     nudity_tags = _NUDITY_MAP.get(nudity_key, [nudity_key] if nudity_key != "clothed" else [])
     for nt in nudity_tags:
         add(nt, 1.2)
 
-    # Prop — key object from user command (banana, dildo, etc.)
+    # Prop
     prop = fields.get("PROP", "").strip().lower()
     if prop and prop != "none":
         add(prop, 1.4)
 
-    # Accessories — glasses, hat, collar, etc. (detected from user message, not LLM)
+    # Accessories
     for acc in fields.get("ACCESSORIES", []):
         add(acc, 1.3)
 
@@ -336,22 +371,34 @@ def _build_tags(fields: dict, appearance: str) -> str:
     if extra:
         add(extra, 1.1)
 
-    # Setting / lighting (no weight)
+    # Setting / lighting
     for key in ("SETTING", "LIGHTING"):
         val = fields.get(key, "")
         if val:
             tags.append(val)
 
-    # Prepend appearance — character features (face, hair, eyes) must lead
-    # the prompt to stay consistent across turns in SD.
-    final_prompt = ", ".join(tags)
-    if appearance:
-        final_prompt = f"{appearance}, {final_prompt}"
-    return final_prompt
+    # Assemble final prompt. 
+    joined_tags = ", ".join(tags)
+    if clean_app:
+        if interaction_priority:
+            # Use a regex to split by commas that are NOT inside parentheses
+            app_parts = [p.strip() for p in re.split(r',(?![^()]*\))', clean_app) if p.strip()]
+            count_tags = []
+            # Extract first few tags if they look like count/group tags
+            while app_parts and (re.search(r"\d+girls?|group scene", app_parts[0], re.I) or len(count_tags) < 2):
+                count_tags.append(app_parts.pop(0))
+            
+            remaining_app = ", ".join(app_parts)
+            return f"{', '.join(count_tags)}, {joined_tags}, {remaining_app}"
+        else:
+            return f"{clean_app}, {joined_tags}"
+    return joined_tags
 
 
 def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
-                      persona: str = "", nudity_floor: str = "clothed") -> tuple:
+                      persona: str = "", nudity_floor: str = "clothed",
+                      interaction_priority: bool = False,
+                      names: list[str] = None) -> tuple:
     try:
         appearance_hint = (
             f"Character appearance (always include these): {appearance}"
@@ -431,15 +478,16 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             fields["ACCESSORIES"] = accessories
             print(f"[image] accessories detected: {accessories}")
 
-        # Override ACTION/BODY/CAMERA with pattern match from user command —
-        # the LLM reliably misreads Alice's prose response for these fields.
+        # Override ACTION/BODY/CAMERA/NUDITY with pattern match from user command
         detected = _detect_action(last_user_msg)
         if detected:
-            action, body, camera = detected
+            action, body, camera, nudity = detected
             fields["ACTION"] = action
             fields.setdefault("BODY",   body)
             fields.setdefault("CAMERA", camera)
-            print(f"[image] action detected from user msg: {action!r}")
+            if nudity:
+                fields["NUDITY"] = nudity
+            print(f"[image] action detected from user msg: {action!r}, nudity={nudity}")
         elif "ACTION" not in fields:
             print("[image] no ACTION field, retrying…")
             raw = llm.llm_chat([
@@ -448,8 +496,14 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             ])
             fields = _parse_template(raw)
 
+        # Pose cleanup: if they are kneeling or sitting, they are not standing.
+        pose = fields.get("POSE", "").lower()
+        if any(p in pose for p in ("kneeling", "sitting", "lying", "bent over")):
+            fields["POSE"] = pose.replace("standing", "").strip(", ")
+
         # Apply nudity floor — never go less undressed than the current session state
         nudity_key = fields.get("NUDITY", "clothed").lower()
+        # ... nudity floor logic ...
         try:
             floor_idx   = _NUDITY_ORDER.index(nudity_floor.lower())
             current_idx = _NUDITY_ORDER.index(nudity_key)
@@ -460,9 +514,18 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
         except ValueError:
             pass
 
+        # In group mode, names are noise. Remove "[Name], " from appearance blocks.
+        if interaction_priority and names:
+            # Build a dynamic regex from the list of names
+            name_pattern = "|".join(re.escape(n) for n in names)
+            # 1. Remove names at the start of parenthetical blocks: "(Alice, blonde..." -> "(blonde..."
+            appearance = re.sub(rf'\(\s*(?:{name_pattern}),\s*', '(', appearance, flags=re.I)
+            # 2. Remove standalone names followed by commas: "Alice, blonde..." -> "blonde..."
+            appearance = re.sub(rf'\b(?:{name_pattern})\b,\s*', '', appearance, flags=re.I)
+
         print(f"[image] scene fields: {fields}")
 
-        tags = _build_tags(fields, appearance)
+        tags = _build_tags(fields, appearance, interaction_priority=interaction_priority)
         print(f"[image] SD prompt: {tags}")
         return tags, fields.get("NUDITY", "clothed")
 

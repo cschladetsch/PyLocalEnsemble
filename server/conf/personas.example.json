@@ -7,7 +7,7 @@
         "negative_prompt": "modern, contemporary, jeans, casual clothing, western fashion, futuristic, sci-fi, sneakers, t-shirt",
         "tts": { "voice": "bf_isabella", "speed": 0.88, "effects": "cathedral" },
         "image": { "suffix": "ancient Egyptian art style, warm golden tones, smooth olive skin, matte finish, fresco aesthetic, warm candlelight, painted detail" },
-        "sd_model": "epiCPhotoGasm"
+        "sd_model": "epicphotogasm_v1.safetensors"
     },
     "Victorian Lady": {
         "name": "Isabelle",
@@ -17,7 +17,7 @@
         "negative_prompt": "modern clothing, jeans, t-shirt, hoodie, contemporary, futuristic, sci-fi, sneakers, casual",
         "tts": { "voice": "bf_emma", "speed": 0.92, "chunk_chars": 1000 },
         "image": { "suffix": "oil painting, pre-raphaelite style, Victorian illustration, painterly, rich jewel tones, detailed brushwork, candlelight" },
-        "sd_model": "dreamshaper_8"
+        "sd_model": "DreamShaper_8_pruned.safetensors"
     },
     "Android": {
         "name": "ARIA-7",
@@ -27,7 +27,7 @@
         "negative_prompt": "human, organic, natural skin, realistic skin pores, freckles, moles, wrinkles, flesh, soft human body, seamless skin, ordinary woman, medieval, fantasy, rustic, natural lighting",
         "tts": { "voice": "af_sky", "speed": 0.92, "effects": "android" },
         "image": { "suffix": "sci-fi android aesthetic, hard-surface rendering, visible robotics, synthetic materials, illuminated circuitry, glossy sensor glass, cool blue lighting, high contrast, hyperdetailed, sharp focus" },
-        "sd_model": "Realistic_Vision"
+        "sd_model": "Realistic_Vision_V5.1.safetensors"
     },
     "Forest Witch": {
         "name": "Morrigan",
@@ -37,6 +37,6 @@
         "negative_prompt": "modern, urban, technology, sci-fi, metallic, futuristic, city, neon, digital",
         "tts": { "voice": "af_bella", "speed": 0.85 },
         "image": { "suffix": "fantasy art, painterly, dark atmosphere, mystical, ethereal, moonlit forest, pre-raphaelite, dark romanticism" },
-        "sd_model": "dreamshaper_8"
+        "sd_model": "DreamShaper_8_pruned.safetensors"
     }
 }

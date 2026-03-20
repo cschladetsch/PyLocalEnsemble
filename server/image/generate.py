@@ -55,28 +55,27 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
 
     explicit_keywords = ["anal", "fingering", "insertion", "blowjob", "fellatio",
                          "penetration", "nude", "naked", "nudity", "topless", "nsfw",
-                         "no clothes", "fully nude", "fully naked", "bare skin", "exposed skin"]
+                         "no clothes", "fully nude", "fully naked", "bare skin", "exposed skin",
+                         "take off clothes", "removing clothes", "disrobing", "pussy", "vagina", 
+                         "vulva", "cunt", "asshole", "clitoris", "breasts bare", "clothed removed"]
     nudity_keywords   = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
-                         "fully nude", "fully naked", "bare skin", "exposed skin"]
+                         "fully nude", "fully naked", "bare skin", "exposed skin",
+                         "take off clothes", "removing clothes", "disrobing", "undress",
+                         "pussy", "vagina", "vulva", "cunt", "asshole", "breasts bare"]
 
     is_explicit = any(kw in prompt.lower() for kw in explicit_keywords)
-    is_nude     = any(kw in prompt.lower() for kw in nudity_keywords)
+    nudity_keywords   = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
+                         "fully nude", "fully naked", "bare skin", "exposed skin",
+                         "take off clothes", "removing clothes", "disrobing", "undress"]
+    is_nude = any(kw in prompt.lower() for kw in nudity_keywords)
 
-    clean_appearance = re.sub(r"\b(elegant|poised|refined|sophisticated)\b,?\s*",
-                              "", appearance, flags=re.I).strip(", ")
     if is_nude:
-        clothing_pattern = (r"\b(dress|gown|robe|skirt|blouse|shirt|top|corset|bodice|"
-                            r"stockings|lingerie|bra|underwear|panties|trousers|pants|"
-                            r"shorts|linen|silk dress|lace|veil)\b")
-        clean_appearance = re.sub(clothing_pattern + r",?\s*", "", clean_appearance,
-                                  flags=re.I).strip(", ")
         negative = ("clothed, dressed, clothing, dress, gown, robe, shirt, top, covered, "
                     "fabric over body, bra, bra straps, bikini top, lingerie top, "
                     "covered chest, fabric on chest, " + negative)
 
-    used_appearance = clean_appearance if is_explicit else appearance
-    # Do NOT prepend appearance here — it's already integrated into 'prompt' via extract_sd_prompt.
-    # We only prepend 'nsfw' to signal the model's safety bypass if explicit content is detected.
+    # full_prompt is built using the tags from extract_sd_prompt (which now includes
+    # the cleaned appearance) and the configured suffix.
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")

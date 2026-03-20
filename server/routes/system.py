@@ -123,6 +123,20 @@ def _demo_stage(turn: int) -> tuple[str, str]:
     return _DEMO_STAGES[-1][2], _DEMO_STAGES[-1][3]
 
 
+@router.post("/demo/start")
+async def demo_start():
+    state.DEMO_ACTIVE = True
+    print("[demo] started — autonomous chatter enabled")
+    return JSONResponse({"status": "ok"})
+
+
+@router.post("/demo/stop")
+async def demo_stop():
+    state.DEMO_ACTIVE = False
+    print("[demo] stopped — autonomous chatter disabled")
+    return JSONResponse({"status": "ok"})
+
+
 @router.get("/demo/prompt")
 async def demo_prompt(turn: int = Query(default=0, ge=0)):
     """Generate a short, natural user message appropriate for the current persona/context."""

@@ -17,6 +17,8 @@
     <select id="demo-persona-select" class="cb" onchange="switchDemoPersona(this.value)" title="Your character in demo mode" style="cursor:pointer"></select>
     <button class="cb" id="demo-btn" onclick="toggleDemo()" title="Auto-pilot: Alice generates and responds to her own prompts">Demo</button>
     <button class="cb" id="group-btn" onclick="toggleGroupMode()" title="Group chat: multiple personas in one room">Group</button>
+    <button class="cb" id="mute-btn" onclick="toggleMute()" title="Mute/Unmute Alice's voice">Mute</button>
+    <button class="cb" id="resay-btn" onclick="resay()" title="Repeat last message" disabled>Resay</button>
     <button class="cb" onclick="clearHistory()">Clear</button>
   </div>
 </header>

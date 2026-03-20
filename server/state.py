@@ -28,6 +28,9 @@ _active_persona_key: str = ""
 GROUP_ACTIVE   = False
 GROUP_PERSONAS: dict = {}  # key → persona config dict
 
+# Demo mode state — mutated by routes/system.py
+DEMO_ACTIVE = False
+
 # Demo mode — active user persona (name + description)
 _demo_user_persona_name: str = ""
 _demo_user_persona_desc: str = ""

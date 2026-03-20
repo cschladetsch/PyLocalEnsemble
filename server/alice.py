@@ -176,7 +176,7 @@ def _ensure_tts_ready():
 def _ensure_forge_ready():
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
-    sd_checkpoint = config.CFG.get("sd_checkpoint", "epiCPhotoGasmVAE.safetensors")
+    sd_checkpoint = config.CFG.get("sd_checkpoint", "pornmasterPro_v9VAE.safetensors")
     if not image.set_forge_model(sd_checkpoint):
         raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
 

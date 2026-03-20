@@ -129,8 +129,11 @@ def _build_response_messages(persona_key: str) -> list[dict]:
         sys_prompt += (
             f"\n\nYou are in a group conversation with {', '.join(others_info)} and the User. "
             f"You are {persona_name} ({persona_gender}). "
-            "Address others by name when relevant. Keep responses concise for group chat. "
-            "Use correct pronouns for others based on their listed gender."
+            "STRICT RULES:\n"
+            "1. Speak ONLY as yourself. Do NOT narrate for, speak for, or describe the actions of other personas.\n"
+            "2. Focus exclusively on your own words, thoughts, and physical state.\n"
+            "3. Address others by name when relevant. Keep responses concise.\n"
+            "4. Use correct pronouns for others based on their listed gender."
         )
 
     raw: list[tuple[str, str]] = []
@@ -183,9 +186,12 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
         sys_prompt += (
             f"\n\nYou are in a group with {', '.join(others_info)} and the User. "
             f"You are {sender_name} ({sender_gender}). "
-            "Keep your response to 1-2 sentences. Be natural, sexy, and in character. "
-            "Let the group conversation feel flirtatious, sensual, and intimate rather than neutral small talk. "
-            "Use correct pronouns for others based on their listed gender."
+            "STRICT RULES:\n"
+            "1. Speak ONLY as yourself. Do NOT narrate for, speak for, or describe the actions of other personas.\n"
+            "2. Focus exclusively on your own words and internal state.\n"
+            "3. Keep your response to 1-2 sentences. Be natural, sexy, and in character.\n"
+            "4. Let the conversation feel flirtatious and intimate rather than neutral.\n"
+            "5. Use correct pronouns for others based on their listed gender."
         )
 
     # Use pair-specific history for targeted chatter to avoid cross-persona phrase bleed.
@@ -237,33 +243,58 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
 
 
 def _clean_reply(reply: str, persona_name: str) -> str:
+    # 1. Remove all bracketed persona tags at the start of the message (e.g., [Morrigan], [Aria-7 to User])
+    # We do this multiple times in case the LLM nested them or listed multiple.
+    last_reply = ""
+    while last_reply != reply:
+        last_reply = reply
+        reply = re.sub(r'^\[[^\]]+\]\s*:?\s*', '', reply).strip()
+    
+    # 2. Remove plain name prefixes (e.g., "Alice: ", "Aria-7 - ")
+    reply = re.sub(rf'^{re.escape(persona_name)}\s*[:"-]\s*', '', reply).strip()
+    
+    # 3. Strip parenthetical stage directions/actions
     reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
-    reply = re.sub(rf'^\[{re.escape(persona_name)}\]\s*:\s*', '', reply).strip()
-    reply = re.sub(rf'^{re.escape(persona_name)}\s*[:"]\s*', '', reply).strip()
+    
+    # 4. Remove AI meta-commentary
     reply = re.sub(
         r'\s*(Please note\b|Note that\b|As an AI\b|I\'m an AI\b).*',
         '', reply, flags=re.DOTALL | re.IGNORECASE
     ).strip()
+    
     return reply
 
 
 # ── Async chatter ──────────────────────────────────────────────────────────────
 
 async def _chatter_loop():
-    """Background task: personas spontaneously speak to each other."""
+    """Background task: personas spontaneously speak to each other (only in Demo mode)."""
     import traceback
     while _active and len(_personas) >= 2:
         global _chatter_wake
         if _chatter_wake is None:
             _chatter_wake = asyncio.Event()
+
+        # If not in demo mode, wait for either the demo to start OR a manual message to wake us
+        if not state.DEMO_ACTIVE:
+            try:
+                # Poll every 2 seconds to check if DEMO_ACTIVE changed
+                await asyncio.wait_for(_chatter_wake.wait(), timeout=2.0)
+                _chatter_wake.clear()
+            except asyncio.TimeoutError:
+                continue # loop again to check state.DEMO_ACTIVE
+
+        # In Demo mode, wait for a longer natural delay
         delay = 8 + random.random() * 10 if _history else 2 + random.random() * 3
         try:
             await asyncio.wait_for(_chatter_wake.wait(), timeout=delay)
             _chatter_wake.clear()
         except asyncio.TimeoutError:
             pass
-        if not _active or len(_personas) < 2:
-            break
+        
+        # Final check before performing chatter
+        if not _active or len(_personas) < 2 or not state.DEMO_ACTIVE:
+            continue
 
         keys = list(_personas.keys())
         sender_key = random.choice(keys)
@@ -411,7 +442,7 @@ async def group_message(body: GroupChatRequest):
         "role": "user",
         "sender": "User",
         "content": body.message,
-        "to": "all",
+        "to": body.to,
     })
     _record_pair_history(_history[-1])
     if _chatter_wake:
