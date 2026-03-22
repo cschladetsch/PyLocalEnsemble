@@ -12,6 +12,73 @@ import state
 router = APIRouter()
 
 
+# ── Group scene helpers ────────────────────────────────────────────────────────
+
+# Matches user messages that are meta-instructions rather than physical actions
+_META_INSTRUCTION_RE = re.compile(
+    r'\b(?:show|generate|make|draw|render|create|display|get)\b.{0,40}\b(?:image|picture|photo|shot|scene|frame)\b|'
+    r'\b(?:group shot|all personas|everyone together|one (?:image|frame)|'
+    r"that is not|doesn't look|does not look|all of them|topless in one)\b",
+    re.I,
+)
+
+# Ordered keyword → setting label; first match wins
+_SETTING_HINTS = [
+    (r'\bforest\b|\bwood(?:s|land)\b|\btrees?\b|\bclearing\b',      "forest clearing"),
+    (r'\bvictorian\b|\bparlou?r\b|\bmanor\b|\bdrawing room\b|\bfireplace\b', "victorian parlor"),
+    (r'\bdungeon\b|\bchains?\b|\bstone wall\b',                      "dungeon"),
+    (r'\bsci.?fi\b|\blab(?:oratory)?\b|\bholographic\b',             "dark laboratory"),
+    (r'\bbedroom\b|\bbed\b|\bsheets?\b',                             "bedroom"),
+    (r'\bgarden\b|\bmeadow\b|\boutdoor',                             "outdoor garden"),
+    (r'\bbeach\b|\bocean\b|\bshore\b',                               "beach"),
+    (r'\btavern\b|\binn\b|\bbarroom\b',                              "tavern"),
+    (r'\btemple\b|\bshrine\b|\bsacred\b|\begyptian\b',               "ancient temple"),
+    (r'\bcathedral\b|\bchurch\b|\bchapel\b',                         "cathedral"),
+]
+
+
+def _extract_setting_hint(personas: dict) -> str:
+    """Infer dominant scene setting from persona system prompts and appearance strings."""
+    combined = " ".join(
+        p.get("system_prompt", "") + " " + p.get("appearance", "")
+        for p in personas.values()
+    )
+    for pattern, setting in _SETTING_HINTS:
+        if re.search(pattern, combined, re.I):
+            return setting
+    return ""
+
+
+def _synthesize_group_scene(history_entries: list, personas: dict) -> str:
+    """Convert purple prose group history into a concrete physical scene description."""
+    recent = [
+        e for e in history_entries
+        if not e.get("_internal") and e.get("content")
+    ][-6:]
+    if not recent:
+        return ""
+    persona_list = ", ".join(p.get("name", k) for k, p in personas.items())
+    text = "\n".join(f"{e['sender']}: {e['content']}" for e in recent)
+    try:
+        desc = llm.llm_chat([
+            {"role": "system", "content": (
+                "Convert roleplay dialogue into a concrete physical scene description for image generation. "
+                "Describe body positions, poses, who is touching whom, and the physical setting. "
+                "No metaphors or purple prose. Plain visual language. 1-2 sentences only."
+            )},
+            {"role": "user", "content": (
+                f"People present: {persona_list}\n\n"
+                f"Dialogue:\n{text}\n\n"
+                "Describe ONLY what is physically happening: poses, positions, contact, and setting location."
+            )},
+        ]).strip()
+        print(f"[image] synthesized group scene: {desc!r}")
+        return desc
+    except Exception as e:
+        print(f"[image] scene synthesis failed: {e}")
+        return ""
+
+
 _GROUP_SCENE_SKIP = {
     "candlelight", "moonlight", "firelight", "soft lighting", "dark atmosphere",
     "egyptian temple", "dark wood panelling", "ornate fireplace",
@@ -165,6 +232,28 @@ async def image_from_history(body: ImageRequest):
 
             state.last_appearance = combined_appearance
 
+            # For group scenes: synthesize a concrete physical scene description
+            # from the purple prose history, so the extractor has something to work with
+            scene_desc = ""
+            if state.GROUP_ACTIVE and len(relevant_personas) > 1:
+                try:
+                    import routes.group as _grp_mod
+                    scene_desc = _synthesize_group_scene(_grp_mod._history, relevant_personas)
+                except Exception as _se:
+                    print(f"[image] scene synthesis error: {_se}")
+
+            # If the user said something meta ("show all personas", "that is not a group shot"),
+            # replace it with the synthesized scene so ACTION/POSE extraction is grounded
+            if scene_desc and _META_INSTRUCTION_RE.search(last_user):
+                effective_user = scene_desc
+                print(f"[image] meta-instruction detected — using synthesized scene as action context")
+            else:
+                effective_user = last_user
+
+            # Prepend scene synthesis to messages so the LLM has concrete visual context
+            if scene_desc:
+                messages = f"CURRENT SCENE: {scene_desc}\n\n" + messages
+
             used_pre = bool(state._pre_sd_prompt and not body.extra)
             if used_pre:
                 print("[image] using pre-extracted SD prompt (skipping LLM call)")
@@ -175,17 +264,21 @@ async def image_from_history(body: ImageRequest):
                 state._pre_sd_prompt = None
             else:
                 print("[image] extracting SD prompt via LLM...")
-                # If multiple personas are involved, give the LLM a mandatory instruction for all characters
                 _persona_context = state.SYSTEM_PROMPT
                 if len(relevant_personas) > 1:
-                    _persona_context += f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. " \
-                                        "You MUST output tags that describe an interaction or pose involving EVERY persona listed. " \
-                                        "Ensure they are distinct individuals and never merged into one person. " \
-                                        "Do not omit any character from the scene description."
+                    setting_hint = _extract_setting_hint(relevant_personas)
+                    _persona_context += (
+                        f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. "
+                        "You MUST output tags that describe an interaction or pose involving EVERY persona listed. "
+                        "Ensure they are distinct individuals and never merged into one person. "
+                        "Do not omit any character from the scene description."
+                    )
+                    if setting_hint:
+                        _persona_context += f"\n\nSCENE SETTING: {setting_hint} — use this for the SETTING field."
 
                 base_prompt, new_nudity = image.extract_sd_prompt(
                     messages, appearance=combined_appearance,
-                    last_user_msg=last_user, persona=_persona_context,
+                    last_user_msg=effective_user, persona=_persona_context,
                     nudity_floor=state._nudity_state,
                     interaction_priority=(len(relevant_personas) > 1),
                     names=_names,
