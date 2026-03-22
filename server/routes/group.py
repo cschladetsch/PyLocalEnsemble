@@ -148,6 +148,17 @@ def _load_growth():
         print(f"[group] failed to load growth state: {e}")
 
 
+def reset_persona_growth(persona_key: str) -> None:
+    """Remove all pair memos and mood for one persona and persist."""
+    pk = persona_key.lower()
+    for k in list(_pair_memos.keys()):
+        if pk in k.split("|"):
+            del _pair_memos[k]
+    _persona_moods.pop(pk, None)
+    _save_growth()
+    print(f"[group] growth data reset for: {pk}")
+
+
 def _compress_pair(key: str):
     """Summarise old pair history → update relationship memo + both persona moods."""
     pair_hist = _pair_histories.get(key, [])

@@ -1466,3 +1466,18 @@ async function clearHistory() {
   _lastChunks = [];
   document.getElementById('resay-btn').disabled = true;
 }
+
+async function resetPersona() {
+  const sel = document.getElementById('persona-select');
+  const name = sel ? sel.value : _activePersona;
+  if (!confirm(`Reset ${name}?\n\nThis clears chat history and relationship memory.`)) return;
+  await fetch(`/persona/${encodeURIComponent(name)}/reset`, { method: 'DELETE' });
+  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>${entranceLine()}</div>`;
+  document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
+  document.getElementById('pd-wrap').style.display = 'none';
+  document.getElementById('pd').value = '';
+  lastReplyText = '';
+  _stopTts();
+  _lastChunks = [];
+  document.getElementById('resay-btn').disabled = true;
+}

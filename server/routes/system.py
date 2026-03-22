@@ -40,6 +40,15 @@ async def clear_history():
     return {"status": "cleared"}
 
 
+@router.delete("/persona/{name}/reset")
+async def reset_persona(name: str):
+    """Clear chat history and group growth data (memos + mood) for a persona."""
+    from routes import group as _grp
+    llm.clear_history()
+    _grp.reset_persona_growth(name)
+    return JSONResponse({"status": "reset", "persona": name})
+
+
 @router.delete("/image/{filename}")
 async def delete_image(filename: str):
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
