@@ -20,8 +20,12 @@ _listeners: list = []  # asyncio.Queue per SSE subscriber
 _chatter_task: asyncio.Task | None = None
 _chatter_wake: asyncio.Event | None = None
 _last_chatter_sender: str | None = None
+_pair_memos:   dict = {}  # pair_key → relationship summary string
+_persona_moods: dict = {}  # persona_key → current emotional disposition string
+_compressing:  set  = set()  # pair_keys currently being compressed (re-entry guard)
 
-_DATA_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_DATA_DIR    = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_GROWTH_FILE = os.path.join(_DATA_DIR, "group_growth.json")
 
 
 # ── Per-pair history helpers ───────────────────────────────────────────────────
@@ -53,9 +57,18 @@ def _save_pair(key: str):
 
 
 def _add_to_pair(key: str, entry: dict):
+    import threading
     if key not in _pair_histories:
         _pair_histories[key] = []
     _pair_histories[key].append(entry)
+    if len(_pair_histories[key]) > 20 and key not in _compressing:
+        _compressing.add(key)
+        def _do():
+            try:
+                _compress_pair(key)
+            finally:
+                _compressing.discard(key)
+        threading.Thread(target=_do, daemon=True).start()
 
 
 def _resolve_persona_key(name_or_key: str | None) -> str | None:
@@ -112,6 +125,102 @@ def _broadcast(event: dict):
     for q in dead:
         try: _listeners.remove(q)
         except ValueError: pass
+
+
+# ── Growth: relationship memos + persona moods ─────────────────────────────────
+
+def _save_growth():
+    try:
+        with open(_GROWTH_FILE, "w") as f:
+            json.dump({"memos": _pair_memos, "moods": _persona_moods}, f, indent=2)
+    except Exception as e:
+        print(f"[group] failed to save growth state: {e}")
+
+
+def _load_growth():
+    try:
+        if os.path.exists(_GROWTH_FILE):
+            with open(_GROWTH_FILE) as f:
+                data = json.load(f)
+            _pair_memos.update(data.get("memos", {}))
+            _persona_moods.update(data.get("moods", {}))
+    except Exception as e:
+        print(f"[group] failed to load growth state: {e}")
+
+
+def _compress_pair(key: str):
+    """Summarise old pair history → update relationship memo + both persona moods."""
+    pair_hist = _pair_histories.get(key, [])
+    if len(pair_hist) <= 16:
+        return
+
+    old = pair_hist[:-8]
+    _pair_histories[key] = pair_hist[-8:]
+
+    # Resolve the two persona names from the sorted key parts
+    parts = key.split("|")
+    def _name_for(part: str) -> tuple[str, str]:
+        """Return (persona_key, display_name) matching this key part."""
+        for pk, p in _personas.items():
+            if pk.lower() == part:
+                return pk, p.get("name", pk)
+        return part, part.title()
+
+    key_a, name_a = _name_for(parts[0])
+    key_b, name_b = _name_for(parts[1])
+
+    text = "\n".join(
+        f"{e['sender']}: {e['content']}"
+        for e in old if e.get("content") and e.get("role") != "user"
+    )
+    if not text.strip():
+        return
+
+    prompt = (
+        f"Track the evolving relationship between {name_a} and {name_b} "
+        f"based on the exchange below.\n\n"
+        f"Reply in EXACTLY this format (no extra lines):\n"
+        f"RELATIONSHIP: [2 sentences — what happened, emotional tone, dynamic shifts]\n"
+        f"{name_a.upper()}_MOOD: [1 sentence — {name_a}'s current disposition and desires]\n"
+        f"{name_b.upper()}_MOOD: [1 sentence — {name_b}'s current disposition and desires]\n\n"
+        f"Exchange:\n{text}"
+    )
+    try:
+        raw = llm.llm_chat([
+            {"role": "system", "content": (
+                "You are a relationship tracker for fictional characters. "
+                "Be specific, emotionally precise, and concise. No purple prose."
+            )},
+            {"role": "user", "content": prompt},
+        ]).strip()
+
+        rel_match   = re.search(r'RELATIONSHIP:\s*(.+?)(?=\n[A-Z_]+:|$)', raw, re.DOTALL | re.IGNORECASE)
+        mood_a_pat  = re.escape(name_a.upper()) + r'_MOOD:\s*(.+?)(?=\n[A-Z_]+:|$)'
+        mood_b_pat  = re.escape(name_b.upper()) + r'_MOOD:\s*(.+?)(?=\n[A-Z_]+:|$)'
+        mood_a_match = re.search(mood_a_pat, raw, re.DOTALL | re.IGNORECASE)
+        mood_b_match = re.search(mood_b_pat, raw, re.DOTALL | re.IGNORECASE)
+
+        if rel_match:
+            new_memo = rel_match.group(1).strip()
+            existing = _pair_memos.get(key, "")
+            _pair_memos[key] = (existing + " " + new_memo).strip() if existing else new_memo
+            # Cap memo length to avoid bloat
+            if len(_pair_memos[key]) > 600:
+                _pair_memos[key] = _pair_memos[key][-600:]
+                cut = _pair_memos[key].find(". ")
+                if cut != -1:
+                    _pair_memos[key] = _pair_memos[key][cut + 2:]
+
+        if mood_a_match and key_a in _personas:
+            _persona_moods[key_a] = mood_a_match.group(1).strip()
+        if mood_b_match and key_b in _personas:
+            _persona_moods[key_b] = mood_b_match.group(1).strip()
+
+        print(f"[group] compressed pair {key}: memo updated, moods refreshed")
+        _save_growth()
+        _save_pair(key)
+    except Exception as e:
+        print(f"[group] pair compression failed for {key}: {e}")
 
 
 # ── Repetition-suppression helpers ────────────────────────────────────────────
@@ -182,6 +291,19 @@ def _build_response_messages(persona_key: str) -> list[dict]:
             "4. Use correct pronouns for others based on their listed gender."
         )
 
+    # Inject relationship memos and current mood so personas react from lived history
+    for other_key in _personas:
+        if other_key == persona_key:
+            continue
+        pk   = _pair_key(persona_key, other_key)
+        memo = _pair_memos.get(pk, "")
+        if memo:
+            other_name = _personas[other_key].get("name", other_key)
+            sys_prompt += f"\n\nYour history with {other_name}: {memo}"
+    mood = _persona_moods.get(persona_key, "")
+    if mood:
+        sys_prompt += f"\n\nYour current emotional state: {mood}"
+
     history_slice = (_history or [])[-20:]
     phrases = _overused_phrases(history_slice)
     if phrases:
@@ -245,6 +367,26 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
             "4. Let the conversation feel flirtatious and intimate rather than neutral.\n"
             "5. Use correct pronouns for others based on their listed gender."
         )
+
+    # Inject relationship memo(s) and current mood
+    if target_key != "all":
+        pk   = _pair_key(sender_key, target_key)
+        memo = _pair_memos.get(pk, "")
+        if memo:
+            tname = _personas[target_key].get("name", target_key)
+            sys_prompt += f"\n\nYour history with {tname}: {memo}"
+    else:
+        for other_key in _personas:
+            if other_key == sender_key:
+                continue
+            pk   = _pair_key(sender_key, other_key)
+            memo = _pair_memos.get(pk, "")
+            if memo:
+                other_name = _personas[other_key].get("name", other_key)
+                sys_prompt += f"\n\nYour history with {other_name}: {memo}"
+    mood = _persona_moods.get(sender_key, "")
+    if mood:
+        sys_prompt += f"\n\nYour current emotional state: {mood}"
 
     # Use pair-specific history for targeted chatter to avoid cross-persona phrase bleed.
     # For "all" target, fall back to recent flat history for group context.
@@ -409,6 +551,7 @@ class StartRequest(BaseModel):
 @router.post("/group/start")
 async def group_start(body: StartRequest):
     global _active, _personas, _history, _pair_histories, _chatter_task, _last_chatter_sender
+    global _pair_memos, _persona_moods
     _active = True
     _last_chatter_sender = None
     _personas = {k: config.PERSONAS[k] for k in body.personas if k in config.PERSONAS}
@@ -424,6 +567,11 @@ async def group_start(body: StartRequest):
             pk = _pair_key(k1, k2)
             _pair_histories[pk] = _load_pair(pk)
 
+    # Load relationship memos and persona moods from previous sessions
+    _pair_memos   = {}
+    _persona_moods = {}
+    _load_growth()
+
     if _chatter_task and not _chatter_task.done():
         _chatter_task.cancel()
     if len(_personas) >= 2:
@@ -438,9 +586,10 @@ async def group_start(body: StartRequest):
 async def group_stop():
     global _active, _personas, _pair_histories, _chatter_task
     _active   = False
-    # Save all pair histories to disk before clearing
+    # Save all pair histories and growth state to disk before clearing
     for key in list(_pair_histories.keys()):
         _save_pair(key)
+    _save_growth()
     _pair_histories = {}
     _personas = {}
     state.GROUP_ACTIVE   = False
