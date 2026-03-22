@@ -123,6 +123,9 @@ def load_config() -> dict:
             merged = {**_DEFAULT_CONFIG, **data}
             for key in ("image", "tts", "llama_server", "memory", "llm_params", "demo"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
+            # List configs extend defaults rather than replace them.
+            for key in ("banned_phrases",):
+                merged[key] = list(_DEFAULT_CONFIG.get(key, [])) + list(data.get(key, []))
             
             # Resolve paths
             merged["model_path"] = resolve_path(merged.get("model_path", ""))
