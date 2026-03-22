@@ -96,7 +96,7 @@ Key settings:
 | `memory.max_history` | `16` | Compress history after this many messages |
 | `memory.keep_recent` | `8` | Messages kept after compression |
 | `memory.max_chars` | `1500` | Max chars in rolling memory summary |
-| `demo.user_name` | `"Christian"` | Name shown for the auto-generated user side in demo mode |
+| `demo.user_name` | `"User"` | Name shown for the auto-generated user side in demo mode |
 | `demo.user_voice` | `"am_adam"` | TTS voice for the user side (`am_adam`, `am_michael`, `bm_george`, `bm_lewis`) |
 | `demo.user_speed` | `0.88` | TTS speed for the user voice |
 | `demo.user_pitch` | `0.88` | Pitch multiplier for the user voice (< 1.0 = lower/deeper) |

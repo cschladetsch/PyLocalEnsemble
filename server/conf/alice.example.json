@@ -48,7 +48,7 @@
 
     "demo": {
         "_comment_voice": "Male voices: am_adam, am_michael, bm_george, bm_lewis",
-        "user_name":    "Christian",
+        "user_name":    "User",
         "user_voice":   "am_adam",
         "user_speed":   0.88,
         "user_pitch":   0.88,
@@ -75,6 +75,14 @@
         "presence_penalty": 0.8,
         "frequency_penalty": 0.5
     },
+
+    "_comment_banned": "Words/phrases injected as a permanent NEVER-USE list into every system prompt. Add model clichés here.",
+    "banned_phrases": [
+        "moonlight", "moonlit", "starry skies", "under the stars", "under these stars",
+        "beneath the stars", "star-filled", "ancient and primal",
+        "whispers of", "shadows dance", "the air crackles",
+        "primal hunger", "smoldering gaze"
+    ],
 
     "_comment_sd": "To use a custom SD checkpoint, set sd_checkpoint_url to a direct download link.",
     "_comment_civitai": "CivitAI: go to a model page, click Download, copy the link. Append ?token=YOUR_API_KEY for gated models.",

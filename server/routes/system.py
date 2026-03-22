@@ -69,7 +69,7 @@ async def info():
         "stt_silence":   config.CFG.get("stt_silence_seconds", 3),
         "history_msgs":  n_msgs,
         "history_max":   max_hist,
-        "demo": {**demo_cfg, "user_name": demo_cfg.get("user_name", "Christian")},
+        "demo": {**demo_cfg, "user_name": demo_cfg.get("user_name", "User")},
     })
 
 
@@ -146,7 +146,7 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
     demo_cfg     = config.CFG.get("demo", config._DEFAULT_CONFIG["demo"])
     ctx_msgs     = demo_cfg.get("context_messages", 12)
     recent       = llm.history[-ctx_msgs:] if llm.history else []
-    user_name    = demo_cfg.get("user_name", "Christian")
+    user_name    = demo_cfg.get("user_name", "User")
     persona_name = config.NAME
     # Active persona description — live state takes precedence over config default
     active_key  = state._demo_user_persona_name or demo_cfg.get("user_persona", "default")

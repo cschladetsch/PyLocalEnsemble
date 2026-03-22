@@ -63,7 +63,7 @@ _DEFAULT_CONFIG = {
         "adetailer_face": True,   # run ADetailer face pass for sharper consistent faces
     },
     "demo": {
-        "user_name":    "Christian",
+        "user_name":    "User",
         "user_voice":   "am_adam",
         "user_speed":   0.88,
         "user_pitch":   0.88,
@@ -89,6 +89,15 @@ _DEFAULT_CONFIG = {
         "presence_penalty":  0.8,
         "frequency_penalty": 0.5,
     },
+    # Phrases/words the LLM must never use, injected into every system prompt.
+    # Add model-level clichés here so they're banned from turn 1 rather than
+    # waiting for the dynamic detector to catch them after 2-3 occurrences.
+    "banned_phrases": [
+        "moonlight", "moonlit", "starry skies", "under the stars", "under these stars",
+        "beneath the stars", "star-filled", "ancient and primal",
+        "whispers of", "shadows dance", "the air crackles",
+        "primal hunger", "smoldering gaze",
+    ],
 }
 
 
@@ -163,6 +172,19 @@ def load_personas(cfg: dict) -> dict:
         except Exception as e:
             print(f"WARNING: could not load personas.json: {e}")
     return defaults
+
+
+def banned_phrases_note(cfg: dict = None) -> str:
+    """Return a system-prompt addendum listing permanently banned words/phrases.
+
+    Pass a persona-specific cfg dict to use per-persona overrides; omits the
+    note entirely when the list is empty so the system prompt stays clean.
+    """
+    phrases = (cfg or CFG).get("banned_phrases", [])
+    if not phrases:
+        return ""
+    joined = ", ".join(f'"{p}"' for p in phrases)
+    return f"\n\nNEVER use these words or phrases under any circumstances: {joined}."
 
 
 CFG      = load_config()

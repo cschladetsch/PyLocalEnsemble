@@ -751,7 +751,7 @@ function _updateDemoBtn() {
   }
 }
 
-let DEMO_USER_NAME  = 'Christian';
+let DEMO_USER_NAME  = 'User';
 let DEMO_USER_VOICE = 'am_adam';
 let DEMO_USER_SPEED = 0.88;
 let DEMO_USER_PITCH = 0.88;

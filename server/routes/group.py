@@ -356,6 +356,8 @@ def _build_response_messages(persona_key: str) -> list[dict]:
     if mood:
         sys_prompt += f"\n\nYour current emotional state: {mood}"
 
+    sys_prompt += config.banned_phrases_note()
+
     history_slice = (_history or [])[-20:]
     phrases = _overused_phrases(history_slice)
     if phrases:
@@ -439,6 +441,8 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
     mood = _persona_moods.get(sender_key, "")
     if mood:
         sys_prompt += f"\n\nYour current emotional state: {mood}"
+
+    sys_prompt += config.banned_phrases_note()
 
     # Use pair-specific history for targeted chatter to avoid cross-persona phrase bleed.
     # For "all" target, fall back to recent flat history for group context.
