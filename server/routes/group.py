@@ -1,5 +1,6 @@
 """Group chat — multiple personas sharing a conversation, with async inter-persona chatter."""
 import asyncio, json, os, random, re
+from collections import Counter
 import queue as _queue
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -18,6 +19,7 @@ _pair_histories: dict = {}  # pair_key → list of entries (per persona-pair cha
 _listeners: list = []  # asyncio.Queue per SSE subscriber
 _chatter_task: asyncio.Task | None = None
 _chatter_wake: asyncio.Event | None = None
+_last_chatter_sender: str | None = None
 
 _DATA_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -112,6 +114,50 @@ def _broadcast(event: dict):
         except ValueError: pass
 
 
+# ── Repetition-suppression helpers ────────────────────────────────────────────
+
+def _overused_phrases(entries: list, top_n: int = 8, ngram: int = 4) -> list[str]:
+    """Return n-grams that appear 2+ times across recent history entries."""
+    texts = [e["content"] for e in entries if e.get("content")]
+    counts: Counter = Counter()
+    for text in texts:
+        words = re.findall(r"[a-z']+", text.lower())
+        for i in range(len(words) - ngram + 1):
+            counts[" ".join(words[i:i + ngram])] += 1
+    return [p for p, n in counts.most_common(top_n) if n >= 2]
+
+
+def _dedupe_entries(entries: list, max_consecutive: int = 2) -> list:
+    """Drop excess consecutive same-sender turns and near-duplicate content."""
+    out: list = []
+    streak_sender: str | None = None
+    streak_count = 0
+    for entry in entries:
+        role   = entry.get("role", "")
+        sender = entry.get("sender", "")
+        if role == "user":
+            streak_sender = None
+            streak_count  = 0
+            out.append(entry)
+            continue
+        if sender == streak_sender:
+            streak_count += 1
+        else:
+            streak_sender = sender
+            streak_count  = 1
+        if streak_count > max_consecutive:
+            continue
+        # Jaccard similarity vs the last entry from the same persona — skip near-dupes
+        prev = next((e for e in reversed(out) if e.get("sender") == sender), None)
+        if prev:
+            a = set(re.findall(r"[a-z]+", prev.get("content", "").lower()))
+            b = set(re.findall(r"[a-z]+", entry.get("content", "").lower()))
+            if a and b and len(a & b) / len(a | b) > 0.65:
+                continue
+        out.append(entry)
+    return out
+
+
 # ── Message history helpers ────────────────────────────────────────────────────
 
 def _build_response_messages(persona_key: str) -> list[dict]:
@@ -136,8 +182,14 @@ def _build_response_messages(persona_key: str) -> list[dict]:
             "4. Use correct pronouns for others based on their listed gender."
         )
 
+    history_slice = (_history or [])[-20:]
+    phrases = _overused_phrases(history_slice)
+    if phrases:
+        sys_prompt += f"\n\nAVOID these stale phrases (already overused in this session): {'; '.join(phrases[:6])}."
+    deduped = _dedupe_entries(history_slice)
+
     raw: list[tuple[str, str]] = []
-    for entry in (_history or [])[-20:]:
+    for entry in deduped:
         if entry.get("_internal"):
             continue
         if entry["role"] == "persona":
@@ -198,9 +250,14 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
     # For "all" target, fall back to recent flat history for group context.
     if target_key != "all":
         pk = _pair_key(sender_key, target_key)
-        source = _pair_histories.get(pk, [])[-12:]
+        raw_source = _pair_histories.get(pk, [])[-12:]
     else:
-        source = (_history or [])[-12:]
+        raw_source = (_history or [])[-12:]
+
+    phrases = _overused_phrases(raw_source)
+    if phrases:
+        sys_prompt += f"\n\nAVOID these stale phrases (already overused in this session): {'; '.join(phrases[:6])}."
+    source = _dedupe_entries(raw_source)
 
     raw: list[tuple[str, str]] = []
     for entry in source:
@@ -296,8 +353,13 @@ async def _chatter_loop():
         if not _active or len(_personas) < 2 or not state.DEMO_ACTIVE:
             continue
 
+        global _last_chatter_sender
         keys = list(_personas.keys())
         sender_key = random.choice(keys)
+        # Never let the same persona speak twice in a row — re-roll if needed
+        if sender_key == _last_chatter_sender and len(keys) > 1:
+            sender_key = random.choice([k for k in keys if k != _last_chatter_sender])
+        _last_chatter_sender = sender_key
         sender_name = _personas[sender_key].get("name", sender_key)
         other_keys = [k for k in keys if k != sender_key]
         # 40% chance: address a specific persona; 60%: address the whole group
@@ -346,8 +408,9 @@ class StartRequest(BaseModel):
 
 @router.post("/group/start")
 async def group_start(body: StartRequest):
-    global _active, _personas, _history, _pair_histories, _chatter_task
+    global _active, _personas, _history, _pair_histories, _chatter_task, _last_chatter_sender
     _active = True
+    _last_chatter_sender = None
     _personas = {k: config.PERSONAS[k] for k in body.personas if k in config.PERSONAS}
     _history = []
     state.GROUP_ACTIVE = True
