@@ -12,8 +12,8 @@
   <h1>ALICE</h1>
   <button class="cb stop-btn" id="stop-btn" onclick="interrupt('user')" title="Stop (Esc)">Stop</button>
   <div style="display:flex;gap:.6rem;align-items:center">
-    <select id="model-select" class="cb" onchange="switchModel(this)" style="cursor:pointer;max-width:16rem"></select>
-    <select id="persona-select" class="cb" onchange="switchPersona(this.value)" style="cursor:pointer"></select>
+    <select id="model-select" class="cb" onchange="switchModel(this)" title="Switch LLM model" style="cursor:pointer;max-width:16rem"></select>
+    <select id="persona-select" class="cb" onchange="switchPersona(this.value)" title="Switch active persona" style="cursor:pointer"></select>
     <select id="demo-persona-select" class="cb" onchange="switchDemoPersona(this.value)" title="Your character in demo mode" style="cursor:pointer"></select>
     <button class="cb" id="demo-btn" onclick="toggleDemo()" title="Auto-pilot: Alice generates and responds to her own prompts">Demo</button>
     <button class="cb" id="group-btn" onclick="toggleGroupMode()" title="Group chat: multiple personas in one room">Group</button>
@@ -35,11 +35,11 @@
     <div class="ir">
       <div id="group-to-wrap" style="display:none;align-items:center;gap:.3rem">
         <span style="font-size:.65rem;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;white-space:nowrap">To:</span>
-        <select id="group-to" class="cb" style="cursor:pointer"></select>
+        <select id="group-to" class="cb" title="Address a specific persona or the whole group" style="cursor:pointer"></select>
       </div>
       <input type="text" id="inp" placeholder="Say something... or /image" onkeydown="if(event.key==='Enter')send()">
       <button id="mic-btn" onclick="toggleMic()" title="Click to record, click again to stop">Mic</button><select id="mic-select" title="Audio input device"></select>
-      <button id="ibtn" onclick="doImage()">Image</button>
+      <button id="ibtn" onclick="doImage()" title="Generate an image from the current conversation">Image</button>
     </div>
   </div>
   <div class="ip">
@@ -66,7 +66,7 @@
           <input type="range" id="cfg" min="1" max="20" value="7" step="0.5" oninput="document.getElementById('cfg-val').textContent=this.value">
         </label>
       </div>
-      <button onclick="regenFromPrompt()">Regenerate</button>
+      <button onclick="regenFromPrompt()" title="Regenerate image using the edited prompt below">Regenerate</button>
       <details id="neg-details" style="margin-top:.4rem">
         <summary style="cursor:pointer;font-size:.75rem;color:#888">Negative prompt</summary>
         <div id="neg-prompt" style="font-size:.7rem;color:#777;margin-top:.3rem;word-break:break-word"></div>
