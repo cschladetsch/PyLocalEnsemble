@@ -237,31 +237,55 @@ _STOP_WORDS = frozenset({
 })
 
 
-def _overused_phrases(entries: list, top_n: int = 8, ngram: int = 4) -> list[str]:
-    """Return phrases (n-grams AND high-frequency single content words) overused across recent history."""
+def _overused_phrases(entries: list, top_n: int = 10) -> list[str]:
+    """Return overused phrases (n-grams of size 2-4) and repetitive content words."""
     texts = [e["content"] for e in entries if e.get("content")]
     if not texts:
         return []
-    ngram_counts: Counter = Counter()
+
+    # Thresholds: shorter n-grams need a higher repeat count to avoid false positives
+    _THRESHOLDS = {4: 2, 3: 2, 2: 3}
+
+    ngram_counts: dict[int, Counter] = {n: Counter() for n in _THRESHOLDS}
     word_counts:  Counter = Counter()
+
     for text in texts:
         words = re.findall(r"[a-z']+", text.lower())
-        # n-gram counts
-        for i in range(len(words) - ngram + 1):
-            ngram_counts[" ".join(words[i:i + ngram])] += 1
-        # single content-word counts (skip stop words and very short words)
+        for n, counter in ngram_counts.items():
+            for i in range(len(words) - n + 1):
+                counter[" ".join(words[i:i + n])] += 1
         for w in words:
             if len(w) >= 5 and w not in _STOP_WORDS:
                 word_counts[w] += 1
-    overused_ngrams = [p for p, n in ngram_counts.most_common(top_n) if n >= 2]
-    # Words appearing 3+ times across multiple turns are thematic clichés — flag them
-    overused_words  = [w for w, n in word_counts.most_common(top_n) if n >= 3]
-    # Deduplicate: skip words already covered by an n-gram entry
-    combined = list(overused_ngrams)
-    for w in overused_words:
-        if not any(w in phrase for phrase in combined):
+
+    # Collect overused n-grams, longest first so sub-phrases aren't double-reported
+    seen_tokens: set[str] = set()
+    combined: list[str] = []
+    for n in (4, 3, 2):
+        thresh = _THRESHOLDS[n]
+        for phrase, count in ngram_counts[n].most_common(top_n):
+            if count < thresh:
+                break
+            # Skip if every word in this phrase is already covered by a longer phrase
+            phrase_words = set(phrase.split())
+            if phrase_words <= seen_tokens:
+                continue
+            combined.append(phrase)
+            seen_tokens.update(phrase_words)
+            if len(combined) >= top_n:
+                break
+        if len(combined) >= top_n:
+            break
+
+    # Add high-frequency single content words not already covered
+    for w, count in word_counts.most_common(top_n):
+        if len(combined) >= top_n:
+            break
+        if count >= 3 and w not in seen_tokens:
             combined.append(w)
-    return combined[:top_n]
+            seen_tokens.add(w)
+
+    return combined
 
 
 def _dedupe_entries(entries: list, max_consecutive: int = 2) -> list:
