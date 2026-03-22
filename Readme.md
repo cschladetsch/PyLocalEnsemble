@@ -185,6 +185,76 @@ Add your own in `personas.json` (created from `conf/personas.example.json` on fi
 
 Per-persona options: `system_prompt`, `appearance`, `negative_prompt` (appended to base), `tts` (`voice`, `speed`, `effects`), `image` (`suffix`, `steps`, `cfg_scale`, …), `sd_model`, `name`.
 
+To remove a persona from the UI (including the Group Chat picker), add `"disabled": true` to its entry in `personas.json`:
+
+```json
+{
+    "Alice": { "disabled": true }
+}
+```
+
+This also works to suppress the built-in default Alice persona.
+
+---
+
+## Group Chat
+
+Multiple personas can share a single conversation, respond to each other, and remember their relationships over time.
+
+### Starting a group session
+
+From the UI, select **Group** and choose which personas to include. All selected personas join the same conversation thread. The user can send messages at any time; between user turns the personas continue chatting with each other automatically via a background chatter loop.
+
+From the API:
+
+```
+POST /group/start   {"personas": ["Alice", "Morrigan", "Isabelle"]}
+POST /group/chat    {"message": "Tell me what you all think of each other."}
+GET  /group/history
+POST /group/stop
+```
+
+### How the chatter loop works
+
+After each user message (and after each AI turn), an async `_chatter_loop` task selects the next speaker and generates a reply. Speaker selection:
+
+1. A persona is chosen at random from the active group.
+2. The consecutive-sender guard ensures the same persona never speaks twice in a row — if the random pick matches the last speaker, a different one is selected.
+3. The selected persona sees only its own per-pair conversation history with each other persona, so context stays focused and doesn't bloat.
+
+### Repetition suppression
+
+The group system actively fights repetition at three levels:
+
+| Mechanism | What it does |
+|-----------|-------------|
+| **Consecutive-sender guard** | Re-rolls speaker selection if the same persona would speak twice in a row |
+| **Phrase avoidance** | Extracts 4-grams appearing 2+ times AND single content words (e.g. "moonlight", "whispers") appearing 3+ times; injects an explicit `AVOID these stale phrases:` list into the system prompt |
+| **Near-duplicate deduplication** | Before building the LLM context, `_dedupe_entries` strips any turn with Jaccard similarity > 0.65 against a recent turn, and caps same-sender streaks at 2 consecutive turns |
+
+### Persona growth
+
+Each persona pair maintains a persistent **relationship memo** and **emotional state** that survive server restarts.
+
+- After every 20 exchanges between a pair, a background LLM call (`_compress_pair`) generates a structured update:
+  - `RELATIONSHIP:` — 2–3 sentence summary of how the pair's dynamic has evolved
+  - `<NAME>_MOOD:` — current emotional state for each persona
+- These are saved to `group_growth.json` and injected into each persona's system prompt on subsequent turns:
+  ```
+  Your history with Morrigan: They share a wary respect...
+  Your current emotional state: guarded but intrigued
+  ```
+- Growth data persists across sessions. The relationship continues deepening even after restarting the server.
+
+### Group scene image generation
+
+When `/image` is called during a group session, the image pipeline handles multi-persona scenes specially:
+
+1. **Scene synthesis** — a dedicated LLM call converts the purple-prose group history into a concrete physical description ("Two women stand facing each other in a moonlit forest clearing…"). This gives the SD prompt extractor grounded visual content to work from.
+2. **Meta-instruction detection** — if the user's last message was a generation command rather than a physical action ("show me a group shot", "generate an image of all of them"), the synthesised scene is used as the action context instead of the literal user message.
+3. **Setting inference** — keyword patterns in each persona's system prompt and appearance tags are matched against known settings (forest, Victorian parlor, dungeon, etc.) and injected as a `SCENE SETTING` hint for the SD prompt extractor.
+4. **Per-persona appearance tags** — each persona in the scene gets a weighted appearance block `(1woman, <appearance tags>:1.2)` so Stable Diffusion renders them as distinct individuals.
+
 ---
 
 ## Conversation Memory
@@ -296,6 +366,14 @@ Prefix a token with `no ` to push it to the negative prompt. All other tokens ar
 
 `/auto-image` toggles automatic image generation on/off for the session (same as `--auto-image` at startup). The input placeholder briefly shows `Auto-image ON` or `Auto-image OFF` as confirmation.
 
+### Group chat
+
+Click **Group** in the header to open the group session panel. Select two or more personas and click **Start**. The personas will begin conversing with each other; type a message at any time to join in.
+
+The chatter loop runs automatically between your messages. Each persona remembers its relationship with every other — these memories accumulate in `group_growth.json` and persist across sessions.
+
+Images generated during a group session capture the full scene: all active personas are included, their appearances are kept visually distinct, and the physical setting is inferred from the conversation context.
+
 ### Demo mode
 
 **Demo** puts Alice on autopilot — the system generates both sides of the conversation, speaks them, and generates images, indefinitely.
@@ -329,6 +407,7 @@ alice/
 │
 ├── routes/                   ← FastAPI route modules
 │   ├── chat.py               ← POST /chat (SSE streaming)
+│   ├── group.py              ← POST /group/chat · /group/start · /group/stop · /group/history
 │   ├── audio.py              ← GET /voices · POST /voice · /tts · /tts/stream · /stt
 │   ├── image_api.py          ← POST /image · /reroll · /generate · /interrupt · /seed
 │   ├── persona.py            ← GET /personas · POST /persona/{name}
@@ -371,7 +450,10 @@ alice/
 │
 ├── alice.json                ← your personal config (gitignored)
 ├── personas.json             ← your personas (gitignored)
-├── history.json              ← conversation history (auto-created, gitignored)
+├── history.json              ← single-persona conversation history (auto-created, gitignored)
+├── history_<persona>.json    ← per-persona history files (auto-created, gitignored)
+├── history_group_<pair>.json ← per-pair group chat history (auto-created, gitignored)
+├── group_growth.json         ← persona relationship memos + emotional states (auto-created, gitignored)
 ├── models/                   ← GGUF models (gitignored)
 │   └── tts/                  ← Kokoro model files
 ├── llama-cpp/                ← llama-server binary (gitignored)
@@ -400,11 +482,12 @@ alice/
 graph TD
     subgraph App ["alice.py — entry point"]
         Routes["FastAPI routes — /chat /image /tts /stt …"]
+        Group["group.py — /group/chat · chatter loop · growth"]
     end
 
     subgraph Core ["Core modules"]
         Config["config.py — paths · defaults · personas"]
-        LLM["llm.py — llama-server · chat · history · memory"]
+        LLM["llm.py — llama-server · chat · history · memory · priority flag"]
         State["state.py — nudity state · seed · appearance"]
         TTS["tts.py — Kokoro load + synthesis + effects"]
         STT["stt.py — Whisper load + transcription"]
@@ -427,12 +510,21 @@ graph TD
         ForgeProc["SD Forge :7860 — Stable Diffusion"]
     end
 
+    subgraph Persist ["Persistent data"]
+        Growth["group_growth.json — memos · moods"]
+        HistGroup["history_group_*.json — per-pair histories"]
+    end
+
     Routes --> Config
     Routes --> LLM
     Routes --> State
     Routes --> TTS
     Routes --> STT
     Routes --> ImagePkg
+    Group --> LLM
+    Group --> Config
+    Group --> Growth
+    Group --> HistGroup
     ImagePkg --> LLM
     ImagePkg --> State
     ImagePkg --> Utils
@@ -456,22 +548,48 @@ sequenceDiagram
 
     U->>B: types message (or speaks via mic)
     B->>A: POST /chat (SSE)
+    Note over A: _chat_in_progress.set()
     A->>L: POST /v1/chat/completions (stream)
     L-->>A: token stream
     A-->>B: SSE token stream
     B-->>U: words appear live
+    Note over A: _chat_in_progress.clear()
 
     B->>A: POST /tts/stream
     A->>K: synthesise sentence by sentence
     K-->>B: WAV chunks (base64 SSE)
     B-->>U: speech plays as chunks arrive
 
-    A->>L: extract SD prompt from last 8 messages
+    A->>L: extract SD prompt (background — yields if chat active)
     L-->>A: structured scene fields
     A->>F: POST /sdapi/v1/txt2img (+ ADetailer if enabled)
     F-->>A: base64 image
     A-->>B: image URL
     B-->>U: scene image shown + prompt caption
+```
+
+> **LLM non-contention:** `_chat_in_progress` is a `threading.Event` held for the full lifetime of any streaming chat call. Background LLM callers (SD prompt extraction, pair compression, scene synthesis) use `llm_chat_deferred()`, which raises immediately if the flag is set rather than queuing behind the stream. This keeps chat responsive at all times.
+
+### Request flow — group chat turn
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as alice.py / group.py
+    participant L as llama-server
+
+    U->>A: POST /group/chat
+    Note over A: _chat_in_progress.set()
+    A->>L: stream reply for selected persona
+    L-->>A: token stream
+    A-->>U: SSE token stream
+    Note over A: _chat_in_progress.clear()
+    Note over A: _chatter_loop fires async
+    A->>L: stream next persona reply (consecutive-sender guard)
+    Note over A: if pair history > 20 entries
+    A->>L: _compress_pair (background, deferred)
+    L-->>A: RELATIONSHIP + MOOD update
+    Note over A: saved to group_growth.json
 ```
 
 ### Startup sequence

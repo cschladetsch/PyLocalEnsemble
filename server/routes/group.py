@@ -225,15 +225,43 @@ def _compress_pair(key: str):
 
 # ── Repetition-suppression helpers ────────────────────────────────────────────
 
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+    "with", "by", "from", "as", "is", "was", "are", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "shall", "i", "you", "he", "she", "it", "we", "they", "my",
+    "your", "his", "her", "its", "our", "their", "me", "him", "us", "them", "this",
+    "that", "these", "those", "not", "no", "so", "if", "than", "then", "there",
+    "what", "which", "who", "when", "how", "all", "each", "every", "more", "very",
+    "just", "can", "into", "up", "out", "about", "like", "now", "even", "still",
+})
+
+
 def _overused_phrases(entries: list, top_n: int = 8, ngram: int = 4) -> list[str]:
-    """Return n-grams that appear 2+ times across recent history entries."""
+    """Return phrases (n-grams AND high-frequency single content words) overused across recent history."""
     texts = [e["content"] for e in entries if e.get("content")]
-    counts: Counter = Counter()
+    if not texts:
+        return []
+    ngram_counts: Counter = Counter()
+    word_counts:  Counter = Counter()
     for text in texts:
         words = re.findall(r"[a-z']+", text.lower())
+        # n-gram counts
         for i in range(len(words) - ngram + 1):
-            counts[" ".join(words[i:i + ngram])] += 1
-    return [p for p, n in counts.most_common(top_n) if n >= 2]
+            ngram_counts[" ".join(words[i:i + ngram])] += 1
+        # single content-word counts (skip stop words and very short words)
+        for w in words:
+            if len(w) >= 5 and w not in _STOP_WORDS:
+                word_counts[w] += 1
+    overused_ngrams = [p for p, n in ngram_counts.most_common(top_n) if n >= 2]
+    # Words appearing 3+ times across multiple turns are thematic clichés — flag them
+    overused_words  = [w for w, n in word_counts.most_common(top_n) if n >= 3]
+    # Deduplicate: skip words already covered by an n-gram entry
+    combined = list(overused_ngrams)
+    for w in overused_words:
+        if not any(w in phrase for phrase in combined):
+            combined.append(w)
+    return combined[:top_n]
 
 
 def _dedupe_entries(entries: list, max_consecutive: int = 2) -> list:
@@ -287,7 +315,7 @@ def _build_response_messages(persona_key: str) -> list[dict]:
             "STRICT RULES:\n"
             "1. Speak ONLY as yourself. Do NOT narrate for, speak for, or describe the actions of other personas.\n"
             "2. Focus exclusively on your own words, thoughts, and physical state.\n"
-            "3. Address others by name when relevant. Keep responses concise.\n"
+            "3. Address others by name when relevant. Keep responses to 2-3 sentences.\n"
             "4. Use correct pronouns for others based on their listed gender."
         )
 
