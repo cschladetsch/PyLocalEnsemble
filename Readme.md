@@ -88,6 +88,9 @@ Key settings:
 | `image.auto_every` | `0` | Generate an image every N chat turns (0 = disabled) |
 | `image.adetailer_hands` | `false` | Run ADetailer hand-repair pass after each generation (requires ADetailer extension) |
 | `image.hires_fix` | `true` | Enable hires fix upscale pass |
+| `image.quick_steps` | `steps ÷ 2` | Steps used in QUICK mode (minimum 12) |
+| `image.quick_sampler` | `"DPM++ 2M Karras"` | Sampler used in QUICK mode — DPM++ 2M Karras is ~2× faster than DPM++ SDE Karras (1 eval/step vs 2) with better quality than Euler |
+| `quick_image` | `true` | QUICK mode toggle (persisted here, also controlled from the UI button) — skips hires fix, ADetailer, and group scene synthesis; uses `quick_steps`/`quick_sampler` |
 | `forge_args` | *(platform default)* | Override Forge launch flags (e.g. `"--api --xformers"`) |
 | `forge_venv_dir` | `""` | Optional path to an existing Forge virtualenv to reuse instead of creating `stable-diffusion-webui-forge/venv` |
 | `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
@@ -268,7 +271,7 @@ Alice maintains a rolling memory so long conversations don't lose earlier contex
 
 **Why 1500 characters?** The memory string is injected into every system prompt, counting against the context window. With the default `ctx_size = 4096` tokens, ~375 tokens (≈ 1500 chars) is a safe budget. If you increase `ctx_size`, raise `memory.max_chars` proportionally in `alice.json`.
 
-- **Clear** — the Clear button wipes history, memory, and `history.json`.
+- **Reset** — the Reset dropdown (header, far right) lets you pick which persona to reset; selecting one wipes that persona's history, memory, and `history.json`.
 - Memory is also cleared when switching personas or models.
 
 ---

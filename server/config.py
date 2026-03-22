@@ -83,12 +83,14 @@ _DEFAULT_CONFIG = {
         "max_chars":   1500, # max chars in rolling memory summary (scales with ctx_size)
     },
     "llm_params": {
+        "max_tokens":        150,
         "temperature":       0.9,
         "top_p":             0.92,
         "repeat_penalty":    1.25,
         "presence_penalty":  0.8,
         "frequency_penalty": 0.5,
     },
+    "quick_image":  True,   # skip LLM extraction + hires/adetailer; use appearance directly
     # Phrases/words the LLM must never use, injected into every system prompt.
     # Add model-level clichés here so they're banned from turn 1 rather than
     # waiting for the dynamic detector to catch them after 2-3 occurrences.

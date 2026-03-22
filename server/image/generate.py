@@ -1,11 +1,11 @@
 """Image generation via the Forge/SD API."""
 from __future__ import annotations
-import json, os, re, threading
+import json, os, re, threading, time
 import logging
 import requests as req
 import config
 import state
-from utils import http_ok
+from utils import http_ok, _c
 from image.forge import start_forge
 
 _gen_cancel    = threading.Event()
@@ -38,7 +38,7 @@ def _resolve_upscaler(forge_url: str, preferred: str) -> str | None:
 
 def generate_image(prompt: str, appearance: str, negative_base: str,
                    extra_negative: str = "", steps: int = None, cfg_scale: float = None,
-                   seed: int = -1):
+                   seed: int = -1, quick: bool = False):
     forge_url = config.CFG["forge_url"]
     img_cfg   = config.CFG["image"]
     if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
@@ -50,8 +50,15 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             raise RuntimeError(msg)
 
     negative = (extra_negative + ", " + negative_base) if extra_negative else negative_base
-    _steps   = steps     if steps     is not None else img_cfg["steps"]
+    # Quick mode: use configured steps (or a sensible default), full resolution.
+    # The big savings come from skipping hires fix and ADetailer, not crippling resolution.
+    quick_steps   = img_cfg.get("quick_steps",   max(img_cfg["steps"] // 2, 12))
+    quick_sampler = img_cfg.get("quick_sampler", "DPM++ 2M Karras")
+    _steps   = (steps if steps is not None else (quick_steps   if quick else img_cfg["steps"]))
+    _sampler = quick_sampler                                    if quick else img_cfg["sampler_name"]
     _cfg     = cfg_scale if cfg_scale is not None else img_cfg["cfg_scale"]
+    _width   = img_cfg["width"]
+    _height  = img_cfg["height"]
 
     explicit_keywords = ["anal", "fingering", "insertion", "blowjob", "fellatio",
                          "penetration", "nude", "naked", "nudity", "topless", "nsfw",
@@ -79,20 +86,23 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
-    print(f"[image] steps={_steps}, cfg={_cfg}, size={img_cfg['width']}x{img_cfg['height']}, seed={seed}")
+    mode = _c("cyan", "QUICK") if quick else _c("magenta", "FULL")
+    hires_on = not quick and img_cfg.get("hires_fix")
+    ad_on    = not quick and (img_cfg.get("adetailer_face") or img_cfg.get("adetailer_hands"))
+    print(f"[image] [{mode}] steps={_steps}, sampler={_sampler}, cfg={_cfg}, size={_width}x{_height}, seed={seed}  hires={hires_on}  adetailer={ad_on}")
 
     try:
         payload = {
             "prompt":          full_prompt,
             "negative_prompt": negative,
             "steps":           _steps,
-            "width":           img_cfg["width"],
-            "height":          img_cfg["height"],
+            "width":           _width,
+            "height":          _height,
             "cfg_scale":       _cfg,
-            "sampler_name":    img_cfg["sampler_name"],
+            "sampler_name":    _sampler,
             "seed":            seed,
         }
-        if img_cfg.get("hires_fix"):
+        if not quick and img_cfg.get("hires_fix"):
             hr_upscaler = _resolve_upscaler(forge_url, img_cfg.get("hires_upscaler", "Latent"))
             if hr_upscaler:
                 payload.update({
@@ -102,11 +112,21 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                     "denoising_strength":   img_cfg.get("hires_denoising", 0.45),
                     "hr_upscaler":          hr_upscaler,
                 })
+        overrides = {
+            # Alice manages its own output — Forge doesn't need to write images to disk,
+            # and skipping the disk write removes a significant chunk of "finishing" time.
+            "samples_save": False,
+            "grid_save":    False,
+        }
         clip_skip = img_cfg.get("clip_skip")
         if clip_skip:
-            payload["override_settings"] = {"CLIP_stop_at_last_layers": clip_skip}
+            overrides["CLIP_stop_at_last_layers"] = clip_skip
+        if quick and img_cfg.get("quick_vae"):
+            # Optional: set sd_vae to "taesd" in alice.json quick_vae for faster decode
+            overrides["sd_vae"] = img_cfg["quick_vae"]
+        payload["override_settings"] = overrides
         ad_models = []
-        if img_cfg.get("adetailer_face"):
+        if not quick and img_cfg.get("adetailer_face"):
             ad_models.append({
                 "ad_model":                       "face_yolov8n.pt",
                 "ad_confidence":                  0.3,
@@ -114,7 +134,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                 "ad_inpaint_only_masked":         True,
                 "ad_inpaint_only_masked_padding": 32,
             })
-        if img_cfg.get("adetailer_hands"):
+        if not quick and img_cfg.get("adetailer_hands"):
             ad_models.append({
                 "ad_model":                       "hand_yolov8n.pt",
                 "ad_confidence":                  0.3,
@@ -126,7 +146,56 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             payload["alwayson_scripts"] = {
                 "ADetailer": {"args": [True, False] + ad_models}
             }
-        r    = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
+
+        # Background thread: poll /progress and log stages while Forge runs
+        _done = threading.Event()
+        def _log_progress():
+            last_phase = None
+            last_step  = -1
+            t_phase    = time.time()
+            while not _done.wait(timeout=0.5):
+                try:
+                    pr = req.get(f"{forge_url}/sdapi/v1/progress?skip_current_image=true", timeout=2).json()
+                    pct  = round((pr.get("progress", 0) or 0) * 100)
+                    st   = pr.get("state", {})
+                    step = st.get("sampling_step", 0)
+                    total= st.get("sampling_steps", 0)
+                    info = (pr.get("textinfo") or "").strip()
+                    eta  = pr.get("eta_relative", 0) or 0
+
+                    if pct > 0:
+                        phase = f"sampling ({info})" if info else "sampling"
+                    elif last_phase and last_phase.startswith("sampling"):
+                        phase = f"finishing · {info}" if info else "finishing · VAE decode"
+                    else:
+                        phase = info or "waiting"
+
+                    if phase != last_phase:
+                        elapsed = time.time() - t_phase
+                        if last_phase:
+                            color = "green" if elapsed < 5 else "yellow" if elapsed < 15 else "red"
+                            print(f"{_c('blue', '[forge]')} {last_phase} done: {_c(color, f'{elapsed:.1f}s')}")
+                        print(f"{_c('blue', '[forge]')} → {_c('cyan', phase)}")
+                        last_phase = phase
+                        t_phase    = time.time()
+                    elif pct > 0 and step != last_step and step % max(1, total // 4) == 0:
+                        eta_str = f"  eta {eta:.1f}s" if eta > 0.5 else ""
+                        print(f"{_c('blue', '[forge]')}   step {step}/{total}  {pct}%{eta_str}")
+                    last_step = step
+                except Exception:
+                    pass
+            if last_phase:
+                elapsed = time.time() - t_phase
+                color = "green" if elapsed < 5 else "yellow" if elapsed < 15 else "red"
+                print(f"{_c('blue', '[forge]')} {last_phase} done: {_c(color, f'{elapsed:.1f}s')}")
+
+        _poll_thread = threading.Thread(target=_log_progress, daemon=True)
+        _poll_thread.start()
+        try:
+            r = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
+        finally:
+            _done.set()
+            _poll_thread.join(timeout=2)
         data = r.json()
         if "images" not in data:
             detail = data.get("detail", "")

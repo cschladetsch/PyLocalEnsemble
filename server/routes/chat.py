@@ -27,7 +27,7 @@ async def chat(body: ChatRequest):
 
     try:
         llm.history.append({"role": "user", "content": body.message})
-        sys_prompt = state.SYSTEM_PROMPT + config.banned_phrases_note()
+        sys_prompt = state.SYSTEM_PROMPT + "\n\nKeep replies concise — 2 to 3 sentences unless more is genuinely needed." + config.banned_phrases_note()
         if llm.memory:
             sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
         messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)

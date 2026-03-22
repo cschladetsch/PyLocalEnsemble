@@ -5,7 +5,9 @@ import llm
 
 def clean_tags(prompt: str) -> str:
     """Deduplicates tags, preserving SD weighting syntax. Weighted form wins over unweighted."""
-    tags = [t.strip() for t in prompt.split(",")]
+    # Split on commas outside parentheses so grouped persona blocks like
+    # "(1woman, brunette:1.2)" are treated as a single tag and not fragmented.
+    tags = [t.strip() for t in re.split(r',(?![^()]*\))', prompt)]
 
     def _norm(tag):
         bare = re.sub(r"^\((.+?):[0-9.]+\)$", r"\1", tag)
@@ -45,6 +47,15 @@ def apply_exposure_rules(text: str, prompt: str, negative: str) -> tuple:
         prompt = "(pov:1.3), (first person view:1.2), " + prompt
     if has(["from behind", "back view", "backside", "rear view"]):
         prompt = "(from behind:1.3), (back view:1.2), " + prompt
+
+    # Expression / pose cues that SD misses if left to LLM extraction
+    if re.search(r'\b(eyes?\s+closed|shut\s+(her\s+)?eyes?|close\s+(her\s+)?eyes?)\b', t):
+        prompt = "(closed eyes:1.4), " + prompt
+    if re.search(r'\b(mouth\s+open|open\s+(her\s+)?mouth|tongue\s+out)\b', t):
+        prompt = "(open mouth:1.3), " + prompt
+    if re.search(r'\b(on\s+(her\s+)?knees|kneel(s|ing)?)\b', t):
+        if "kneeling" not in prompt:
+            prompt = "(kneeling:1.3), " + prompt
 
     return prompt, negative
 
@@ -297,6 +308,14 @@ def _strip_clothing(text: str) -> str:
     """Remove clothing words from an appearance string."""
     return _CLOTHING_RE.sub("", text).replace(", ,", ",").strip(", ")
 
+_ANATOMY_RE = re.compile(
+    r"\b(pussy hair|pubic hair|nipples?|areola|vulva|vagina|clit\w*)\b,?\s*", re.I
+)
+
+def _strip_anatomy(text: str) -> str:
+    """Remove anatomy tags from an appearance string (used when clothed)."""
+    return _ANATOMY_RE.sub("", text).replace(", ,", ",").strip(", ")
+
 
 def _build_tags(fields: dict, appearance: str, interaction_priority: bool = False) -> str:
     """Convert parsed structured fields into a weighted SD tag string."""
@@ -320,6 +339,8 @@ def _build_tags(fields: dict, appearance: str, interaction_priority: bool = Fals
     clean_app = _strip_distractions(appearance)
     if is_nude:
         clean_app = _strip_clothing(clean_app)
+    else:
+        clean_app = _strip_anatomy(clean_app)
 
     # 3. Handle Pose Conflicts
     # If ACTION contains a specific pose, it must override the POSE field

@@ -1,4 +1,4 @@
-import re, asyncio
+import re, asyncio, time
 import requests as req
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -8,6 +8,7 @@ import config
 import llm
 import image
 import state
+from utils import _c
 
 router = APIRouter()
 
@@ -199,6 +200,12 @@ async def image_from_history(body: ImageRequest):
 
     try:
         def _run():
+            t0 = time.time()
+            def _elapsed(label, t_start):
+                secs = time.time() - t_start
+                color = "green" if secs < 5 else "yellow" if secs < 15 else "red"
+                print(f"{_c('blue', '[image]')} {label}: {_c(color, f'{secs:.2f}s')}")
+
             image._gen_cancel.clear()
             recent = _llm_history[-10:]
             last_user_full = (
@@ -222,37 +229,47 @@ async def image_from_history(body: ImageRequest):
             # Determine relevant personas for the scene
             relevant_personas = _get_relevant_personas(_llm_history, last_user)
             _names = [p.get("name", k) for k, p in relevant_personas.items()]
-            
+
             if len(relevant_personas) > 1:
                 combined_appearance = _build_group_scene_appearance(relevant_personas)
-                print(f"[image] multi-persona mode ({len(relevant_personas)}) — aggregated appearance: {combined_appearance}")
+                print(f"[image] multi-persona mode ({len(relevant_personas)}): {', '.join(_names)}")
             else:
                 p_key = list(relevant_personas.keys())[0] if relevant_personas else (state._active_persona_key or "Alice")
                 combined_appearance = config.PERSONAS.get(p_key, {}).get("appearance", state.ALICE_APPEARANCE)
 
             state.last_appearance = combined_appearance
 
-            # For group scenes: synthesize a concrete physical scene description
-            # from the purple prose history, so the extractor has something to work with
+            quick = config.CFG.get("quick_image", True)
+            mode_tag = _c("cyan", "QUICK") if quick else _c("magenta", "FULL")
+            print(f"{_c('blue', '[image]')} start [{mode_tag}] nudity={_c('yellow', state._nudity_state)} personas={_names}")
+
+            # Scene synthesis is an extra LLM call — skip in quick mode
             scene_desc = ""
-            if state.GROUP_ACTIVE and len(relevant_personas) > 1:
+            if not quick and state.GROUP_ACTIVE and len(relevant_personas) > 1:
+                t1 = time.time()
                 try:
                     import routes.group as _grp_mod
                     scene_desc = _synthesize_group_scene(_grp_mod._history, relevant_personas)
                 except Exception as _se:
                     print(f"[image] scene synthesis error: {_se}")
+                _elapsed("scene synthesis", t1)
 
-            # If the user said something meta ("show all personas", "that is not a group shot"),
-            # replace it with the synthesized scene so ACTION/POSE extraction is grounded
             if scene_desc and _META_INSTRUCTION_RE.search(last_user):
                 effective_user = scene_desc
                 print(f"[image] meta-instruction detected — using synthesized scene as action context")
             else:
                 effective_user = last_user
 
-            # Prepend scene synthesis to messages so the LLM has concrete visual context
             if scene_desc:
                 messages = f"CURRENT SCENE: {scene_desc}\n\n" + messages
+
+            positive_parts, negative_parts = [], []
+            for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
+                if token.lower().startswith("no "):
+                    negative_parts.append(token[3:].strip())
+                else:
+                    positive_parts.append(token)
+            extra_negative = ", ".join(negative_parts)
 
             used_pre = bool(state._pre_sd_prompt and not body.extra)
             if used_pre:
@@ -262,8 +279,11 @@ async def image_from_history(body: ImageRequest):
                 if state._pre_sd_nudity:
                     state._nudity_state = state._pre_sd_nudity
                 state._pre_sd_prompt = None
+                if positive_parts:
+                    prompt = ", ".join(positive_parts) + ", " + prompt
             else:
-                print("[image] extracting SD prompt via LLM...")
+                t2 = time.time()
+                print(f"{_c('blue', '[image]')} extracting SD prompt via LLM...")
                 _persona_context = state.SYSTEM_PROMPT
                 if len(relevant_personas) > 1:
                     setting_hint = _extract_setting_hint(relevant_personas)
@@ -283,34 +303,33 @@ async def image_from_history(body: ImageRequest):
                     interaction_priority=(len(relevant_personas) > 1),
                     names=_names,
                 )
+                _elapsed("LLM extraction", t2)
                 state._nudity_state = new_nudity
+                base_prompt    = image.clean_tags(base_prompt)
+                positive_extra = ", ".join(positive_parts)
+                prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
+                prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
 
             if image._gen_cancel.is_set():
                 print("[image] cancelled before Forge call")
                 return None, None
 
-            positive_parts, negative_parts = [], []
-            for token in [t.strip() for t in body.extra.split(",") if t.strip()]:
-                if token.lower().startswith("no "):
-                    negative_parts.append(token[3:].strip())
-                else:
-                    positive_parts.append(token)
-
-            if not used_pre:
-                base_prompt    = image.clean_tags(base_prompt)
-                positive_extra = ", ".join(positive_parts)
-                extra_negative = ", ".join(negative_parts)
-                prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt
-                prompt, extra_negative = image.apply_exposure_rules(messages, prompt, extra_negative)
-            elif positive_parts:
-                prompt = ", ".join(positive_parts) + ", " + prompt
-
             state.last_sd_prompt = prompt
+            # For group scenes, add over-count tags to the negative to discourage SD
+            # from hallucinating extra people beyond the expected number.
+            if len(relevant_personas) > 1:
+                n = len(relevant_personas)
+                over_count = ", ".join(f"{n+i}girls, {n+i}women" for i in range(1, 3))
+                extra_negative = (extra_negative + ", " + over_count) if extra_negative else over_count
+
+            t3 = time.time()
             img = image.generate_image(
                 prompt, combined_appearance, state.BASE_NEGATIVE,
                 extra_negative=extra_negative,
                 seed=state._character_seed,
+                quick=quick,
             )
+            _elapsed("Forge generation", t3)
             # Auto-pin seed after first generation so the character face stays consistent
             if img and config.CFG["image"].get("auto_pin_seed", True):
                 if not state._seed_pinned and state.last_seed > 0:
@@ -318,6 +337,9 @@ async def image_from_history(body: ImageRequest):
                     state._seed_pinned    = True
                     print(f"[seed] auto-pinned {state._character_seed} for character consistency")
             url = state.save_generated_image(img) if img else None
+            total = time.time() - t0
+            color = "green" if total < 10 else "yellow" if total < 30 else "red"
+            print(f"{_c('blue', '[image]')} {_c('bold', 'total')}: {_c(color, f'{total:.2f}s')}")
             return prompt, url
 
         loop = asyncio.get_running_loop()
@@ -389,7 +411,7 @@ async def interrupt():
 @router.get("/progress")
 async def get_progress():
     try:
-        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=false", timeout=3)
+        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=true", timeout=3)
         return JSONResponse(r.json())
     except Exception:
         return JSONResponse({"progress": 0, "state": {}})

@@ -20,6 +20,16 @@ const ENTRANCE_LINES = [
   "I've been saving my best words for you.",
   "Good. I was growing tired of my own company.",
   "You always keep me waiting just long enough.",
+  "I wasn't sure you'd come.",
+  "There's that face.",
+  "Sit. Talk to me.",
+  "I had a feeling today would be interesting.",
+  "You have no idea how long this hour has felt.",
+  "Don't just stand there.",
+  "I've been rehearsing what to say. Now I've forgotten it all.",
+  "You smell like the outside world. Tell me about it.",
+  "I knew it was you before you arrived.",
+  "I was just thinking about the last thing you said.",
 ];
 
 function entranceLine() {
@@ -106,7 +116,9 @@ try {
 
 function saveImg(url, prompt) {
   if (!url) return;
-  imgHistory.unshift({ url, prompt, ts: Date.now(), persona: _activePersona });
+  const entry = { url, prompt, ts: Date.now(), persona: _activePersona };
+  if (_groupMode && _groupSelected.size > 0) entry.group = [..._groupSelected];
+  imgHistory.unshift(entry);
   if (imgHistory.length > 100) imgHistory.pop();
   try {
     localStorage.setItem('alice_img_history_urls', JSON.stringify(imgHistory));
@@ -124,13 +136,14 @@ function renderHistory() {
   const container = document.getElementById('is');
   if (!container) return;
   container.innerHTML = imgHistory.map((item, i) => {
-    const ts  = item.ts ? new Date(item.ts).toLocaleString() : '';
-    const tip = [item.persona, ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
+    const ts    = item.ts ? new Date(item.ts).toLocaleString() : '';
+    const who   = item.group ? item.group.join(', ') : item.persona;
+    const tip   = [who, ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
     return `<img src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`;
   }).join('');
 }
 
-function showHistImg(index) {
+async function showHistImg(index) {
   const item = imgHistory[index];
   if (!item) return;
   document.querySelectorAll('.is img').forEach((img, i) => {
@@ -138,7 +151,18 @@ function showHistImg(index) {
   });
   document.getElementById('ic').innerHTML = `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
   setPrompt(item.prompt);
-  if (item.persona && item.persona !== _activePersona) {
+  if (item.group) {
+    // Group image — enter group mode if not already, then select the saved personas
+    if (!_groupMode) await _startGroupMode();
+    // Deselect chips that weren't in this image's group
+    document.querySelectorAll('#group-personas .group-persona-chip').forEach(chip => {
+      const inGroup = item.group.includes(chip.dataset.key);
+      chip.classList.toggle('checked', inGroup);
+      if (inGroup) _groupSelected.add(chip.dataset.key);
+      else         _groupSelected.delete(chip.dataset.key);
+    });
+  } else if (item.persona && item.persona !== _activePersona) {
+    if (_groupMode) await _stopGroupMode();
     switchPersona(item.persona, { reChat: false });
     const sel = document.getElementById('persona-select');
     if (sel) sel.value = item.persona;
@@ -162,6 +186,15 @@ async function loadInfo() {
     document.title = charName;
     const h1 = document.querySelector('h1');
     if (h1) h1.textContent = charName.toUpperCase();
+    // Keep dropdown in sync with server's active persona (survives page reloads)
+    if (d.active_persona && d.active_persona !== _activePersona) {
+      const psel = document.getElementById('persona-select');
+      if (psel && psel.querySelector(`option[value="${d.active_persona}"]`)) {
+        psel.value    = d.active_persona;
+        _activePersona = d.active_persona;
+        _applyPersonaFont(d.active_persona);
+      }
+    }
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
     const firstBody = document.querySelector('#msgs .msg.alice');
@@ -316,23 +349,30 @@ async function deleteActiveImage() {
   }
 }
 
-async function interrupt(reason) {
-  if (reason === 'user' && _demoMode) { _demoSkip = true; }  // Skip current turn, don't stop demo
+// Cancel only the chat stream — leaves image generation running.
+function _interruptChat() {
   _resetGroupAudioState();
   _stopTts();
   _stopGroupSpeech();
   if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-  if (chatAbort) {
-    console.log('Aborting chat:', reason);
-    chatAbort.abort();
-    chatAbort = null;
-  }
+  if (chatAbort) { chatAbort.abort(); chatAbort = null; }
+}
+
+// Full stop: cancel chat AND image generation (Stop button, explicit new image, reroll).
+async function interrupt(reason) {
+  if (reason === 'user' && _demoMode) { _demoSkip = true; }
+  _interruptChat();
+  const hadImgInFlight = !!imgAbort;
   if (imgAbort) {
     console.log('Aborting media generation:', reason);
     imgAbort.abort();
     imgAbort = null;
   }
-  await fetch('/interrupt', { method: 'POST' }).catch(() => {});
+  // Only tell the server to cancel Forge if something was actually running.
+  // Calling /interrupt unnecessarily sets _gen_cancel and kills the next gen.
+  if (hadImgInFlight) {
+    await fetch('/interrupt', { method: 'POST' }).catch(() => {});
+  }
 }
 
 function doImage() {
@@ -341,10 +381,12 @@ function doImage() {
   triggerMedia(extra);
 }
 
-let progressTimer = null, _lastPct = 0;
+let progressTimer = null, _lastPct = 0, _passCount = 0, _inFinishing = false;
 function startProgress() {
   stopProgress();
   _lastPct = 0;
+  _passCount = 0;
+  _inFinishing = false;
   progressTimer = setInterval(async () => {
     try {
       const r = await fetch('/progress');
@@ -352,30 +394,29 @@ function startProgress() {
       const pct = Math.round((d.progress || 0) * 100);
       const fill   = document.getElementById('img-pb');
       const status = document.getElementById('img-status');
-      if (fill)   fill.style.width = pct + '%';
+      if (fill) fill.style.width = pct + '%';
       if (status) {
-        const st = d.state || {};
-        const step = st.sampling_step || 0;
-        const total = st.sampling_steps || 0;
-        const stepStr = total > 0 ? ` (${step}/${total})` : '';
-        if (pct > 0)           status.textContent = `Generating... ${pct}%${stepStr}`;
-        else if (_lastPct > 0) status.textContent = 'Finishing...';
-      }
-      _lastPct = pct;
-      if (d.current_image) {
-        const ic = document.getElementById('ic');
-        if (ic && !ic.querySelector('img.final')) {
-          let prev = ic.querySelector('img.preview');
-          if (prev) {
-            prev.src = `data:image/png;base64,${d.current_image}`;
-          } else {
-            const img = document.createElement('img');
-            img.className = 'preview';
-            img.src = `data:image/png;base64,${d.current_image}`;
-            ic.insertBefore(img, ic.firstChild);
-          }
+        const st       = d.state || {};
+        const step     = st.sampling_step  || 0;
+        const total    = st.sampling_steps || 0;
+        const eta      = d.eta_relative > 0.5 ? ` · ${Math.ceil(d.eta_relative)}s` : '';
+        const textinfo = (d.textinfo || '').trim();
+        // Detect a new pass starting (ADetailer resets progress to 0 then climbs again)
+        if (pct > 0 && _lastPct === 0 && _passCount > 0) _passCount++;
+        if (pct > 0 && _passCount === 0) _passCount = 1;
+        const passStr = _passCount > 1 ? ` · pass ${_passCount}` : '';
+        if (pct > 0) {
+          _inFinishing = false;
+          const stepStr = total > 0 ? ` (${step}/${total})` : '';
+          status.textContent = `Generating${passStr}… ${pct}%${stepStr}${eta}`;
+        } else if (_lastPct > 0 || _inFinishing) {
+          // Sampling done — now VAE decode or inter-pass gap
+          _inFinishing = true;
+          const detail = textinfo || (st.job ? `${st.job}` : 'decoding…');
+          status.textContent = `Finishing${passStr} · ${detail}`;
         }
       }
+      _lastPct = pct;
     } catch {}
   }, 800);
 }
@@ -385,64 +426,68 @@ function stopProgress() {
 
 async function triggerMedia(extra = '', auto = false) {
   if (!auto) await interrupt('new media request');  // auto: already interrupted at chat start
-  imgAbort = new AbortController();
-  const { signal } = imgAbort;
+  const myAbort = new AbortController();
+  imgAbort = myAbort;
 
   disableAll();
-  document.getElementById('ih').textContent = 'Generated Scene';
 
   if (extra && !auto) addMsg('user', 'You', extra);
 
-  document.getElementById('ic').innerHTML =
-    '<div id="img-progress-wrap">' +
-      '<div class="ph gen" id="img-status">Analyzing scene...</div>' +
-      '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>' +
-    '</div>';
-  document.getElementById('pd-wrap').style.display = 'none';
-  document.getElementById('pd').value = '';
+  const isForeground = () => imgAbort === myAbort;
 
-  startProgress();
+  if (isForeground()) {
+    document.getElementById('ih').textContent = 'Generated Scene';
+    document.getElementById('ic').innerHTML =
+      '<div id="img-progress-wrap">' +
+        '<div class="ph gen" id="img-status">Analyzing scene...</div>' +
+        '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>' +
+      '</div>';
+    document.getElementById('pd-wrap').style.display = 'none';
+    document.getElementById('pd').value = '';
+    startProgress();
+  }
+
   try {
+    // No abort signal — let Forge run to completion even if user switches away.
+    // Server /interrupt (Stop button / new image request) cancels Forge server-side.
     const res = await fetch('/image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ extra }),
-      signal
     });
     const d = await res.json();
-    if (d.error) {
-      document.getElementById('ic').innerHTML = `<div class="ph">${d.error}</div>`;
-    } else if (d.url) {
-      // Stop polling before preload — frees browser connections for the image fetch
-      stopProgress();
-      const ic = document.getElementById('ic');
-      const existing = ic.innerHTML;
+    if (d.url) {
       await new Promise(resolve => {
         const img = new Image();
         img.onload = img.onerror = resolve;
         img.src = d.url;
       });
-      ic.innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
-      setPrompt(d.sd_prompt);
-      saveImg(d.url, d.sd_prompt);
-      _syncSeedBtn(d.pinned, d.seed);
-      const rerollBtn = document.getElementById('reroll-btn');
-      if (rerollBtn) rerollBtn.disabled = false;
-    } else {
-      document.getElementById('ic').innerHTML = '<div class="ph">No output generated.</div>';
+      saveImg(d.url, d.sd_prompt);  // always save to history
+      if (isForeground()) {
+        stopProgress();
+        document.getElementById('ic').innerHTML = `<img src="${d.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
+        setPrompt(d.sd_prompt);
+        _syncSeedBtn(d.pinned, d.seed);
+        const rerollBtn = document.getElementById('reroll-btn');
+        if (rerollBtn) rerollBtn.disabled = false;
+      }
+    } else if (isForeground()) {
+      document.getElementById('ic').innerHTML = d.error
+        ? `<div class="ph">${d.error}</div>`
+        : '<div class="ph">No output generated.</div>';
     }
   } catch (e) {
-    if (e.name === 'AbortError') {
-      document.getElementById('ic').innerHTML = '<div class="ph">Interrupted.</div>';
-    } else {
+    if (isForeground()) {
       console.error('Image error:', e);
       document.getElementById('ic').innerHTML = `<div class="ph">Image error: ${e.message || 'Unknown error'}. Check console.</div>`;
     }
   }
-  stopProgress();
-  imgAbort = null;
-  enableAll();
-  document.getElementById('inp').focus();
+  if (isForeground()) {
+    stopProgress();
+    imgAbort = null;
+    enableAll();
+    document.getElementById('inp').focus();
+  }
 }
 
 async function loadModels() {
@@ -500,16 +545,40 @@ function _applyPersonaFont(name) {
 }
 
 async function loadPersonas() {
-  const res = await fetch('/personas');
-  const d = await res.json();
+  const [persRes, infoRes] = await Promise.all([fetch('/personas'), fetch('/info')]);
+  const d    = await persRes.json();
+  const info = await infoRes.json();
   const sel = document.getElementById('persona-select');
   sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
   d.personas.forEach(p => { _personaFontKeys[p.name] = p.font_key; });
+  // Sync dropdown to whatever persona the server is currently on
+  if (info.active_persona && sel.querySelector(`option[value="${info.active_persona}"]`)) {
+    sel.value = info.active_persona;
+  }
   if (sel.value) { _activePersona = sel.value; _applyPersonaFont(sel.value); }
+  const resetSel = document.getElementById('reset-persona-select');
+  if (resetSel) {
+    resetSel.innerHTML =
+      '<option value="" disabled selected>Reset…</option>' +
+      '<option value="__all__">All personas</option>' +
+      d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  }
 }
 
 async function switchPersona(name, { reChat = true } = {}) {
-  await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
+  console.log('[persona] switching to:', name);
+  let r;
+  try {
+    r = await fetch(`/persona/${encodeURIComponent(name)}`, { method: 'POST' });
+  } catch (e) {
+    console.error('[persona] network error switching to', name, e);
+    return;
+  }
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    console.error('[persona] switch failed', r.status, body.error || r.statusText, '— name:', name);
+    return;
+  }
   _activePersona = name;
   _applyPersonaFont(name);
   await loadInfo();
@@ -617,6 +686,28 @@ async function regenFromPrompt() {
 
 renderHistory();
 
+async function loadQuickState() {
+  try {
+    const r = await fetch('/settings');
+    const d = await r.json();
+    const btn = document.getElementById('quick-btn');
+    if (btn) btn.classList.toggle('active', !!d.quick_image);
+  } catch {}
+}
+
+async function toggleQuick() {
+  const btn = document.getElementById('quick-btn');
+  const next = btn ? !btn.classList.contains('active') : true;
+  if (btn) btn.classList.toggle('active', next);
+  await fetch('/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quick_image: next }),
+  });
+}
+
+loadQuickState();
+
 async function loadNegative() {
   try {
     const r = await fetch('/negative');
@@ -628,7 +719,7 @@ async function loadNegative() {
 loadNegative();
 
 async function _chatWith(msg, { forceImage = false } = {}) {
-  await interrupt('new message sent');
+  _interruptChat();  // stop previous chat only — image gen continues
   const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
@@ -697,7 +788,7 @@ async function send() {
   }
   lastUserMsg = msg;
   if (_groupMode) {
-    await interrupt('group input');
+    _interruptChat();  // stop previous chat only — image gen continues
     inp.focus();
     await _sendGroupMsg(msg);
     inp.focus();
@@ -1467,11 +1558,22 @@ async function clearHistory() {
   document.getElementById('resay-btn').disabled = true;
 }
 
-async function resetPersona() {
-  const sel = document.getElementById('persona-select');
-  const name = sel ? sel.value : _activePersona;
-  if (!confirm(`Reset ${name}?\n\nThis clears chat history and relationship memory.`)) return;
-  await fetch(`/persona/${encodeURIComponent(name)}/reset`, { method: 'DELETE' });
+async function resetPersona(selectEl) {
+  const resetSel = selectEl || document.getElementById('reset-persona-select');
+  const name = resetSel ? resetSel.value : _activePersona;
+  if (!name) return;
+  const label = name === '__all__' ? 'ALL personas' : name;
+  if (!confirm(`Reset ${label}?\n\nThis clears chat history and relationship memory.`)) {
+    resetSel.value = '';
+    return;
+  }
+  if (name === '__all__') {
+    const opts = Array.from(resetSel.options).filter(o => o.value && o.value !== '__all__');
+    await Promise.all(opts.map(o => fetch(`/persona/${encodeURIComponent(o.value)}/reset`, { method: 'DELETE' })));
+  } else {
+    await fetch(`/persona/${encodeURIComponent(name)}/reset`, { method: 'DELETE' });
+  }
+  resetSel.value = '';
   document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>${entranceLine()}</div>`;
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';

@@ -79,6 +79,7 @@ def set_forge_model(name: str) -> bool:
             return True
         else:
             warn(f"Model '{name}' not found in Forge model list.")
+            warn(f"Available models: {', '.join(models) if models else '(none)'}")
             return False
     except Exception as e:
         warn(f"Could not set Forge model: {e}")

@@ -14,6 +14,22 @@ router = APIRouter()
 class ModelSwitchRequest(BaseModel):
     path: str
 
+class SettingsPatch(BaseModel):
+    quick_image: bool | None = None
+
+
+@router.get("/settings")
+async def get_settings():
+    return JSONResponse({"quick_image": config.CFG.get("quick_image", True)})
+
+
+@router.post("/settings")
+async def patch_settings(body: SettingsPatch):
+    if body.quick_image is not None:
+        config.CFG["quick_image"] = body.quick_image
+        config.save_config(config.CFG)
+    return JSONResponse({"quick_image": config.CFG.get("quick_image", True)})
+
 class DemoPersonaRequest(BaseModel):
     name: str
 
@@ -42,10 +58,15 @@ async def clear_history():
 
 @router.delete("/persona/{name}/reset")
 async def reset_persona(name: str):
-    """Clear chat history and group growth data (memos + mood) for a persona."""
+    """Clear chat history, growth data, and nudity/image state for a persona."""
     from routes import group as _grp
     llm.clear_history()
     _grp.reset_persona_growth(name)
+    state._nudity_state               = "clothed"
+    state._nudity_turns_since_keyword = 0
+    state._pre_sd_prompt              = None
+    state._pre_sd_nudity              = None
+    state._pre_sd_negative            = ""
     return JSONResponse({"status": "reset", "persona": name})
 
 
@@ -73,11 +94,12 @@ async def info():
     max_hist = mem_cfg["max_history"]
     n_msgs   = len(llm.history)
     return JSONResponse({
-        "name":          config.NAME,
-        "llm_ready":     llm.LLM_READY,
-        "stt_silence":   config.CFG.get("stt_silence_seconds", 3),
-        "history_msgs":  n_msgs,
-        "history_max":   max_hist,
+        "name":           config.NAME,
+        "active_persona": state._active_persona_key,
+        "llm_ready":      llm.LLM_READY,
+        "stt_silence":    config.CFG.get("stt_silence_seconds", 3),
+        "history_msgs":   n_msgs,
+        "history_max":    max_hist,
         "demo": {**demo_cfg, "user_name": demo_cfg.get("user_name", "User")},
     })
 

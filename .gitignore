@@ -12,6 +12,7 @@ personas.json
 /models
 history.json
 history_*.json
+group_growth.json
 /static/outputs/
 /server/static/outputs/
 __pycache__/

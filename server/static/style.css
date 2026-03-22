@@ -34,6 +34,7 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:700;font-size:1.8rem;lette
 .is img.active{opacity:1;border-color:var(--accent);box-shadow:0 0 8px var(--accent2)}
 .pd-toggle{background:none;border:1px solid var(--border);color:var(--muted);width:auto;min-width:1.4rem;height:1.4rem;padding:0 .4rem;cursor:pointer;font-size:.8rem;line-height:1;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .pd-toggle:hover{border-color:var(--accent2);color:var(--accent)}
+.pd-toggle.active{border-color:var(--accent);color:var(--accent)}
 .ic img,.ic video{max-width:100%;max-height:calc(100% - 2rem);object-fit:contain;border:1px solid var(--border);animation:fi .5s ease}.ic img.preview{filter:blur(4px);opacity:.6;transition:filter .4s,opacity .4s}.ic img.final{filter:none;opacity:1}.ph{color:var(--muted);text-align:center;font-style:italic;font-family:'Cormorant Garamond',serif;font-size:1rem}
 .pd{padding:.6rem 1.2rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.4rem}
 .pd textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.68rem;font-family:'Montserrat',sans-serif;line-height:1.5;resize:vertical;min-height:60px;padding:.4rem;outline:none}

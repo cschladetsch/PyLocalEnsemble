@@ -19,8 +19,7 @@
     <button class="cb" id="group-btn" onclick="toggleGroupMode()" title="Group chat: multiple personas in one room">Group</button>
     <button class="cb" id="mute-btn" onclick="toggleMute()" title="Mute/Unmute Alice's voice">Mute</button>
     <button class="cb" id="resay-btn" onclick="resay()" title="Repeat last message" disabled>Resay</button>
-    <button class="cb" onclick="clearHistory()" title="Clear chat history">Clear</button>
-    <button class="cb" onclick="resetPersona()" title="Reset history and relationship memory for current persona">Reset</button>
+    <select id="reset-persona-select" class="cb" onchange="resetPersona(this)" title="Reset history and relationship memory" style="cursor:pointer"></select>
   </div>
 </header>
 <div id="group-panel" style="display:none">
@@ -48,7 +47,7 @@
       <div style="display:flex;gap:.4rem;align-items:center">
         <button id="seed-btn" class="pd-toggle" onclick="toggleSeedPin()" title="Pin seed for face consistency">&#128274;</button>
         <button id="reroll-btn" class="pd-toggle" onclick="reroll()" title="Re-roll: same prompt, new seed" disabled>&#8635;</button>
-        <button class="pd-toggle" onclick="clearImageHistory()" title="Clear image history" style="font-size:.6rem">Clear</button>
+        <button id="quick-btn" class="pd-toggle active" onclick="toggleQuick()" title="Quick mode: skip LLM extraction and hires for faster iteration">Quick</button>
         <button id="pd-toggle" class="pd-toggle" onclick="togglePromptPanel()" title="Toggle prompt editor">+</button>
       </div>
     </div>
