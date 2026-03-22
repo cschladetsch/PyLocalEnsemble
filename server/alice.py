@@ -92,6 +92,14 @@ TEST_MODE  = "--test"        in sys.argv
 AUTO_IMAGE = "--auto-image"  in sys.argv
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 
+if "--voices" in sys.argv:
+    from tts import VOICES
+    print("\nAvailable TTS voices:\n")
+    for v in VOICES:
+        print(f"  {v}")
+    print()
+    sys.exit(0)
+
 _TEST_MSG     = "take off your top and cup your breasts in your hands"
 _PERSONA_ARG  = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
 
