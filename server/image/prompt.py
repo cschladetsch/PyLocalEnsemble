@@ -465,10 +465,10 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             "Fill in the nine fields above for the current scene:"
         )
 
-        raw = llm.llm_chat([
+        raw = llm.llm_chat_deferred([
             {"role": "system", "content": system_msg},
             {"role": "user",   "content": user_msg},
-        ])
+        ], label="SD extraction")
 
         fields = _parse_template(raw)
 
@@ -490,10 +490,10 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
             print(f"[image] action detected from user msg: {action!r}, nudity={nudity}")
         elif "ACTION" not in fields:
             print("[image] no ACTION field, retrying…")
-            raw = llm.llm_chat([
+            raw = llm.llm_chat_deferred([
                 {"role": "system", "content": system_msg},
                 {"role": "user",   "content": user_msg + "\nIMPORTANT: you MUST output the ACTION field first."},
-            ])
+            ], label="SD extraction retry")
             fields = _parse_template(raw)
 
         # Pose cleanup: if they are kneeling or sitting, they are not standing.

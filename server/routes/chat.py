@@ -38,6 +38,7 @@ async def chat(body: ChatRequest):
             collected = []
 
             def _run():
+                llm._chat_in_progress.set()
                 try:
                     p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
                     trimmed = list(messages)
@@ -93,6 +94,8 @@ async def chat(body: ChatRequest):
                     import traceback
                     traceback.print_exc()
                     q.put(e)
+                finally:
+                    llm._chat_in_progress.clear()
                 q.put(None)
 
             loop = asyncio.get_running_loop()

@@ -186,13 +186,13 @@ def _compress_pair(key: str):
         f"Exchange:\n{text}"
     )
     try:
-        raw = llm.llm_chat([
+        raw = llm.llm_chat_deferred([
             {"role": "system", "content": (
                 "You are a relationship tracker for fictional characters. "
                 "Be specific, emotionally precise, and concise. No purple prose."
             )},
             {"role": "user", "content": prompt},
-        ]).strip()
+        ], label="pair compression").strip()
 
         rel_match   = re.search(r'RELATIONSHIP:\s*(.+?)(?=\n[A-Z_]+:|$)', raw, re.DOTALL | re.IGNORECASE)
         mood_a_pat  = re.escape(name_a.upper()) + r'_MOOD:\s*(.+?)(?=\n[A-Z_]+:|$)'
@@ -703,6 +703,7 @@ async def group_chat(body: GroupChatRequest):
             q_inner: _queue.Queue = _queue.Queue()
 
             def _run(msgs=messages, pname=persona_name):
+                llm._chat_in_progress.set()
                 try:
                     params = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
                     r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
@@ -727,6 +728,8 @@ async def group_chat(body: GroupChatRequest):
                                 q_inner.put(delta)
                 except Exception as e:
                     q_inner.put(e)
+                finally:
+                    llm._chat_in_progress.clear()
                 q_inner.put(None)
 
             loop = asyncio.get_running_loop()

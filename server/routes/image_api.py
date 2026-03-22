@@ -60,7 +60,7 @@ def _synthesize_group_scene(history_entries: list, personas: dict) -> str:
     persona_list = ", ".join(p.get("name", k) for k, p in personas.items())
     text = "\n".join(f"{e['sender']}: {e['content']}" for e in recent)
     try:
-        desc = llm.llm_chat([
+        desc = llm.llm_chat_deferred([
             {"role": "system", "content": (
                 "Convert roleplay dialogue into a concrete physical scene description for image generation. "
                 "Describe body positions, poses, who is touching whom, and the physical setting. "
@@ -71,7 +71,7 @@ def _synthesize_group_scene(history_entries: list, personas: dict) -> str:
                 f"Dialogue:\n{text}\n\n"
                 "Describe ONLY what is physically happening: poses, positions, contact, and setting location."
             )},
-        ]).strip()
+        ], label="scene synthesis").strip()
         print(f"[image] synthesized group scene: {desc!r}")
         return desc
     except Exception as e:

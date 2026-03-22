@@ -7,7 +7,8 @@ from utils import step, ok, warn, http_ok
 LLM_READY = False
 history   = []
 memory    = ""
-_history_lock = threading.Lock()
+_history_lock     = threading.Lock()
+_chat_in_progress = threading.Event()   # set for the full lifetime of any streaming chat call
 
 LLAMA_URL = os.environ.get("LLAMA_URL", config.CFG.get("llama_url", "http://127.0.0.1:8080"))
 if not LLAMA_URL.startswith("http"):
@@ -155,6 +156,19 @@ def llm_chat(messages: list) -> str:
         r.raise_for_status()
         
     return r.json()["choices"][0]["message"]["content"]
+
+
+def llm_chat_deferred(messages: list, label: str = "") -> str:
+    """Like llm_chat but raises immediately if a chat stream is active.
+
+    Use this for background / lower-priority LLM calls (image extraction,
+    pair compression, scene synthesis) so they yield to live chat without
+    ever queuing behind a streaming response.
+    """
+    if _chat_in_progress.is_set():
+        tag = f" ({label})" if label else ""
+        raise RuntimeError(f"chat in progress — deferring LLM call{tag}")
+    return llm_chat(messages)
 
 
 def save_history():
