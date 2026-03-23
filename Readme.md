@@ -445,6 +445,12 @@ alice/
 ├── android/                  ← Android application (Kotlin/Jetpack Compose)
 │   └── app/src/main/java/    ← UI, ViewModels, and JNI bridge to Rust core
 │
+├── personas/                 ← persona management
+│   ├── packs/                ← shared persona sets (git-tracked)
+│   │   ├── default.json      ← the standard starting set
+│   │   └── senate.json       ← the Roman Senate expansion pack
+│   └── mine/                 ← personal customizations & backups (gitignored)
+│
 ├── log/                      ← runtime logs (gitignored)
 ├── models/                   ← GGUF and TTS models (gitignored)
 ├── llama-cpp/                ← llama-server binaries (gitignored)
@@ -499,6 +505,25 @@ The **Reset** option in the UI (or `DELETE /persona/{name}/reset`) performs a de
 3. Resets nudity decay and character-specific image state.
 
 This effectively "reboots" your relationship with that persona while leaving others untouched.
+
+---
+
+## Persona Packs
+
+Alice supports modular persona sets via the **Packs** dropdown in the header.
+
+### Directory Structure
+- **`personas/packs/`**: Shared, community persona sets included in the repository. (e.g., `default.json`, `senate.json`).
+- **`personas/mine/`**: Your personal customizations. Files placed here will appear in the dropdown with a `mine/` prefix and are **never committed to Git**.
+- **`personas.json`**: The active persona list. This is always a copy of a pack.
+
+### Non-Destructive Switching
+When you select a new pack from the UI:
+1. The server automatically creates a timestamped backup of your current `personas.json` in `personas/mine/` (e.g., `backup_20260323_224512.json`).
+2. The selected pack is copied to `personas.json`.
+3. The UI reloads instantly with the new characters, fonts, and voices.
+
+This ensures you can experiment with new persona sets (like the **Roman Senate** pack) without losing your tailored configurations.
 
 ---
 
