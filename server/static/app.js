@@ -368,6 +368,8 @@ async function interrupt(reason) {
     imgAbort.abort();
     imgAbort = null;
   }
+  stopProgress();
+  enableAll();
   // Only tell the server to cancel Forge if something was actually running.
   // Calling /interrupt unnecessarily sets _gen_cancel and kills the next gen.
   if (hadImgInFlight) {
