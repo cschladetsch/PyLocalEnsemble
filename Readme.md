@@ -10,6 +10,25 @@ Powered by:
 - [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx) — offline neural TTS
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — offline STT (Whisper small.en)
 
+```mermaid
+graph TD
+    User([User]) <--> UI[Web UI / Android App]
+    UI <--> Alice[Alice Python Server]
+    
+    subgraph Engines ["Local Inference Engines"]
+        Alice <--> LLM[llama.cpp]
+        Alice <--> SD[SD Forge]
+        Alice <--> TTS[Kokoro TTS]
+        Alice <--> STT[Faster-Whisper]
+    end
+    
+    subgraph Storage ["Local Storage"]
+        Alice <--> Hist[(Chat History)]
+        Alice <--> Packs[(Persona Packs)]
+        Alice <--> Models[(Model Weights)]
+    end
+```
+
 ---
 
 ## System Requirements
