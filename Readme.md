@@ -395,75 +395,110 @@ The leftmost dropdown lists models available from the llama-server. Switching cl
 
 ## Directory Structure
 
-The current repo layout is split by runtime: `alice.py` is a thin root launcher, the Python app lives under `server/`, the Rust core/bindings live under `core/`, and runtime logs go to `log/`.
+The repository is organized by runtime environment: a thin root launcher delegates to the Python backend, while the Rust core provides native performance for desktop and mobile bindings.
 
 ```
 alice/
-├── alice.py                  ← entry point — FastAPI app + startup
-├── config.py                 ← paths, defaults, load/save config, personas
-├── llm.py                    ← llama-server lifecycle, chat, history, memory
-├── state.py                  ← shared mutable runtime state (nudity, seed, etc.)
-├── tts.py                    ← Kokoro TTS load + synthesis + effects
-├── stt.py                    ← Whisper STT load + transcription
-├── utils.py                  ← step/ok/warn, http_ok, wait_for, is_wsl
-├── install.py                ← installer entry point (thin orchestrator)
+├── alice.py                  ← thin root launcher (delegates to server/alice.py)
+├── install.py                ← installer orchestrator
 │
-├── routes/                   ← FastAPI route modules
-│   ├── chat.py               ← POST /chat (SSE streaming)
-│   ├── group.py              ← POST /group/chat · /group/start · /group/stop · /group/history
-│   ├── audio.py              ← GET /voices · POST /voice · /tts · /tts/stream · /stt
-│   ├── image_api.py          ← POST /image · /reroll · /generate · /interrupt · /seed
-│   ├── persona.py            ← GET /personas · POST /persona/{name}
-│   └── system.py             ← GET /info · /history · /negative · /demo/prompt · /demo/user-personas · POST /model · /auto-image · /demo/user-persona · DELETE /image
+├── server/                   ← Python backend (FastAPI)
+│   ├── alice.py              ← backend entry point & startup logic
+│   ├── config.py             ← paths, defaults, persona merging
+│   ├── llm.py                ← llama-server lifecycle, history, memory compression
+│   ├── state.py              ← shared runtime state (nudity, seed, active persona)
+│   ├── tts.py                ← Kokoro TTS synthesis & sentence streaming
+│   ├── stt.py                ← Faster-Whisper transcription
+│   ├── utils.py              ← shared helpers (logging, path resolution, OS checks)
+│   │
+│   ├── routes/               ← FastAPI endpoint modules
+│   │   ├── chat.py           ← /chat (SSE streaming)
+│   │   ├── group.py          ← /group/* (group chat, chatter loop, growth)
+│   │   ├── audio.py          ← /voices, /tts, /stt
+│   │   ├── image_api.py      ← /image, /reroll, /generate, /seed
+│   │   ├── persona.py        ← /personas, /persona/{name}
+│   │   └── system.py         ← /info, /history, /models, /settings, /demo/*
+│   │
+│   ├── image/                ← image generation package
+│   │   ├── prompt.py         ← SD tag utilities, LLM prompt extraction
+│   │   ├── forge.py          ← Forge process lifecycle
+│   │   └── generate.py       ← txt2img API calls & ADetailer handling
+│   │
+│   ├── installer/            ← modular installer steps
+│   │   ├── packages.py       ← dependency & pip checks
+│   │   ├── llama.py          ← llama-server binary retrieval
+│   │   ├── model.py          ← GGUF model selection & download
+│   │   ├── tts_install.py    ← Kokoro model & voice retrieval
+│   │   └── forge_install.py  ← SD Forge & ADetailer setup
+│   │
+│   ├── static/               ← Web UI (HTML/CSS/JS)
+│   │   └── outputs/          ← generated images (gitignored)
+│   │
+│   └── tests/                ← pytest suite (247+ tests)
 │
-├── image/                    ← image generation package
-│   ├── prompt.py             ← SD tag utilities, LLM prompt extraction, accessory detection
-│   ├── forge.py              ← Forge process lifecycle + Python detection
-│   └── generate.py           ← txt2img API call, nudity/clothing handling, ADetailer
+├── core/                     ← Rust core (native inference)
+│   ├── src/                  ← cross-platform engine logic (LLM, TTS, STT)
+│   └── bindings/
+│       ├── python/           ← pyo3 bindings (future desktop native path)
+│       └── android/          ← JNI bindings for the Android app
 │
-├── installer/                ← installer steps package
-│   ├── helpers.py            ← Spinner, download utils, shared constants
-│   ├── packages.py           ← step 1-2: Python check + pip install
-│   ├── llama.py              ← step 3: llama-server download
-│   ├── model.py              ← step 4: GGUF model selection + download
-│   ├── tts_install.py        ← step 5: Kokoro TTS model download
-│   └── forge_install.py      ← step 6: Forge clone + checkpoint + ADetailer
+├── android/                  ← Android application (Kotlin/Jetpack Compose)
+│   └── app/src/main/java/    ← UI, ViewModels, and JNI bridge to Rust core
 │
-├── conf/                     ← example / template config files (committed)
-│   ├── alice.example.json
-│   └── personas.example.json
-│
-├── static/                   ← web UI
-│   ├── index.html
-│   ├── app.js
-│   ├── style.css
-│   └── outputs/              ← generated images (gitignored)
-│
-├── tests/                    ← pytest test suite (247 tests)
-│   ├── conftest.py
-│   ├── test_api.py           ← API endpoint tests
-│   ├── test_audio.py         ← _tts_clean, _emotion_speed
-│   ├── test_config.py        ← config loading and persona merging
-│   ├── test_image_utils.py   ← clean_tags, exposure rules, nudity keywords
-│   ├── test_install.py       ← llama-server asset selection
-│   ├── test_llm.py           ← history ops, memory compression
-│   ├── test_prompt.py        ← SD prompt extraction, action/accessory detection
-│   ├── test_state.py         ← image saving, RE_CLOTHE, nudity patterns
-│   └── test_tts.py           ← TTS effects, chunking, crossfade
-│
-├── alice.json                ← your personal config (gitignored)
-├── personas.json             ← your personas (gitignored)
-├── history.json              ← single-persona conversation history (auto-created, gitignored)
-├── history_<persona>.json    ← per-persona history files (auto-created, gitignored)
-├── history_group_<pair>.json ← per-pair group chat history (auto-created, gitignored)
-├── group_growth.json         ← persona relationship memos + emotional states (auto-created, gitignored)
-├── models/                   ← GGUF models (gitignored)
-│   └── tts/                  ← Kokoro model files
-├── llama-cpp/                ← llama-server binary (gitignored)
-└── stable-diffusion-webui-forge/  ← auto-cloned by install.py (gitignored)
+├── log/                      ← runtime logs (gitignored)
+├── models/                   ← GGUF and TTS models (gitignored)
+├── llama-cpp/                ← llama-server binaries (gitignored)
+└── stable-diffusion-webui-forge/  ← SD Forge checkout (gitignored)
     ├── extensions/adetailer/ ← ADetailer extension (auto-cloned)
     └── models/adetailer/     ← hand_yolov8n.pt (auto-downloaded)
 ```
+
+---
+
+## Android App (Experimental)
+
+Alice includes a native Android application located in `android/`. This app is designed for fully local, private AI interaction on high-end mobile devices.
+
+- **Local Inference:** Uses the Rust `core` via JNI bindings.
+- **Hardware Acceleration:** Leverages mobile GPUs for both LLM and TTS.
+- **Status:** Experimental. Currently supports streaming chat and voice synthesis. Image generation still requires the Python backend or a future mobile-native diffusion implementation.
+
+To build, open the `android/` directory in Android Studio. Ensure the Rust toolchain is installed to compile the `alice-core` native library.
+
+---
+
+## Repetition Suppression
+
+Alice fights conversational staleness through multiple dynamic and static mechanisms.
+
+### Banned Phrases (Static)
+The `banned_phrases` list in `alice.json` lets you permanently block specific clichés. These are injected into every system prompt as a hard constraint.
+
+```json
+"banned_phrases": [
+    "moonlight", "shadows dance", "primal hunger", "as an AI"
+]
+```
+
+### Dynamic Suppression
+The system actively monitors the current session for repetition:
+- **N-gram blocking:** Automatically identifies and bans 2-4 word phrases that appear too frequently.
+- **Phrase avoidance:** Detects overused content words and injects an `AVOID` list into the LLM context.
+- **Jaccard deduplication:** Re-rolls or strips turns that are too similar (> 65% overlap) to recent messages.
+
+---
+
+## Personas & Growth
+
+History is preserved across persona switches, but each character maintains its own unique perspective.
+
+### Persona Reset
+The **Reset** option in the UI (or `DELETE /persona/{name}/reset`) performs a deep wipe:
+1. Clears chat history and memory for that persona.
+2. Wipes **Growth Data** — relationship memos and emotional states stored in `group_growth.json`.
+3. Resets nudity decay and character-specific image state.
+
+This effectively "reboots" your relationship with that persona while leaving others untouched.
 
 ---
 

@@ -449,6 +449,34 @@ def test_pin_then_unpin_roundtrip(reset_seed_state):
     assert state._character_seed == -1
 
 
+# ── DELETE /persona/{name}/reset ──────────────────────────────────────────────
+
+def test_reset_persona_clears_history_growth_and_state(monkeypatch):
+    import llm, state
+    from routes import group as _grp
+    
+    # Set up dirty state
+    llm.history.append({"role": "user", "content": "hello Alice"})
+    state._nudity_state = "fully nude"
+    state._nudity_turns_since_keyword = 5
+    _grp._pair_memos["alice|morrigan"] = "They are close."
+    _grp._persona_moods["alice"] = "happy"
+    
+    # Mock _save_growth to avoid file IO
+    monkeypatch.setattr(_grp, "_save_growth", lambda: None)
+    
+    res = client.delete("/persona/Alice/reset")
+    assert res.status_code == 200
+    assert res.json() == {"status": "reset", "persona": "Alice"}
+    
+    # Verify everything is cleared
+    assert llm.history == []
+    assert state._nudity_state == "clothed"
+    assert state._nudity_turns_since_keyword == 0
+    assert "alice|morrigan" not in _grp._pair_memos
+    assert "alice" not in _grp._persona_moods
+
+
 # ── POST /model ───────────────────────────────────────────────────────────────
 
 @pytest.fixture()
