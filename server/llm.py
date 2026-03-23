@@ -127,15 +127,12 @@ def llm_chat(messages: list) -> str:
     # Try to get the actual model name from the server to avoid 400 errors
     model = llm_model()
     
+    p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
     payload = {
         "model":            model,
         "messages":         messages,
         "stream":           False,
-        "temperature":      0.9,
-        "top_p":            0.92,
-        "repeat_penalty":   1.25,
-        "presence_penalty": 0.8,
-        "frequency_penalty": 0.5,
+        **p
     }
     
     r = req.post(f"{LLAMA_URL}/v1/chat/completions", json=payload, timeout=120)

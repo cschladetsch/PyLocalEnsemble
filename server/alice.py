@@ -118,7 +118,7 @@ def _resolve_persona(arg: str) -> str:
     return arg
 
 
-_TEST_PERSONA = _resolve_persona(_PERSONA_ARG or "Android")
+_TEST_PERSONA = _resolve_persona(_PERSONA_ARG or "Alice")
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 class _NoSpamFilter(logging.Filter):

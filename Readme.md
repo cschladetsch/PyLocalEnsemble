@@ -191,6 +191,7 @@ Four personas are included out of the box. Switch between them using the dropdow
 | Victorian Lady | Isabelle — aristocratic, wickedly composed |
 | Android | ARIA — synthetic, precise, curious |
 | Forest Witch | Morrigan — wild, primal, ancient |
+| **Expansion Pack** | **Roman Senate** — Caesar, Cicero, Cato, and more |
 
 Alice's opening line is randomly chosen from a pool of 12 variations on each page load and after clearing history.
 

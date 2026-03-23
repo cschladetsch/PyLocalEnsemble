@@ -96,6 +96,7 @@ gantt
     Refactor image/ + installer/ pkgs   :done, 2026-03, 2026-03
     Test suite (39 tests)               :done, 2026-03, 2026-03
     Built-in personas + image fixes     :done, 2026-03, 2026-03
+    Experimental Android App (local)    :active, 2026-03, 2026-05
 
     section Phase 2 · Distribution
     Packaging / release zip             :active, 2026-03, 2026-04
