@@ -7,12 +7,15 @@
 /tmp
 alice.json
 personas.json
+# Personal customized persona versions
+/personas/mine/
+history.json
+history_*.json
+history_group_*.json
+group_growth.json
 /.claude
 /backups
 /models
-history.json
-history_*.json
-group_growth.json
 /static/outputs/
 /server/static/outputs/
 __pycache__/

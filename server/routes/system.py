@@ -33,6 +33,43 @@ async def patch_settings(body: SettingsPatch):
 class DemoPersonaRequest(BaseModel):
     name: str
 
+class PackSwitchRequest(BaseModel):
+    name: str
+
+
+@router.get("/persona-packs")
+async def list_persona_packs():
+    return JSONResponse({"packs": config.get_persona_packs()})
+
+
+@router.post("/persona-pack")
+async def switch_persona_pack(body: PackSwitchRequest):
+    import shutil, time
+    
+    # 1. Backup current personas.json to /personas/mine
+    if os.path.exists(config.PERSONAS_FILE):
+        os.makedirs(config.MINE_DIR, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_name = f"backup_{timestamp}.json"
+        shutil.copy(config.PERSONAS_FILE, os.path.join(config.MINE_DIR, backup_name))
+        print(f"[system] Backed up current personas.json to mine/{backup_name}")
+
+    # 2. Determine source path
+    if body.name.startswith("mine/"):
+        real_name = body.name[5:]
+        src = os.path.join(config.MINE_DIR, f"{real_name}.json")
+    else:
+        src = os.path.join(config.PACKS_DIR, f"{body.name}.json")
+        
+    if not os.path.exists(src):
+        return JSONResponse({"error": f"Pack '{body.name}' not found"}, status_code=404)
+    
+    # 3. Overwrite personas.json and reload
+    shutil.copy(src, config.PERSONAS_FILE)
+    config.reload_personas()
+    print(f"[system] Switched persona pack to: {body.name}")
+    return JSONResponse({"status": "ok", "pack": body.name})
+
 
 @router.get("/models")
 async def list_models():

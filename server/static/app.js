@@ -500,6 +500,36 @@ async function loadModels() {
   } catch (e) { console.warn('Could not load models:', e); }
 }
 
+async function loadPacks() {
+  try {
+    const res = await fetch('/persona-packs');
+    const d = await res.json();
+    const sel = document.getElementById('pack-select');
+    if (!sel) return;
+    sel.innerHTML = `<option value="" disabled selected>Packs</option>` +
+      d.packs.map(p => `<option value="${p}">${p}</option>`).join('');
+  } catch (e) { console.warn('Could not load persona packs:', e); }
+}
+
+async function switchPack(name) {
+  const sel = document.getElementById('pack-select');
+  sel.disabled = true;
+  try {
+    const res = await fetch('/persona-pack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (res.ok) {
+      await loadPersonas();
+      // Also update the reset persona select
+      const resetSel = document.getElementById('reset-persona-select');
+      if (resetSel) loadResetPersonas();
+    }
+  } catch (e) { console.error('Failed to switch pack:', e); }
+  sel.disabled = false;
+}
+
 async function switchModel(sel) {
   const path = sel.value;
   const name = sel.options[sel.selectedIndex].text;
@@ -518,6 +548,7 @@ async function switchModel(sel) {
 }
 
 loadModels();
+loadPacks();
 
 const _PERSONA_FONTS = {
   'default':          { family: "'Montserrat', sans-serif",      style: 'normal', size: '.88rem', weight: '300', spacing: 'normal' },

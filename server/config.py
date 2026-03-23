@@ -14,6 +14,8 @@ def history_file_for(persona_key: str) -> str:
     return os.path.join(ALICE_DIR, f"history_{safe}.json")
 CONFIG_FILE   = os.path.join(ALICE_DIR, "alice.json")
 PERSONAS_FILE = os.path.join(ALICE_DIR, "personas.json")
+PACKS_DIR     = os.path.join(ALICE_DIR, "personas", "packs")
+MINE_DIR      = os.path.join(ALICE_DIR, "personas", "mine")
 
 _DEFAULT_CONFIG = {
     "name":               "Alice",
@@ -162,10 +164,13 @@ def load_personas(cfg: dict) -> dict:
         }
     }
     if not os.path.exists(PERSONAS_FILE):
-        example = os.path.join(SERVER_DIR, "conf", "personas.example.json")
-        if os.path.exists(example):
-            shutil.copy(example, PERSONAS_FILE)
-            print(f"        config: created {PERSONAS_FILE} from example")
+        # Try copying from packs/default.json or server/conf/personas.example.json
+        src = os.path.join(PACKS_DIR, "default.json")
+        if not os.path.exists(src):
+            src = os.path.join(SERVER_DIR, "conf", "personas.example.json")
+        if os.path.exists(src):
+            shutil.copy(src, PERSONAS_FILE)
+            print(f"        config: created {PERSONAS_FILE} from {os.path.basename(src)}")
     if os.path.exists(PERSONAS_FILE):
         try:
             with open(PERSONAS_FILE, encoding="utf-8") as f:
@@ -177,6 +182,26 @@ def load_personas(cfg: dict) -> dict:
         except Exception as e:
             print(f"WARNING: could not load personas.json: {e}")
     return defaults
+
+
+def get_persona_packs() -> list[str]:
+    """Find all .json files in personas/packs/ and personas/mine/."""
+    packs = []
+    if os.path.exists(PACKS_DIR):
+        for f in os.listdir(PACKS_DIR):
+            if f.endswith(".json"):
+                packs.append(f[:-5])
+    if os.path.exists(MINE_DIR):
+        for f in os.listdir(MINE_DIR):
+            if f.endswith(".json"):
+                packs.append(f"mine/{f[:-5]}")
+    return sorted(packs)
+
+
+def reload_personas():
+    """Reload PERSONAS from disk after a pack switch."""
+    global PERSONAS
+    PERSONAS = load_personas(CFG)
 
 
 def banned_phrases_note(cfg: dict = None) -> str:
