@@ -1,0 +1,13 @@
+services:
+  forge:
+    build: .
+    ports:
+      - "7860:7860"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    volumes:
+      - ./models:/app/forge/models
+
