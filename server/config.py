@@ -107,12 +107,10 @@ _DEFAULT_CONFIG = {
 
 def resolve_path(p: str) -> str:
     if not p: return ""
-    # If it's already absolute and exists, keep it
-    if os.path.isabs(p) and os.path.exists(p):
+    p = os.path.expanduser(p)
+    if os.path.isabs(p):
         return p
-    # Otherwise, try making it relative to ALICE_DIR
-    abs_p = os.path.normpath(os.path.join(ALICE_DIR, p))
-    return abs_p
+    return os.path.normpath(os.path.join(ALICE_DIR, p))
 
 
 def load_config() -> dict:

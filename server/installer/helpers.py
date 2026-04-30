@@ -2,11 +2,12 @@
 import sys, os, subprocess, json, threading, itertools, time
 import urllib.request, urllib.error
 
-# Resolve paths relative to the project root (one level up from this file)
+# Resolve paths relative to the server dir and the project root
 _INSTALLER_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPT_DIR     = os.path.dirname(_INSTALLER_DIR)
+SCRIPT_DIR     = os.path.dirname(_INSTALLER_DIR)          # server/
+_ROOT_DIR      = os.path.dirname(SCRIPT_DIR)              # repo root
 
-CONFIG_FILE  = os.path.join(SCRIPT_DIR, "alice.json")
+CONFIG_FILE  = os.path.join(_ROOT_DIR, "alice.json")
 REQ_FILE     = os.path.join(SCRIPT_DIR, "requirements.txt")
 LLAMA_DIR    = os.path.join(SCRIPT_DIR, "llama-cpp")
 MODELS_DIR   = os.path.join(SCRIPT_DIR, "models")
