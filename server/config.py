@@ -92,7 +92,8 @@ _DEFAULT_CONFIG = {
         "presence_penalty":  0.8,
         "frequency_penalty": 0.5,
     },
-    "quick_image":  True,   # skip LLM extraction + hires/adetailer; use appearance directly
+    "quick_image":       True,   # skip LLM extraction + hires/adetailer; use appearance directly
+    "vram_swap_for_image": True,  # suspend llama-server during image gen to free VRAM
     # Phrases/words the LLM must never use, injected into every system prompt.
     # Add model-level clichés here so they're banned from turn 1 rather than
     # waiting for the dynamic detector to catch them after 2-3 occurrences.

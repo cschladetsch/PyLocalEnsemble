@@ -5,6 +5,7 @@ import logging
 import requests as req
 import config
 import state
+import llm as _llm
 from utils import http_ok, _c
 from image.forge import start_forge
 
@@ -191,12 +192,17 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
 
         _poll_thread = threading.Thread(target=_log_progress, daemon=True)
         _poll_thread.start()
+        vram_swap = config.CFG.get("vram_swap_for_image", True)
+        if vram_swap:
+            _llm.suspend_for_image()
         try:
             r = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         finally:
             _done.set()
             _poll_thread.join(timeout=2)
         data = r.json()
+        if vram_swap:
+            _llm.resume_after_image()
         if "images" not in data:
             detail = data.get("detail", "")
             if "ADetailer" in str(detail) and "alwayson_scripts" in payload:

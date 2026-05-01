@@ -4,11 +4,13 @@ import config
 import state
 from utils import step, ok, warn, http_ok
 
-LLM_READY = False
+LLM_READY     = False
+LLM_SUSPENDED = False   # True while VRAM is yielded to image generation
 history   = []
 memory    = ""
 _history_lock     = threading.Lock()
 _chat_in_progress = threading.Event()   # set for the full lifetime of any streaming chat call
+_server_proc: subprocess.Popen | None = None   # process started by _start_server()
 
 LLAMA_URL = os.environ.get("LLAMA_URL", config.CFG.get("llama_url", "http://127.0.0.1:8080"))
 if not LLAMA_URL.startswith("http"):
@@ -75,7 +77,8 @@ def _start_server():
     kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-    subprocess.Popen(flags, **kw)
+    global _server_proc
+    _server_proc = subprocess.Popen(flags, **kw)
 
 
 def _try_connect(silent=False) -> bool:
@@ -104,6 +107,88 @@ def wait_until_ready(timeout: int = 120) -> bool:
     return False
 
 
+def _kill_server_proc() -> bool:
+    """Terminate the tracked server process. Returns True if a process was killed."""
+    global _server_proc
+    if _server_proc and _server_proc.poll() is None:
+        _server_proc.kill()
+        try:
+            _server_proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            pass
+        _server_proc = None
+        return True
+    _server_proc = None
+    return False
+
+
+def _kill_by_port() -> None:
+    """Kill whatever is listening on the llama-server port (fallback)."""
+    import re as _re
+    m = _re.search(r':(\d+)(?:/|$)', LLAMA_URL)
+    if not m:
+        return
+    port = m.group(1)
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["netstat", "-ano", "-p", "tcp"],
+                               capture_output=True, text=True, check=False)
+            for line in r.stdout.splitlines():
+                parts = line.split()
+                if (len(parts) >= 5 and parts[0].upper() == "TCP"
+                        and parts[1].endswith(f":{port}")
+                        and parts[3].upper() == "LISTENING"):
+                    try:
+                        pid = int(parts[4])
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                       capture_output=True, check=False)
+                        print(f"[llm] killed llama-server PID {pid} (port {port})")
+                    except (ValueError, Exception):
+                        pass
+                    return
+        else:
+            r = subprocess.run(["fuser", "-k", f"{port}/tcp"],
+                               capture_output=True, check=False)
+            if r.returncode != 0:
+                r = subprocess.run(["lsof", "-ti", f"tcp:{port}"],
+                                   capture_output=True, text=True, check=False)
+                for pid_str in r.stdout.split():
+                    if pid_str.isdigit():
+                        os.kill(int(pid_str), 15)
+    except Exception as e:
+        warn(f"[llm] kill-by-port failed: {e}")
+
+
+def suspend_for_image() -> None:
+    """Kill the llama-server to free its VRAM for image generation."""
+    global LLM_READY, LLM_SUSPENDED
+    if LLM_SUSPENDED:
+        return
+    print("[llm] suspending server to free VRAM for image generation...")
+    killed = _kill_server_proc()
+    if not killed:
+        _kill_by_port()
+    LLM_READY     = False
+    LLM_SUSPENDED = True
+
+
+def resume_after_image() -> None:
+    global LLM_SUSPENDED
+    if not LLM_SUSPENDED:
+        return
+    LLM_SUSPENDED = False
+    print("[llm] resuming server after image generation...")
+
+    def _restart():
+        _start_server()
+        wait_until_ready(timeout=180)
+        if LLM_READY:
+            print("[llm] server back up.")
+        else:
+            warn("[llm] server did not come back in time — restart Alice if chat is unresponsive.")
+
+    threading.Thread(target=_restart, daemon=True).start()
+
 def load_llm():
     step(f"Connecting to llama.cpp server at {LLAMA_URL} ...")
     if not http_ok(LLAMA_URL + "/health", timeout=2):
@@ -124,7 +209,9 @@ def load_llm():
 
 
 def llm_chat(messages: list) -> str:
-    # Try to get the actual model name from the server to avoid 400 errors
+    # If the server was just suspended for image gen, wait for it to come back.
+    if not LLM_READY:
+        wait_until_ready(timeout=120)
     model = llm_model()
     
     p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])

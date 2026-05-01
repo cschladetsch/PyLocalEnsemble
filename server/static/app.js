@@ -416,6 +416,9 @@ function startProgress() {
           _inFinishing = true;
           const detail = textinfo || (st.job ? `${st.job}` : 'decoding…');
           status.textContent = `Finishing${passStr} · ${detail}`;
+        } else if (textinfo) {
+          // Forge is busy before sampling starts (e.g. loading model checkpoint)
+          status.textContent = textinfo;
         }
       }
       _lastPct = pct;
