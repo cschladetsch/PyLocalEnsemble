@@ -34,13 +34,16 @@ def load_tts() -> bool:
         return False
     try:
         import numpy as np
+        # Force CPU inference — avoids VRAM competition with LLM and Forge.
+        # Kokoro is small enough that CPU synthesis stays under 100 ms per chunk.
+        os.environ.setdefault("ONNX_PROVIDER", "CPUExecutionProvider")
         _orig_load = np.load
         np.load = lambda *a, **kw: _orig_load(*a, **{**kw, "allow_pickle": True})
         try:
             TTS = _Kokoro(model_path, voices_path)
         finally:
             np.load = _orig_load
-        ok("TTS ready.")
+        ok("TTS ready (CPU).")
         return True
     except Exception as e:
         warn(f"TTS failed to load: {e} — audio will be disabled.")

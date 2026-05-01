@@ -65,6 +65,22 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
         warn(f"Forge tooling upgrade failed: {exc}")
 
 
+def _push_forge_settings(forge_url: str) -> None:
+    """Push Alice-managed settings to Forge so users never need to touch Forge's UI."""
+    settings = {
+        "vae_in_cpu":     False,   # decode on GPU, not CPU
+        "vae_in_fp32":    False,   # no slow fp32 upcast
+        "samples_save":   False,   # Alice saves its own images
+        "grid_save":      False,
+        "save_to_dirs":   False,
+        "samples_format": "png",
+    }
+    try:
+        req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+    except Exception as e:
+        warn(f"Could not push Forge settings: {e}")
+
+
 def set_forge_model(name: str) -> bool:
     forge_url = config.CFG["forge_url"]
     try:
@@ -75,6 +91,7 @@ def set_forge_model(name: str) -> bool:
         if match:
             req.post(f"{forge_url}/sdapi/v1/options",
                      json={"sd_model_checkpoint": match}, timeout=30)
+            _push_forge_settings(forge_url)
             ok(f"Forge model set to: {match}")
             return True
         else:
