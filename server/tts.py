@@ -1,5 +1,4 @@
 import os, io, re, wave, base64
-from kokoro_onnx import Kokoro as _Kokoro
 import config
 from utils import step, ok, warn
 
@@ -33,6 +32,7 @@ def load_tts() -> bool:
         warn("TTS models not found — run install.py. Audio will be disabled.")
         return False
     try:
+        from kokoro_onnx import Kokoro as _Kokoro
         import numpy as np
         # Force CPU inference — avoids VRAM competition with LLM and Forge.
         # Kokoro is small enough that CPU synthesis stays under 100 ms per chunk.
