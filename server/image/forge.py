@@ -66,19 +66,13 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
 
 
 def _push_forge_settings(forge_url: str) -> None:
-    """Push Alice-managed settings to Forge so users never need to touch Forge's UI."""
+    """Push Alice-managed settings to Forge."""
     settings = {
-        # VAE compute device — the setting that actually controls whether the
-        # decode step runs on CPU or GPU.  sd_vae_cpu_offload is Forge's own
-        # option; vae_in_cpu is the upstream SD-WebUI equivalent.  Push both so
-        # whichever one this Forge build respects gets set.
-        "sd_vae_cpu_offload": False,
-        "vae_in_cpu":         False,
-        "vae_in_fp32":        False,   # no slow fp32 upcast
-        "samples_save":       False,   # Alice saves its own images
-        "grid_save":          False,
-        "save_to_dirs":       False,
-        "samples_format":     "png",
+        "vae_in_fp32":    False,   # no slow fp32 upcast
+        "samples_save":   False,   # Alice saves its own images
+        "grid_save":      False,
+        "save_to_dirs":   False,
+        "samples_format": "png",
     }
     try:
         r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)

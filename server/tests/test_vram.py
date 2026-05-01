@@ -1,20 +1,27 @@
-"""Tests for vram.py VRAM state machine.
+"""Tests for vram.py VRAM orchestrator.
 
 All tests mock HTTP calls — no Forge server required.
 """
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import vram
+from vram import Priority
 
 
 @pytest.fixture(autouse=True)
 def _reset_vram_state():
-    """Restore module-level state after each test."""
-    saved_url    = vram._forge_url
-    saved_loaded = vram._forge_loaded
+    """Restore module-level and orchestrator state after each test."""
+    saved_url      = vram._forge_url
+    saved_loaded   = vram._forge_loaded
+    saved_holders  = dict(vram._orch._holders)
+    saved_default  = vram._orch._default
+    saved_def_pri  = vram._orch._default_priority
     yield
-    vram._forge_url    = saved_url
-    vram._forge_loaded = saved_loaded
+    vram._forge_url            = saved_url
+    vram._forge_loaded         = saved_loaded
+    vram._orch._holders        = saved_holders
+    vram._orch._default        = saved_default
+    vram._orch._default_priority = saved_def_pri
 
 
 # ── setup ────────────────────────────────────────────────────────────────────
@@ -154,60 +161,121 @@ def test_reload_forge_no_url_skips_http():
     mock_post.assert_not_called()
 
 
-# ── acquire_for_image / release_from_image ───────────────────────────────────
+# ── acquire_for_image ─────────────────────────────────────────────────────────
 
-def test_acquire_for_image_suspends_llm_then_reloads():
-    """acquire_for_image must call suspend_for_image before reload_forge."""
+def test_acquire_for_image_evicts_llm_and_loads_forge():
+    """GENERATION priority must evict a BACKGROUND-priority LLM and load Forge."""
+    import llm as _llm
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = False
+    # LLM is the default background holder
+    vram._orch._holders["llm"] = Priority.BACKGROUND
+
     call_order = []
+
+    with patch.object(_llm, "suspend_for_image", side_effect=lambda: call_order.append("suspend")):
+        with patch("vram.time.sleep"):
+            resp = MagicMock(status_code=200)
+            with patch("vram.req.post", return_value=resp):
+                with patch("image.forge._push_forge_settings"):
+                    vram.acquire_for_image()
+
+    assert "suspend" in call_order, "LLM must be suspended before image generation"
+    assert vram._forge_loaded is True, "Forge checkpoint must be loaded onto GPU"
+
+
+def test_acquire_for_image_sleeps_after_evicting_llm():
+    """A sleep of ≥ 2 s must occur (CUDA VRAM reclaim) between LLM kill and Forge load."""
     import llm as _llm
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = False
+    vram._orch._holders["llm"] = Priority.BACKGROUND
 
-    def fake_suspend(): call_order.append("suspend")
-    def fake_reload(): call_order.append("reload"); return True
-
-    with patch.object(_llm, "suspend_for_image", side_effect=fake_suspend):
-        with patch("vram.reload_forge", side_effect=fake_reload):
-            with patch("vram.time.sleep"):
-                vram.acquire_for_image()
-
-    assert call_order == ["suspend", "reload"]
-
-
-def test_acquire_for_image_sleeps_before_reload():
-    """acquire_for_image must sleep to let CUDA reclaim VRAM after the kill."""
-    import llm as _llm
-    sleep_calls = []
+    sleep_values = []
+    resp = MagicMock(status_code=200)
 
     with patch.object(_llm, "suspend_for_image"):
-        with patch("vram.reload_forge"):
-            with patch("vram.time.sleep", side_effect=lambda s: sleep_calls.append(s)):
-                vram.acquire_for_image()
+        with patch("vram.time.sleep", side_effect=lambda s: sleep_values.append(s)):
+            with patch("vram.req.post", return_value=resp):
+                with patch("image.forge._push_forge_settings"):
+                    vram.acquire_for_image()
 
-    assert sleep_calls and sleep_calls[0] == pytest.approx(2.0)
+    assert any(s >= 2.0 for s in sleep_values), "Must sleep ≥ 2 s for CUDA to reclaim VRAM"
 
 
-def test_release_from_image_unloads_then_resumes_llm():
-    """release_from_image must unload Forge, then restart the LLM if suspended."""
+def test_acquire_for_image_does_not_evict_interactive_holder():
+    """GENERATION (2) must NOT evict an INTERACTIVE (1) holder."""
     import llm as _llm
-    call_order = []
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = False
+    # Pretend a chat response is already holding the GPU at INTERACTIVE priority
+    vram._orch._holders["llm"] = Priority.INTERACTIVE
 
-    def fake_unload(): call_order.append("unload"); return True
-    def fake_resume(): call_order.append("resume")
+    resp = MagicMock(status_code=200)
+    with patch.object(_llm, "suspend_for_image") as mock_suspend:
+        with patch("vram.time.sleep"):
+            with patch("vram.req.post", return_value=resp):
+                with patch("image.forge._push_forge_settings"):
+                    vram.acquire_for_image()
 
-    with patch("vram.unload_forge", side_effect=fake_unload):
-        with patch.object(_llm, "LLM_SUSPENDED", True):
-            with patch.object(_llm, "resume_after_image", side_effect=fake_resume):
-                vram.release_from_image()
-
-    assert call_order == ["unload", "resume"]
+    mock_suspend.assert_not_called()
 
 
-def test_release_from_image_skips_resume_when_not_suspended():
-    import llm as _llm
-    with patch("vram.unload_forge"):
-        with patch.object(_llm, "LLM_SUSPENDED", False):
-            with patch.object(_llm, "resume_after_image") as mock_resume:
-                vram.release_from_image()
-    mock_resume.assert_not_called()
+# ── release_from_image ────────────────────────────────────────────────────────
+
+def test_release_from_image_unloads_forge():
+    """release_from_image must evict the Forge checkpoint from VRAM."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+    vram._orch._holders["forge"] = Priority.GENERATION
+
+    resp = MagicMock(status_code=200)
+    with patch("vram.req.post", return_value=resp):
+        with patch.object(vram._orch, "_reload_default_async"):
+            vram.release_from_image()
+
+    assert vram._forge_loaded is False
+
+
+def test_release_from_image_triggers_llm_reload():
+    """After Forge releases, the LLM default must be scheduled for reload."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+    vram._orch._holders["forge"] = Priority.GENERATION
+
+    resp = MagicMock(status_code=200)
+    with patch("vram.req.post", return_value=resp):
+        with patch.object(vram._orch, "_reload_default_async") as mock_reload:
+            vram.release_from_image()
+
+    mock_reload.assert_called_once()
+
+
+# ── Priority semantics ────────────────────────────────────────────────────────
+
+def test_interactive_preempts_generation():
+    """An INTERACTIVE acquire (e.g. urgent chat reclaiming LLM) must interrupt
+    and evict an in-progress GENERATION holder (Forge mid-gen)."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+    vram._orch._holders["forge"] = Priority.GENERATION
+
+    interrupted = []
+    unloaded    = []
+
+    # Intercept the forge resource's interrupt/unload callbacks directly.
+    vram._orch._resources["forge"]._interrupt_fn = lambda: interrupted.append(True)
+    vram._orch._resources["forge"]._unload_fn    = lambda: (unloaded.append(True), True)[1]
+
+    # Replace the LLM load callback so we don't actually start llama-server.
+    vram._orch._resources["llm"]._load_fn = lambda: True
+
+    # Acquiring "llm" at INTERACTIVE priority should interrupt + evict "forge"
+    # (GENERATION=2 > INTERACTIVE=1) before loading the LLM.
+    vram._orch.acquire("llm", Priority.INTERACTIVE)
+
+    assert interrupted, "Forge interrupt must be called when a higher-priority task arrives"
+    assert unloaded,    "Forge checkpoint must be evicted before the LLM reloads"
 
 
 # ── idempotency ───────────────────────────────────────────────────────────────
