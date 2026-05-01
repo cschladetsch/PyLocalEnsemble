@@ -32,9 +32,11 @@ def load_tts() -> bool:
         warn("TTS models not found — run install.py. Audio will be disabled.")
         return False
     try:
-        # Must be set before kokoro_onnx import — it reads this during import
-        # to choose the ONNX execution provider. Without it, CUDA init hangs.
-        os.environ["ONNX_PROVIDER"] = "CPUExecutionProvider"
+        # Hide CUDA from onnxruntime before the import. On Windows, onnxruntime-gpu
+        # tries to initialise the CUDA provider at import time and hangs if the
+        # CUDA driver is busy. Alice's process doesn't need CUDA directly — all
+        # GPU work runs in subprocesses (llama-server, Forge).
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
         from kokoro_onnx import Kokoro as _Kokoro
         import numpy as np
         _orig_load = np.load
