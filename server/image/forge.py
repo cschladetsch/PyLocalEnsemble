@@ -97,6 +97,29 @@ def restart_forge():
         warn("Forge did not come back after restart.")
 
 
+def warmup_forge() -> None:
+    """Send a 1-step dummy generation to force the checkpoint into VRAM."""
+    forge_url = config.CFG["forge_url"]
+    step("Warming up Forge (loading model into VRAM)...")
+    try:
+        r = req.post(f"{forge_url}/sdapi/v1/txt2img", json={
+            "prompt": "test",
+            "negative_prompt": "",
+            "steps": 1,
+            "width": 128,
+            "height": 128,
+            "cfg_scale": 1,
+            "seed": 42,
+            "override_settings": {"samples_save": False, "grid_save": False},
+        }, timeout=300)
+        if r.ok:
+            ok("Forge warmup done — model in VRAM.")
+        else:
+            warn(f"Forge warmup returned {r.status_code}")
+    except Exception as e:
+        warn(f"Forge warmup failed: {e}")
+
+
 def start_forge() -> bool:
     forge_url = config.CFG["forge_url"]
     step("Starting Forge...")

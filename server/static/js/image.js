@@ -113,6 +113,8 @@ function startProgress() {
           _inFinishing = true;
           const detail = textinfo || (st.job ? `${st.job}` : 'decoding…');
           status.textContent = `Finishing${passStr} · ${detail}`;
+        } else if (textinfo) {
+          status.textContent = textinfo;
         }
       }
       _lastPct = pct;
