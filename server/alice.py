@@ -182,15 +182,27 @@ def _ensure_tts_ready():
 
 
 def _ensure_forge_ready():
+    import vram
+    vram.setup(config.CFG["forge_url"])
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
     sd_checkpoint = config.CFG.get("sd_checkpoint", "pornmasterPro_v9VAE.safetensors")
     if not image.set_forge_model(sd_checkpoint):
         raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
     image.warmup_forge()
+    if config.CFG.get("vram_swap_for_image", True):
+        vram.unload_forge()
+        print("[vram] Forge evicted after warmup — LLM will have full VRAM.")
 
 
 def _startup():
+    _vram_swap = config.CFG.get("vram_swap_for_image", True)
+
+    # When vram_swap is on, Forge must warm up before the LLM so it gets full VRAM.
+    # After warmup the checkpoint is evicted and the LLM loads into the freed VRAM.
+    if not NO_FORGE and _vram_swap:
+        _ensure_forge_ready()
+
     _ensure_llm_ready()
 
     if not state._active_persona_key:
@@ -205,9 +217,9 @@ def _startup():
     if not NO_SPEECH:
         _ensure_tts_ready()
 
-    if not NO_FORGE:
+    if not NO_FORGE and not _vram_swap:
         _ensure_forge_ready()
-    else:
+    elif NO_FORGE:
         print(f"[{config.NAME}] Skipping Forge startup (--no-forge)")
 
 

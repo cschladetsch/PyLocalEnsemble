@@ -781,6 +781,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = JSON.parse(line.slice(6));
+        if (data.status) { updMsg(tid, `<em style="color:#888">${data.status}</em>`); }
         if (data.error) { document.getElementById('thinking-bar').style.display='none'; updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
         if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
         if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }

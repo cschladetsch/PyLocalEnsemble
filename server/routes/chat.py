@@ -1,4 +1,4 @@
-import re, json, asyncio
+import re, json, asyncio, time
 import queue as _queue
 import requests as req
 from fastapi import APIRouter
@@ -20,20 +20,33 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(body: ChatRequest):
     print(f"\n[backend] Received /chat request: {body.message[:50]}...")
-    if not llm.LLM_READY:
-        async def _not_ready():
-            yield f"data: {json.dumps({'error': 'LLM server is still starting up — please wait a moment and try again.'})}\n\n"
-        return StreamingResponse(_not_ready(), media_type="text/event-stream")
 
-    try:
-        llm.history.append({"role": "user", "content": body.message})
-        sys_prompt = state.SYSTEM_PROMPT + "\n\nKeep replies concise — 2 to 3 sentences unless more is genuinely needed." + config.banned_phrases_note()
-        if llm.memory:
-            sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
-        messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)
-        print(f"[chat] user: {body.message!r}")
+    async def _stream():
+        # --- Phase 1: wait for LLM if restarting after image generation ---
+        if not llm.LLM_READY:
+            yield f"data: {json.dumps({'status': 'LLM restarting after image generation…'})}\n\n"
+            deadline = time.monotonic() + 45
+            dots = 0
+            while not llm.LLM_READY:
+                if time.monotonic() >= deadline:
+                    yield f"data: {json.dumps({'error': 'LLM did not restart in time — please reload and try again.'})}\n\n"
+                    return
+                await asyncio.sleep(1)
+                dots += 1
+                if dots % 5 == 0:
+                    elapsed = int(time.monotonic() - (deadline - 45))
+                    yield f"data: {json.dumps({'status': f'LLM restarting… ({elapsed}s)'})}\n\n"
+            yield f"data: {json.dumps({'status': 'LLM ready.'})}\n\n"
 
-        async def generate():
+        # --- Phase 2: normal chat ---
+        try:
+            llm.history.append({"role": "user", "content": body.message})
+            sys_prompt = state.SYSTEM_PROMPT + "\n\nKeep replies concise — 2 to 3 sentences unless more is genuinely needed." + config.banned_phrases_note()
+            if llm.memory:
+                sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
+            messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)
+            print(f"[chat] user: {body.message!r}")
+
             q = _queue.Queue()
             collected = []
 
@@ -56,17 +69,15 @@ async def chat(body: ChatRequest):
                             except Exception:
                                 err = {}
                             if "exceed_context_size" in err.get("type", "") or "exceed_context_size" in err.get("message", ""):
-                                # Calculate how much we need to free: overage + 512 token generation headroom
-                                n_prompt = err.get("n_prompt_tokens", 0)
-                                n_ctx    = err.get("n_ctx", 4096)
-                                need_free = max((n_prompt - n_ctx) + 512, 512)  # tokens to free
+                                n_prompt  = err.get("n_prompt_tokens", 0)
+                                n_ctx     = err.get("n_ctx", 4096)
+                                need_free = max((n_prompt - n_ctx) + 512, 512)
                                 freed = 0
                                 non_sys = [i for i, m in enumerate(trimmed) if m["role"] != "system"]
                                 while freed < need_free and len(non_sys) >= 2:
                                     idx = non_sys.pop(0)
                                     freed += len(trimmed[idx].get("content", "")) // 4
                                     del trimmed[idx]
-                                    # Indices shift after deletion — recalculate
                                     non_sys = [i for i, m in enumerate(trimmed) if m["role"] != "system"]
                                 if freed > 0:
                                     print(f"[chat] context overflow — trimmed to {len(trimmed)} msgs (~{freed} tokens freed), retrying")
@@ -121,7 +132,7 @@ async def chat(body: ChatRequest):
             reply = "".join(collected)
             print(f"[chat] raw reply ({len(reply)} chars): {reply!r}")
             reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
-            reply = re.sub(r'^[Aa]lice\s*[:"]\s*', '', reply).strip().strip('"""\u201c\u201d')
+            reply = re.sub(r'^[Aa]lice\s*[:”]\s*', '', reply).strip().strip('"“”')
             reply = re.sub(
                 r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
                 r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
@@ -138,7 +149,6 @@ async def chat(body: ChatRequest):
             yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
 
             if auto_img:
-                # Pre-extract SD prompt in background so /image can skip the LLM call
                 state._pre_sd_prompt   = None
                 state._pre_sd_negative = ""
                 state._pre_sd_nudity   = None
@@ -170,8 +180,11 @@ async def chat(body: ChatRequest):
 
                 asyncio.create_task(_pre_extract())
 
-        return StreamingResponse(generate(), media_type="text/event-stream")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JSONResponse({"error": str(e)}, status_code=500)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            if llm.history and llm.history[-1].get("role") == "user":
+                llm.history.pop()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")

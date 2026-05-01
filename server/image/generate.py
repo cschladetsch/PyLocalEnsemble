@@ -5,7 +5,7 @@ import logging
 import requests as req
 import config
 import state
-import llm as _llm
+import vram as _vram
 from utils import http_ok, _c
 from image.forge import start_forge
 
@@ -51,8 +51,10 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             raise RuntimeError(msg)
 
     negative = (extra_negative + ", " + negative_base) if extra_negative else negative_base
-    # Quick mode: use configured steps (or a sensible default), full resolution.
-    # The big savings come from skipping hires fix and ADetailer, not crippling resolution.
+    # Suppress checkpoint-specific makeup artefacts (many NSFW models default to heavy blue eye shadow)
+    if "blue eyeshadow" not in negative.lower():
+        negative = "blue eyeshadow, heavy eye makeup, colorful eyeshadow, " + negative
+
     quick_steps   = img_cfg.get("quick_steps",   max(img_cfg["steps"] // 2, 12))
     quick_sampler = img_cfg.get("quick_sampler", "DPM++ 2M Karras")
     _steps   = (steps if steps is not None else (quick_steps   if quick else img_cfg["steps"]))
@@ -64,7 +66,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     explicit_keywords = ["anal", "fingering", "insertion", "blowjob", "fellatio",
                          "penetration", "nude", "naked", "nudity", "topless", "nsfw",
                          "no clothes", "fully nude", "fully naked", "bare skin", "exposed skin",
-                         "take off clothes", "removing clothes", "disrobing", "pussy", "vagina", 
+                         "take off clothes", "removing clothes", "disrobing", "pussy", "vagina",
                          "vulva", "cunt", "asshole", "clitoris", "breasts bare", "clothed removed"]
     nudity_keywords   = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
                          "fully nude", "fully naked", "bare skin", "exposed skin",
@@ -82,8 +84,6 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                     "fabric over body, bra, bra straps, bikini top, lingerie top, "
                     "covered chest, fabric on chest, " + negative)
 
-    # full_prompt is built using the tags from extract_sd_prompt (which now includes
-    # the cleaned appearance) and the configured suffix.
     full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
@@ -91,6 +91,10 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     hires_on = not quick and img_cfg.get("hires_fix")
     ad_on    = not quick and (img_cfg.get("adetailer_face") or img_cfg.get("adetailer_hands"))
     print(f"[image] [{mode}] steps={_steps}, sampler={_sampler}, cfg={_cfg}, size={_width}x{_height}, seed={seed}  hires={hires_on}  adetailer={ad_on}")
+
+    vram_swap = config.CFG.get("vram_swap_for_image", True)
+    if vram_swap:
+        _vram.acquire_for_image()
 
     try:
         payload = {
@@ -114,8 +118,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                     "hr_upscaler":          hr_upscaler,
                 })
         overrides = {
-            # Alice manages its own output — Forge doesn't need to write images to disk,
-            # and skipping the disk write removes a significant chunk of "finishing" time.
+            # Alice manages its own output — Forge doesn't need to write images to disk.
             "samples_save": False,
             "grid_save":    False,
         }
@@ -123,7 +126,6 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
         if clip_skip:
             overrides["CLIP_stop_at_last_layers"] = clip_skip
         if quick and img_cfg.get("quick_vae"):
-            # Optional: set sd_vae to "taesd" in alice.json quick_vae for faster decode
             overrides["sd_vae"] = img_cfg["quick_vae"]
         payload["override_settings"] = overrides
         ad_models = []
@@ -148,7 +150,6 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                 "ADetailer": {"args": [True, False] + ad_models}
             }
 
-        # Background thread: poll /progress and log stages while Forge runs
         _done = threading.Event()
         def _log_progress():
             last_phase = None
@@ -192,17 +193,13 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
 
         _poll_thread = threading.Thread(target=_log_progress, daemon=True)
         _poll_thread.start()
-        vram_swap = config.CFG.get("vram_swap_for_image", True)
-        if vram_swap:
-            _llm.suspend_for_image()
         try:
             r = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         finally:
             _done.set()
             _poll_thread.join(timeout=2)
+
         data = r.json()
-        if vram_swap:
-            _llm.resume_after_image()
         if "images" not in data:
             detail = data.get("detail", "")
             if "ADetailer" in str(detail) and "alwayson_scripts" in payload:
@@ -239,6 +236,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             print("[image] Forge returned empty images list")
             raise RuntimeError("Forge returned no images")
         return imgs[0] if imgs else None
+
     except RuntimeError:
         raise
     except Exception as e:
@@ -248,3 +246,6 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                 f"Could not connect to Forge at {forge_url}. Start Forge or set forge_url correctly in alice.json."
             ) from e
         raise RuntimeError(str(e)) from e
+    finally:
+        if vram_swap:
+            _vram.release_from_image()

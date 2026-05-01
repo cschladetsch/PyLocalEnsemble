@@ -68,17 +68,35 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
 def _push_forge_settings(forge_url: str) -> None:
     """Push Alice-managed settings to Forge so users never need to touch Forge's UI."""
     settings = {
-        "vae_in_cpu":     False,   # decode on GPU, not CPU
-        "vae_in_fp32":    False,   # no slow fp32 upcast
-        "samples_save":   False,   # Alice saves its own images
-        "grid_save":      False,
-        "save_to_dirs":   False,
-        "samples_format": "png",
+        # VAE compute device — the setting that actually controls whether the
+        # decode step runs on CPU or GPU.  sd_vae_cpu_offload is Forge's own
+        # option; vae_in_cpu is the upstream SD-WebUI equivalent.  Push both so
+        # whichever one this Forge build respects gets set.
+        "sd_vae_cpu_offload": False,
+        "vae_in_cpu":         False,
+        "vae_in_fp32":        False,   # no slow fp32 upcast
+        "samples_save":       False,   # Alice saves its own images
+        "grid_save":          False,
+        "save_to_dirs":       False,
+        "samples_format":     "png",
     }
     try:
-        req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+        r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+        if r.status_code != 200:
+            warn(f"Forge settings push returned HTTP {r.status_code}")
     except Exception as e:
         warn(f"Could not push Forge settings: {e}")
+
+    # Log the VAE-related options that are actually active in Forge, so we
+    # can diagnose decode-on-CPU problems without guessing at setting names.
+    try:
+        opts = req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json()
+        vae_opts = {k: v for k, v in opts.items()
+                    if any(t in k.lower() for t in ("vae", "cpu", "offload", "device"))}
+        if vae_opts:
+            print(f"[forge] active VAE/CPU options: {vae_opts}")
+    except Exception:
+        pass
 
 
 def set_forge_model(name: str) -> bool:
