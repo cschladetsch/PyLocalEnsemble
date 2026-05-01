@@ -32,11 +32,11 @@ def load_tts() -> bool:
         warn("TTS models not found — run install.py. Audio will be disabled.")
         return False
     try:
+        # Must be set before kokoro_onnx import — it reads this during import
+        # to choose the ONNX execution provider. Without it, CUDA init hangs.
+        os.environ["ONNX_PROVIDER"] = "CPUExecutionProvider"
         from kokoro_onnx import Kokoro as _Kokoro
         import numpy as np
-        # Force CPU inference — avoids VRAM competition with LLM and Forge.
-        # Kokoro is small enough that CPU synthesis stays under 100 ms per chunk.
-        os.environ.setdefault("ONNX_PROVIDER", "CPUExecutionProvider")
         _orig_load = np.load
         np.load = lambda *a, **kw: _orig_load(*a, **{**kw, "allow_pickle": True})
         try:

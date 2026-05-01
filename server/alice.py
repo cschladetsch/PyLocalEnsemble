@@ -51,13 +51,10 @@ def _needs_install() -> bool:
         return False
     if not (_tts_assets_present() and _llama_server_present() and _forge_present()):
         return True
-    try:
-        import fastapi, uvicorn, pydantic, requests
-        from kokoro_onnx import Kokoro   # noqa: F401
-        import faster_whisper, av        # noqa: F401
-        return False
-    except ImportError:
-        return True
+    import importlib.util
+    required = ["fastapi", "uvicorn", "pydantic", "requests",
+                "kokoro_onnx", "faster_whisper", "av"]
+    return not all(importlib.util.find_spec(pkg) is not None for pkg in required)
 
 if _needs_install():
     _install = os.path.join(_ROOT_DIR, "install.py")
