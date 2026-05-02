@@ -147,30 +147,44 @@ def tts_wav_b64_stream(text: str, voice: str = None, speed: float = None, pitch:
 
     pitch: framerate multiplier (< 1.0 = lower pitch + slower playback).
            e.g. 0.88 ≈ -2 semitones.  Default: 1.0 (no shift).
+
+    Synthesis is pipelined: chunk N+1 starts synthesising in a background thread
+    immediately after chunk N is yielded, overlapping with client-side playback so
+    the gap between sentence chunks is eliminated on modern hardware.
     """
     import numpy as np
+    from concurrent.futures import ThreadPoolExecutor
     tts_cfg = config.CFG.get("tts", {})
     voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_nicole")
     spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.85))
     effects = effects if effects is not None else tts_cfg.get("effects", "")
     chunks  = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
     total   = len(chunks)
-    for i, chunk in enumerate(chunks):
-        s, sr = TTS.create(chunk, voice=voice, speed=spd, lang="en-us")
-        if effects == "android":
-            s = _android_effect(s, sr)
-        elif effects == "cathedral":
-            s = _cathedral_effect(s, sr)
-        # Pitch shift via framerate trick: claim a lower sample rate so the
-        # browser plays back slower + lower-pitched with no extra processing.
-        out_sr = int(sr * pitch) if pitch and pitch != 1.0 else sr
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(out_sr)
-            wf.writeframes((s * 32767).astype(np.int16).tobytes())
-        yield base64.b64encode(buf.getvalue()).decode(), (i == total - 1)
+    if not total:
+        return
+
+    def _synth(chunk):
+        return TTS.create(chunk, voice=voice, speed=spd, lang="en-us")
+
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(_synth, chunks[0])
+        for i in range(total):
+            s, sr = future.result()
+            # Start next chunk immediately — overlaps with yield + network send
+            if i + 1 < total:
+                future = ex.submit(_synth, chunks[i + 1])
+            if effects == "android":
+                s = _android_effect(s, sr)
+            elif effects == "cathedral":
+                s = _cathedral_effect(s, sr)
+            out_sr = int(sr * pitch) if pitch and pitch != 1.0 else sr
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(out_sr)
+                wf.writeframes((s * 32767).astype(np.int16).tobytes())
+            yield base64.b64encode(buf.getvalue()).decode(), (i == total - 1)
 
 
 def tts_wav_b64(text: str) -> str:

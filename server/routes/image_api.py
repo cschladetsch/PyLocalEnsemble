@@ -451,7 +451,7 @@ async def interrupt():
 @router.get("/progress")
 async def get_progress():
     try:
-        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=true", timeout=3)
+        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=false", timeout=3)
         return JSONResponse(r.json())
     except Exception:
         return JSONResponse({"progress": 0, "state": {}})

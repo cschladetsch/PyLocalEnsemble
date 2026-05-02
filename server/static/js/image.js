@@ -117,6 +117,19 @@ function startProgress() {
           status.textContent = textinfo;
         }
       }
+      // Show live preview as soon as Forge has a current_image — user sees the
+      // image forming instead of waiting for the full API response.
+      if (d.current_image) {
+        const ic = document.getElementById('ic');
+        if (ic && !ic.querySelector('img.final')) {
+          const existing = ic.querySelector('img.preview');
+          if (!existing) {
+            ic.innerHTML = `<img class="preview" src="data:image/png;base64,${d.current_image}" style="width:100%;opacity:0.85">`;
+          } else {
+            existing.src = `data:image/png;base64,${d.current_image}`;
+          }
+        }
+      }
       _lastPct = pct;
     } catch {}
   }, 800);

@@ -415,6 +415,8 @@ function _interruptChat() {
 async function interrupt(reason) {
   if (reason === 'user' && _demoMode) { _demoSkip = true; }
   _interruptChat();
+  if (_pendingRetryAbort) { _pendingRetryAbort.abort(); _pendingRetryAbort = null; }
+  _retryGen++;
   const hadImgInFlight = !!imgAbort;
   if (imgAbort) {
     console.log('Aborting media generation:', reason);
@@ -476,6 +478,17 @@ function startProgress() {
         }
       }
       _lastPct = pct;
+      if (d.current_image) {
+        const ic = document.getElementById('ic');
+        if (ic && !ic.querySelector('img.final')) {
+          const existing = ic.querySelector('img.preview');
+          if (!existing) {
+            ic.innerHTML = `<img class="preview" src="data:image/png;base64,${d.current_image}" style="width:100%;opacity:0.85">`;
+          } else {
+            existing.src = `data:image/png;base64,${d.current_image}`;
+          }
+        }
+      }
     } catch {}
   }, 800);
 }
@@ -858,13 +871,15 @@ async function loadNegative() {
 loadNegative();
 
 async function _chatWith(msg, { forceImage = false } = {}) {
+  _retryGen++;
+  if (_pendingRetryAbort) { _pendingRetryAbort.abort(); _pendingRetryAbort = null; }
   _interruptChat();  // stop previous chat only — image gen continues
   const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
   chatAbort = new AbortController();
   disableAll();
-  let reply = '', autoImage = true;
+  let reply = '', autoImage = false, scheduleRetry = false;
   let _earlyTtsText = '';  // text sent to TTS early; '' = not yet started
   let _ttsBuf = '';        // accumulates deltas for sentence-boundary detection
   try {
@@ -901,7 +916,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
             }
           }
         }
-        if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
+        if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; if (data.retry) scheduleRetry = true; }
       }
     }
   } catch (e) {
@@ -917,6 +932,19 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
+  if (scheduleRetry) {
+    _pendingRetryAbort = new AbortController();
+    const sig = _pendingRetryAbort.signal;
+    const myGen = _retryGen;
+    (async () => {
+      for (let i = 0; i < 90 && !sig.aborted && _retryGen === myGen; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (sig.aborted || _retryGen !== myGen) return;
+        try { const d = await (await fetch('/info')).json(); if (d.llm_ready) { _chatWith(msg, { forceImage }); return; } } catch {}
+      }
+    })();
+    return;
+  }
   if (reply) {
     if (autoImage || forceImage) triggerMedia('', true);
     if (!_earlyTtsText) {

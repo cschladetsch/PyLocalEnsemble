@@ -146,6 +146,14 @@ async def chat(body: ChatRequest):
             reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
             reply = re.sub(r'^[Aa]lice\s*[:”]\s*', '', reply).strip().strip('”””')
             reply = re.sub(r'\bAs Alice,?\s*', '', reply, flags=re.IGNORECASE).strip()
+            # Strip Dolphin boilerplate closers that survive banned_phrases injection
+            reply = re.sub(
+                r'\s*(This intimate act connects us.*|'
+                r'binding us together with.*|'
+                r'It\'?s an act (?:of pure pleasure|that connects).*|'
+                r'a (?:sensual )?dance (?:of passion|between us).*)',
+                '', reply, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
             reply = re.sub(
                 r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
                 r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
