@@ -389,6 +389,19 @@ def _register_resources() -> None:
 
 # ── LLM callbacks ─────────────────────────────────────────────────────────────
 
+def _wait_vram_free(needed_mb: int = 4000, timeout: float = 15.0) -> None:
+    """Poll until VRAM free >= needed_mb or timeout expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        res = sample_resources()
+        if res.vram_total == 0 or res.vram_free >= needed_mb:
+            return
+        remaining = deadline - time.monotonic()
+        print(f"[orch] waiting for VRAM reclaim: {res.vram_free}MB free, need {needed_mb}MB  ({remaining:.0f}s left)")
+        time.sleep(0.5)
+    print(f"[orch] VRAM reclaim timeout after {timeout:.0f}s — proceeding anyway")
+
+
 def _llm_load() -> bool:
     import llm as _llm
     if _llm.LLM_READY:
@@ -398,7 +411,7 @@ def _llm_load() -> bool:
     if _forge_loaded:
         print("[orch] evicting Forge before LLM load (lazy evict after keep-hot)")
         _forge_unload()
-        time.sleep(2.0)   # give the CUDA driver time to reclaim VRAM after Forge eviction
+        _wait_vram_free()
     if _llm.LLM_SUSPENDED:
         _llm.resume_after_image()   # starts server in background thread
     else:
