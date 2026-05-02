@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-_LLM_WAIT_TIMEOUT = 120   # seconds; override in tests via monkeypatch
+_LLM_WAIT_TIMEOUT = 8   # seconds; fail fast + let client retry rather than long-polling
 
 import config
 import llm

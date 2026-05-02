@@ -31,7 +31,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
           document.getElementById('thinking-bar').style.display = 'none';
           if (data.retry) {
             scheduleRetry = true;
-            updMsg(tid, '<em style="color:#888">LLM still starting — retrying in 5 s…</em>');
+            updMsg(tid, '<em style="color:#888">Alice is loading — sending your message when ready…</em>');
           } else {
             updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>');
           }
@@ -53,7 +53,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (scheduleRetry) { setTimeout(() => _chatWith(msg, { forceImage }), 5000); return; }
+  if (scheduleRetry) { setTimeout(() => _chatWith(msg, { forceImage }), 3000); return; }
   if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
   loadInfo();
 }
