@@ -66,23 +66,31 @@ def _ensure_forge_tooling(python_exe: str, env: dict) -> None:
 
 
 def _push_forge_settings(forge_url: str) -> None:
-    """Push Alice-managed settings to Forge."""
-    settings = {
-        "vae_in_fp32":    False,   # no slow fp32 upcast
-        "samples_save":   False,   # Alice saves its own images
-        "grid_save":      False,
-        "save_to_dirs":   False,
-        "samples_format": "png",
+    """Push Alice-managed settings to Forge, skipping keys this build doesn't support."""
+    desired = {
+        # Forge resets forge_inference_memory to 0 whenever the checkpoint option changes.
+        # 0 MB leaves no VRAM for compute, causing a silent hang during VAE decode with
+        # the cudaMallocAsync backend. Pin it to 1024 so decode always has headroom.
+        "forge_inference_memory":      1024,
+        "sd_checkpoints_keep_in_cpu":  False,
+        "samples_save":                False,     # Alice saves its own images
+        "grid_save":                   False,
+        "save_to_dirs":                False,
+        "samples_format":              "png",
     }
     try:
-        r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
-        if r.status_code != 200:
-            warn(f"Forge settings push returned HTTP {r.status_code}")
+        known = set(req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json().keys())
+        settings = {k: v for k, v in desired.items() if k in known}
+        if settings:
+            r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+            if r.status_code != 200:
+                warn(f"Forge settings push returned HTTP {r.status_code}")
+        skipped = set(desired) - settings.keys()
+        if skipped:
+            print(f"[forge] skipped unknown option keys: {skipped}")
     except Exception as e:
         warn(f"Could not push Forge settings: {e}")
 
-    # Log the VAE-related options that are actually active in Forge, so we
-    # can diagnose decode-on-CPU problems without guessing at setting names.
     try:
         opts = req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json()
         vae_opts = {k: v for k, v in opts.items()
@@ -93,17 +101,20 @@ def _push_forge_settings(forge_url: str) -> None:
         pass
 
 
-def set_forge_model(name: str) -> bool:
+def set_forge_model(name: str, refresh: bool = False) -> bool:
     forge_url = config.CFG["forge_url"]
     try:
-        req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=30)
+        if refresh:
+            req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=30)
         r = req.get(f"{forge_url}/sdapi/v1/sd-models", timeout=5)
         models = [m["title"] for m in r.json()]
         match  = next((m for m in models if name in m), None)
         if match:
+            # Push memory settings (esp. keep_in_cpu=False) BEFORE triggering the
+            # checkpoint load so Forge doesn't cache the weights in CPU RAM.
+            _push_forge_settings(forge_url)
             req.post(f"{forge_url}/sdapi/v1/options",
                      json={"sd_model_checkpoint": match}, timeout=30)
-            _push_forge_settings(forge_url)
             ok(f"Forge model set to: {match}")
             return True
         else:
@@ -127,7 +138,7 @@ def restart_forge():
 
 
 def warmup_forge() -> None:
-    """Send a 1-step dummy generation to force the checkpoint into VRAM."""
+    """Send a 1-step dummy generation to pre-load the checkpoint into VRAM."""
     forge_url = config.CFG["forge_url"]
     step("Warming up Forge (loading model into VRAM)...")
     try:
@@ -135,12 +146,12 @@ def warmup_forge() -> None:
             "prompt": "test",
             "negative_prompt": "",
             "steps": 1,
-            "width": 128,
-            "height": 128,
+            "width": 64,
+            "height": 64,
             "cfg_scale": 1,
             "seed": 42,
             "override_settings": {"samples_save": False, "grid_save": False},
-        }, timeout=300)
+        }, timeout=120)
         if r.ok:
             ok("Forge warmup done — model in VRAM.")
         else:
@@ -161,13 +172,21 @@ def start_forge() -> bool:
         return False
     env = os.environ.copy()
     if "forge_args" in config.CFG:
-        env["COMMANDLINE_ARGS"] = config.CFG["forge_args"]
+        base_args = config.CFG["forge_args"]
     elif os.name == "nt":
-        env["COMMANDLINE_ARGS"] = "--api --cuda-malloc --xformers"
+        base_args = "--api --cuda-malloc --xformers"
     elif platform.system() == "Darwin":
-        env["COMMANDLINE_ARGS"] = "--api --skip-torch-cuda-test"
+        base_args = "--api --skip-torch-cuda-test"
     else:
-        env["COMMANDLINE_ARGS"] = "--api --xformers"
+        base_args = "--api --xformers"
+    # Append --ckpt-dir if sd_models_dir is configured
+    sd_models_dir = config.CFG.get("sd_models_dir", "")
+    if sd_models_dir:
+        sd_models_dir = os.path.expanduser(sd_models_dir)
+        os.makedirs(sd_models_dir, exist_ok=True)
+        base_args = f"{base_args} --ckpt-dir \"{sd_models_dir}\""
+        ok(f"Forge: using SD models dir {sd_models_dir}")
+    env["COMMANDLINE_ARGS"] = base_args
 
     default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))
     forge_py = _find_forge_python()
@@ -204,4 +223,7 @@ def start_forge() -> bool:
     if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=4):
         warn("Forge did not start in time - images won't generate.")
         return False
+    # Push keep_in_cpu=False as early as possible so the auto-loaded checkpoint
+    # (and any subsequent load) doesn't duplicate model weights in CPU RAM.
+    _push_forge_settings(forge_url)
     return True

@@ -1,3 +1,4 @@
+import os
 import pytest
 import config
 from fastapi.testclient import TestClient
@@ -32,9 +33,9 @@ def test_build_group_scene_appearance_marks_distinct_people():
     assert "separate people" in result
     assert "distinct individuals" in result
     assert "different faces" in result
-    assert "unique signature looks" in result
-    assert "Alice signature look: red hair, green eyes, pale skin, black dress, freckles" in result
-    assert "Morrigan signature look: black hair, amber eyes, tan skin, silver gown, jewelry" in result
+    assert "1woman" in result
+    assert "red hair, green eyes, pale skin, black dress, freckles" in result
+    assert "black hair, amber eyes, tan skin, silver gown, jewelry" in result
 
 
 @pytest.fixture()
@@ -480,10 +481,15 @@ def test_reset_persona_clears_history_growth_and_state(monkeypatch):
 # ── POST /model ───────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-def reset_model_state():
+def reset_model_state(monkeypatch):
     import llm
+    import routes.system as _sys
     saved_det   = llm._DETECTED_MODEL
     saved_model = config.CFG.get("llama_model")
+    monkeypatch.setattr(_sys.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(llm, "suspend_for_image", lambda: None)
+    monkeypatch.setattr(llm, "_start_server", lambda: None)
+    monkeypatch.setattr(llm, "wait_until_ready", lambda timeout=120: False)
     yield
     llm._DETECTED_MODEL       = saved_det
     config.CFG["llama_model"] = saved_model
@@ -513,3 +519,114 @@ def test_switch_model_clears_history(reset_model_state):
 def test_switch_model_returns_model_name(reset_model_state):
     res = client.post("/model", json={"path": "my-model"})
     assert res.json()["model"] == "my-model"
+
+
+# ── GET /models includes size_gb ──────────────────────────────────────────────
+
+def test_models_includes_size_gb(tmp_path, monkeypatch):
+    """Each entry returned by /models must have a size_gb field."""
+    fake_model = tmp_path / "model.gguf"
+    fake_model.write_bytes(b"x")
+    monkeypatch.setattr(config, "CFG", {**config.CFG, "model_path": str(fake_model)})
+    monkeypatch.setattr(os.path, "getsize", lambda p: 4_400_000_000)
+    res = client.get("/models")
+    assert res.status_code == 200
+    models = res.json()["models"]
+    assert len(models) > 0
+    for m in models:
+        assert "size_gb" in m
+        assert isinstance(m["size_gb"], (int, float))
+
+
+def test_models_size_gb_reflects_file_size(tmp_path, monkeypatch):
+    """size_gb must be approximately the file size in gigabytes."""
+    fake_model = tmp_path / "model.gguf"
+    fake_model.write_bytes(b"x")
+    monkeypatch.setattr(config, "CFG", {**config.CFG, "model_path": str(fake_model)})
+    monkeypatch.setattr(os.path, "getsize", lambda p: 7_500_000_000)
+    res = client.get("/models")
+    models = [m for m in res.json()["models"] if "model.gguf" in m["path"]]
+    assert models, "Expected at least one model entry"
+    assert models[0]["size_gb"] == pytest.approx(7.5, abs=0.2)
+
+
+# ── GET /sd-models ────────────────────────────────────────────────────────────
+
+def test_sd_models_returns_empty_on_forge_down(monkeypatch):
+    """When Forge is unreachable, /sd-models returns empty list without crashing."""
+    import requests
+    monkeypatch.setattr(requests, "get",
+                        lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("Forge down")))
+    res = client.get("/sd-models")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["models"] == []
+    assert "error" in data
+
+
+def test_sd_models_lists_checkpoints(monkeypatch):
+    """When Forge responds, /sd-models returns the model list and current checkpoint."""
+    import requests
+    from unittest.mock import MagicMock
+    forge_models = [
+        {"title": "Realistic_Vision_V5.1.safetensors [abc123]", "model_name": "Realistic_Vision_V5.1"},
+        {"title": "AnythingV5.safetensors [def456]", "model_name": "AnythingV5"},
+    ]
+    opts = {"sd_model_checkpoint": "Realistic_Vision_V5.1.safetensors [abc123]"}
+
+    def _fake_get(url, **kw):
+        m = MagicMock()
+        if "sd-models" in url:
+            m.json.return_value = forge_models
+        else:
+            m.json.return_value = opts
+        return m
+
+    monkeypatch.setattr(requests, "get", _fake_get)
+    res = client.get("/sd-models")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["models"]) == 2
+    assert data["models"][0]["name"] == "Realistic_Vision_V5.1"
+    assert data["current"] == "Realistic_Vision_V5.1.safetensors [abc123]"
+
+
+# ── POST /sd-model ────────────────────────────────────────────────────────────
+
+def test_switch_sd_model_calls_forge_options(monkeypatch):
+    """POST /sd-model must send the title to Forge /sdapi/v1/options."""
+    import requests, config as _cfg
+    from unittest.mock import MagicMock, patch
+
+    calls = []
+
+    def _fake_post(url, json=None, **kw):
+        calls.append((url, json))
+        m = MagicMock()
+        m.ok = True
+        m.status_code = 200
+        return m
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+    # Suppress _push_forge_settings side effect
+    with patch("image.forge._push_forge_settings"):
+        res = client.post("/sd-model", json={"title": "Realistic_Vision.safetensors [abc]"})
+
+    assert res.status_code == 200
+    assert any("options" in url for url, _ in calls), "Must POST to /sdapi/v1/options"
+    posted_json = next((j for url, j in calls if "options" in url), None)
+    assert posted_json["sd_model_checkpoint"] == "Realistic_Vision.safetensors [abc]"
+
+
+def test_switch_sd_model_returns_error_on_forge_failure(monkeypatch):
+    """When Forge returns non-200, /sd-model must relay the error."""
+    import requests
+    from unittest.mock import MagicMock
+
+    m = MagicMock()
+    m.ok = False
+    m.status_code = 500
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: m)
+    res = client.post("/sd-model", json={"title": "SomeModel.safetensors"})
+    assert res.status_code == 500
+    assert "error" in res.json()

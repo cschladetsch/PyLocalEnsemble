@@ -5,6 +5,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+_LLM_WAIT_TIMEOUT = 60   # seconds; override in tests via monkeypatch
+
 import config
 import llm
 import state
@@ -24,24 +26,25 @@ async def chat(body: ChatRequest):
     async def _stream():
         # --- Phase 1: wait for LLM if restarting after image generation ---
         if not llm.LLM_READY:
-            yield f"data: {json.dumps({'status': 'LLM restarting after image generation…'})}\n\n"
-            deadline = time.monotonic() + 45
+            msg = 'LLM restarting after image generation' if llm.LLM_SUSPENDED else 'Alice is starting up'
+            yield f"data: {json.dumps({'status': msg + '…'})}\n\n"
+            deadline = time.monotonic() + _LLM_WAIT_TIMEOUT
             dots = 0
             while not llm.LLM_READY:
                 if time.monotonic() >= deadline:
-                    yield f"data: {json.dumps({'error': 'LLM did not restart in time — please reload and try again.'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'LLM not ready — please reload and try again.'})}\n\n"
                     return
                 await asyncio.sleep(1)
                 dots += 1
                 if dots % 5 == 0:
-                    elapsed = int(time.monotonic() - (deadline - 45))
-                    yield f"data: {json.dumps({'status': f'LLM restarting… ({elapsed}s)'})}\n\n"
-            yield f"data: {json.dumps({'status': 'LLM ready.'})}\n\n"
+                    elapsed = int(time.monotonic() - (deadline - _LLM_WAIT_TIMEOUT))
+                    yield f"data: {json.dumps({'status': msg + f' ({elapsed}s)…'})}\n\n"
+            yield f"data: {json.dumps({'status': 'Ready.'})}\n\n"
 
         # --- Phase 2: normal chat ---
         try:
             llm.history.append({"role": "user", "content": body.message})
-            sys_prompt = state.SYSTEM_PROMPT + "\n\nKeep replies concise — 2 to 3 sentences unless more is genuinely needed." + config.banned_phrases_note()
+            sys_prompt = state.SYSTEM_PROMPT + "\n\nMatch reply length to the message. A casual greeting or one-liner: one sentence only. A question or request: two sentences maximum. Never lecture, philosophize, or ask multiple questions back." + config.banned_phrases_note()
             if llm.memory:
                 sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
             messages = [{"role": "system", "content": sys_prompt}] + list(llm.history)
@@ -141,12 +144,15 @@ async def chat(body: ChatRequest):
             ).strip()
 
             llm.history.append({"role": "assistant", "content": reply})
-            await loop.run_in_executor(None, llm.compress_history)
-            llm.save_history()
 
             auto_img = state.should_auto_image(body.message)
             print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
             yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
+
+            # Compress history and save in background — don't block stream close.
+            # compress_history may trigger a full LLM summarisation call when history
+            # overflows; doing it before `done` caused 30-60 s UI freezes.
+            loop.run_in_executor(None, lambda: (llm.compress_history(), llm.save_history()))
 
             if auto_img:
                 state._pre_sd_prompt   = None

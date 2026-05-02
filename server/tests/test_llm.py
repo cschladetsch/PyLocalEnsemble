@@ -53,7 +53,9 @@ def test_clear_history_tolerates_missing_file(tmp_path, monkeypatch):
 # ── save_history / load_history ────────────────────────────────────────────────
 
 def test_save_load_roundtrip(tmp_path, monkeypatch):
+    import state
     monkeypatch.setattr(config, "HISTORY_FILE", str(tmp_path / "h.json"))
+    monkeypatch.setattr(state, "_active_persona_key", "Alice")
     llm.history.clear()
     llm.history.append({"role": "user", "content": "hello"})
     llm.memory = "memory text"
@@ -181,3 +183,47 @@ def test_compress_memory_fallback_when_no_period(monkeypatch):
          patch.object(llm, "save_history"):
         llm.compress_history()
     assert len(llm.memory) <= 20
+
+
+# ── list_models — size_gb ─────────────────────────────────────────────────────
+
+def test_list_models_returns_size_gb(tmp_path, monkeypatch):
+    """list_models must return (name, path, size_gb) triples."""
+    fake = tmp_path / "test_model.gguf"
+    fake.write_bytes(b"x" * 4_400_000_000)
+    monkeypatch.setitem(config.CFG, "model_path", str(fake))
+    monkeypatch.setitem(config.CFG, "model_dir", "")
+    result = llm.list_models()
+    assert len(result) > 0
+    names, paths, sizes = zip(*result)
+    assert "test_model.gguf" in names
+    idx = names.index("test_model.gguf")
+    assert sizes[idx] == pytest.approx(4.4, abs=0.2)
+
+
+def test_list_models_triple_format(tmp_path, monkeypatch):
+    """Each element returned by list_models must be a 3-tuple (name, path, size_gb)."""
+    fake = tmp_path / "x.gguf"
+    fake.write_bytes(b"x" * 1_000_000_000)
+    monkeypatch.setitem(config.CFG, "model_path", str(fake))
+    monkeypatch.setitem(config.CFG, "model_dir", "")
+    for entry in llm.list_models():
+        assert len(entry) == 3
+        name, path, size = entry
+        assert isinstance(name, str)
+        assert isinstance(path, str)
+        assert isinstance(size, float)
+
+
+def test_list_models_size_zero_on_missing_file(tmp_path, monkeypatch):
+    """If stat fails, size_gb should default to 0.0 rather than raising."""
+    fake = tmp_path / "ghost.gguf"
+    fake.write_bytes(b"x" * 100)
+    monkeypatch.setitem(config.CFG, "model_path", str(fake))
+    monkeypatch.setitem(config.CFG, "model_dir", "")
+    # Remove the file after list_models scans the directory but before stat
+    # — simulate by patching os.path.getsize to raise
+    with patch("os.path.getsize", side_effect=OSError("permission denied")):
+        result = llm.list_models()
+    sizes = [s for _, _, s in result]
+    assert all(s == 0.0 for s in sizes), "OSError in getsize must yield size_gb=0.0"

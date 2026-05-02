@@ -253,27 +253,27 @@ def test_last_clause_multiple_ands():
 # ── _detect_action ────────────────────────────────────────────────────────────
 
 def test_detect_cup_breasts():
-    actions, body, camera = _detect_action("cup your breasts in your hands")
+    actions, body, camera, _ = _detect_action("cup your breasts in your hands")
     assert actions[0] == "cupping breasts"
     assert body   == "breasts"
-    assert camera == "front view"
+    assert camera == "face level"
 
 
 def test_detect_hold_breasts():
-    actions, body, _ = _detect_action("hold your breasts up for me")
+    actions, body, _, _ = _detect_action("hold your breasts up for me")
     assert actions[0] == "holding breasts"
     assert "cupping breasts" in actions
     assert body   == "breasts"
 
 
 def test_detect_fellatio():
-    actions, body, camera = _detect_action("get on your knees and suck it")
+    actions, body, camera, _ = _detect_action("get on your knees and suck it")
     assert actions[0] == "fellatio"
     assert camera == "face level"
 
 
 def test_detect_finger_in_mouth():
-    actions, body, camera = _detect_action("put your finger in your mouth")
+    actions, body, camera, _ = _detect_action("put your finger in your mouth")
     assert actions[0] == "one finger in mouth"
     assert body   == "mouth"
     assert camera == "face level"
@@ -281,32 +281,32 @@ def test_detect_finger_in_mouth():
 
 def test_detect_finger_in_mouth_reversed():
     # "suck your finger" — mouth word comes first
-    actions, body, camera = _detect_action("suck your finger slowly")
+    actions, body, camera, _ = _detect_action("suck your finger slowly")
     assert actions[0] == "one finger in mouth"
     assert camera == "face level"
 
 
 def test_detect_finger_pussy_not_confused():
     # plain "finger" with no mouth context → fingering
-    actions, body, _ = _detect_action("finger me")
+    actions, body, _, _ = _detect_action("finger me")
     assert actions[0] == "fingering"
     assert body == "pussy"
 
 
 def test_detect_bend_over():
-    actions, body, camera = _detect_action("bend over and show me")
+    actions, body, camera, _ = _detect_action("bend over and show me")
     assert actions[0] == "bent over"
     assert camera == "from behind"
 
 
 def test_detect_spread_legs():
-    actions, body, camera = _detect_action("spread your legs wide")
+    actions, body, camera, _ = _detect_action("spread your legs wide")
     assert actions[0] == "spreading legs"
     assert camera == "from below"
 
 
 def test_detect_riding():
-    actions, _, camera = _detect_action("sit on me and ride")
+    actions, _, camera, _ = _detect_action("sit on me and ride")
     assert actions[0] == "riding"
     assert camera == "from below"
 
@@ -324,7 +324,7 @@ def test_detect_no_match_returns_none():
 def test_detect_compound_picks_last_matching():
     # "take off your top and cup your breasts" — after clause reorder,
     # last_user_msg = "cup your breasts in your hands, take off your top"
-    actions, _, _ = _detect_action("cup your breasts in your hands, take off your top")
+    actions, _, _, _ = _detect_action("cup your breasts in your hands, take off your top")
     assert actions[0] == "cupping breasts"
 
 
@@ -340,56 +340,56 @@ def test_last_clause_preserves_all_context():
 # ── remaining _detect_action patterns ────────────────────────────────────────
 
 def test_detect_kneeling():
-    actions, body, camera = _detect_action("kneel before me")
+    actions, body, camera, _ = _detect_action("kneel before me")
     assert actions[0] == "kneeling"
     assert camera == "front view"
 
 def test_detect_stroking():
-    actions, body, camera = _detect_action("stroke it for me")
+    actions, body, camera, _ = _detect_action("stroke it for me")
     assert actions[0] == "stroking penis"
     assert camera == "front view"
 
 def test_detect_kissing():
-    actions, body, camera = _detect_action("kiss me deeply")
+    actions, body, camera, _ = _detect_action("kiss me deeply")
     assert actions[0] == "kissing"
     assert camera == "face level"
 
 def test_detect_strip():
-    actions, body, camera = _detect_action("strip for me")
+    actions, body, camera, _ = _detect_action("strip for me")
     assert actions[0] == "disrobing"
     assert camera == "front view"
 
 def test_detect_undress():
-    actions, _, _ = _detect_action("slowly undress")
+    actions, _, _, _ = _detect_action("slowly undress")
     assert actions[0] == "disrobing"
 
 def test_detect_anal():
-    actions, body, camera = _detect_action("take it in the anal")
+    actions, body, camera, _ = _detect_action("take it in the anal")
     assert actions[0] == "anal insertion"
     assert camera == "from behind"
 
 def test_detect_squeeze_breasts():
-    actions, body, _ = _detect_action("squeeze your breasts for me")
+    actions, body, _, _ = _detect_action("squeeze your breasts for me")
     assert actions[0] == "squeezing breasts"
     assert body == "breasts"
 
 def test_detect_touch_breasts():
-    actions, body, _ = _detect_action("touch your breasts slowly")
+    actions, body, _, _ = _detect_action("touch your breasts slowly")
     assert actions[0] == "hands on breasts"
     assert body == "breasts"
 
 def test_detect_blowjob_keyword():
-    actions, _, camera = _detect_action("give me a blowjob")
+    actions, _, camera, _ = _detect_action("give me a blowjob")
     assert actions[0] == "fellatio"
     assert camera == "face level"
 
 def test_detect_lick_finger():
-    actions, body, camera = _detect_action("lick your finger")
+    actions, body, camera, _ = _detect_action("lick your finger")
     assert actions[0] == "one finger in mouth"
     assert body == "mouth"
 
 def test_detect_tongue_finger():
-    actions, body, _ = _detect_action("run your finger along your tongue")
+    actions, body, _, _ = _detect_action("run your finger along your tongue")
     assert actions[0] == "one finger in mouth"
     assert body == "mouth"
 

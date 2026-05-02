@@ -171,11 +171,20 @@ def _ensure_llm_ready(timeout: int = 120):
     llm.load_llm()
     if not llm.wait_until_ready(timeout):
         raise RuntimeError("llama.cpp server did not become ready; check llama-server output.")
+    import vram
+    vram.notify_llm_ready()
+    vram.log_resources("LLM ready")
 
 
 def _ensure_tts_ready():
-    if not tts.load_tts():
-        raise RuntimeError("TTS assets not available or failed to load.")
+    import threading
+    def _load():
+        if tts.load_tts():
+            print(f"[{config.NAME}] TTS ready.")
+        else:
+            print(f"[{config.NAME}] TTS failed to load — audio disabled.")
+    threading.Thread(target=_load, daemon=True, name="tts-loader").start()
+    print(f"[{config.NAME}] TTS loading in background...")
 
 
 def _ensure_forge_ready():
@@ -184,20 +193,46 @@ def _ensure_forge_ready():
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
     sd_checkpoint = config.CFG.get("sd_checkpoint", "pornmasterPro_v9VAE.safetensors")
-    if not image.set_forge_model(sd_checkpoint):
-        raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
-    image.warmup_forge()
-    if config.CFG.get("vram_swap_for_image", True):
+
+    # Skip set_forge_model (slow refresh-checkpoints included) if Forge already has
+    # the right checkpoint. Fall back to full set when it differs or check fails.
+    _needs_model_set = True
+    try:
+        opts = req.get(f"{config.CFG['forge_url']}/sdapi/v1/options", timeout=5).json()
+        current = opts.get("sd_model_checkpoint", "")
+        if current and (sd_checkpoint in current or current in sd_checkpoint):
+            _needs_model_set = False
+            print(f"[forge] Checkpoint already correct: {current}")
+            from image.forge import _push_forge_settings
+            _push_forge_settings(config.CFG["forge_url"])
+    except Exception:
+        pass
+
+    if _needs_model_set:
+        if not image.set_forge_model(sd_checkpoint):
+            raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
+
+    if config.CFG.get("vram_swap_for_image", False):
+        # vram_swap mode: evict Forge so LLM gets full VRAM. Checkpoint reloads on
+        # first image request via acquire_for_image(). Only needed when model is too
+        # large to coexist with Forge (>5GB model on 8GB GPU).
         vram.unload_forge()
-        print("[vram] Forge evicted after warmup — LLM will have full VRAM.")
+        print("[vram] Forge evicted at startup — LLM will have full VRAM.")
+    else:
+        # Normal mode: LLM and Forge coexist. Warmup loads the checkpoint into VRAM
+        # now so the first image request doesn't pay the reload cost.
+        image.warmup_forge()
 
 
 def _startup():
-    _vram_swap = config.CFG.get("vram_swap_for_image", True)
+    import vram as _vram_mod
+    _vram_mod.log_resources("startup baseline")
 
-    # When vram_swap is on, Forge must warm up before the LLM so it gets full VRAM.
-    # After warmup the checkpoint is evicted and the LLM loads into the freed VRAM.
+    _vram_swap = config.CFG.get("vram_swap_for_image", False)
+
     if not NO_FORGE and _vram_swap:
+        # vram_swap: Forge must start before LLM so the checkpoint is evicted first,
+        # freeing VRAM for the LLM. Only needed for models >5GB on 8GB GPUs.
         _ensure_forge_ready()
 
     _ensure_llm_ready()
@@ -314,11 +349,13 @@ if __name__ == "__main__":
 
     _kill_listener(HOST, PORT)
 
-    try:
-        _startup()
-    except RuntimeError as exc:
-        print(f"\n[{config.NAME}] Preflight failed: {exc}")
-        sys.exit(1)
+    def _run_startup():
+        try:
+            _startup()
+        except RuntimeError as exc:
+            print(f"\n[{config.NAME}] Preflight failed: {exc}")
+
+    threading.Thread(target=_run_startup, daemon=True, name="startup").start()
 
     if _PERSONA_ARG and not TEST_MODE:
         def _apply_persona():

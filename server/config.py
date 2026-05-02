@@ -147,8 +147,14 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     try:
+        to_save = {**cfg}
+        # banned_phrases is extended (not replaced) during load: defaults + alice.json.
+        # Strip default phrases before saving so we only persist user additions and
+        # avoid the list doubling on every save→load cycle.
+        default_banned = set(_DEFAULT_CONFIG.get("banned_phrases", []))
+        to_save["banned_phrases"] = [p for p in cfg.get("banned_phrases", []) if p not in default_banned]
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=4, ensure_ascii=False)
+            json.dump(to_save, f, indent=4, ensure_ascii=False)
     except Exception as e:
         print(f"        WARNING: Could not save config: {e}")
 

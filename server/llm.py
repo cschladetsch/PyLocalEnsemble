@@ -45,11 +45,35 @@ def llm_model() -> str:
 
 
 def list_models() -> list:
-    try:
-        r = req.get(f"{LLAMA_URL}/v1/models", timeout=5)
-        return [(m["id"], m["id"]) for m in r.json().get("data", [])]
-    except Exception:
-        return []
+    """Return (name, path, size_gb) triples for every .gguf found on disk."""
+    found = {}
+
+    search_roots = []
+    # Directory of the currently configured model
+    current = config.CFG.get("model_path", "")
+    if current:
+        search_roots.append(os.path.dirname(current))
+    # LM Studio cache
+    lm_studio = os.path.join(os.path.expanduser("~"), ".cache", "lm-studio", "models")
+    if os.path.isdir(lm_studio):
+        search_roots.append(lm_studio)
+    # Any explicit model_dir in config
+    extra = config.CFG.get("model_dir", "")
+    if extra and os.path.isdir(extra):
+        search_roots.append(extra)
+
+    for root in search_roots:
+        for dirpath, _, files in os.walk(root):
+            for fname in files:
+                if fname.lower().endswith(".gguf") and ".part" not in fname:
+                    full = os.path.join(dirpath, fname)
+                    if full not in found:
+                        try:
+                            size_gb = round(os.path.getsize(full) / 1e9, 1)
+                        except OSError:
+                            size_gb = 0.0
+                        found[full] = (fname, size_gb)
+    return [(name, path, size) for path, (name, size) in sorted(found.items(), key=lambda x: x[1][0].lower())]
 
 
 def _start_server():
@@ -189,9 +213,31 @@ def resume_after_image() -> None:
 
     threading.Thread(target=_restart, daemon=True).start()
 
+def _server_model_matches() -> bool:
+    """Return True if the running llama-server is serving the configured model_path."""
+    configured = os.path.basename(config.CFG.get("model_path", "")).lower()
+    if not configured:
+        return True  # no model configured — can't verify
+    try:
+        r = req.get(f"{LLAMA_URL}/v1/models", timeout=2)
+        if r.status_code == 200:
+            ids = [m.get("id", "").lower() for m in r.json().get("data", [])]
+            return any(configured in i or i in configured for i in ids)
+    except Exception:
+        pass
+    return True  # if we can't check, assume it's fine
+
+
 def load_llm():
     step(f"Connecting to llama.cpp server at {LLAMA_URL} ...")
-    if not http_ok(LLAMA_URL + "/health", timeout=2):
+    if http_ok(LLAMA_URL + "/health", timeout=2):
+        if not _server_model_matches():
+            warn("llama-server is running a different model — restarting with the configured model...")
+            _kill_server_proc()
+            _kill_by_port()
+            time.sleep(1)
+            _start_server()
+    else:
         _start_server()
 
     def _retry():

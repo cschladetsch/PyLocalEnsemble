@@ -78,7 +78,7 @@ async def speak_stream(body: TtsRequest):
 
     def _worker():
         try:
-            for b64, is_last in tts.tts_wav_b64_stream_contiguous(
+            for b64, is_last in tts.tts_wav_b64_stream(
                 clean, voice=body.voice, speed=body.speed, pitch=body.pitch, effects=body.effects
             ):
                 if stop.is_set():

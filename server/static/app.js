@@ -1,4 +1,5 @@
 let mid = 0, imgAbort = null, chatAbort = null, muted = false;
+let _imgGenId = 0;  // incremented each time a new image request starts or is aborted
 let mediaRecorder = null, audioChunks = [];
 let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
@@ -64,7 +65,7 @@ function skipVoice() {
   _demoSkip = true;
   _stopTts();
   if (chatAbort) { chatAbort.abort(); chatAbort = null; }
-  if (imgAbort)  { imgAbort.abort();  imgAbort  = null; }
+  if (imgAbort)  { imgAbort.abort();  imgAbort  = null; _imgGenId++; }
   fetch('/interrupt', { method: 'POST' }).catch(() => {});
 }
 
@@ -198,9 +199,9 @@ async function loadInfo() {
     const firstMsg = document.querySelector('#msgs .msg.alice .sndr');
     if (firstMsg) firstMsg.textContent = charName;
     const firstBody = document.querySelector('#msgs .msg.alice');
-    if (firstBody && firstBody.childNodes.length === 2) {
-      // Only replace the hardcoded greeting on first load (before any conversation)
+    if (firstBody && firstBody.childNodes.length === 2 && !firstBody.dataset.entranceSet) {
       firstBody.childNodes[1].textContent = entranceLine();
+      firstBody.dataset.entranceSet = '1';
     }
     if (d.demo) {
       if (d.demo.user_name)  DEMO_USER_NAME  = d.demo.user_name;
@@ -311,6 +312,47 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
   } catch (e) { if (gen === _ttsGen) console.warn('TTS stream error:', e); }
 }
 
+// Like speak() but chains audio after current playback without resetting TTS state.
+// Use to append more speech to an already-running or scheduled stream.
+async function speakChain(text, voice = null, speed = null, pitch = null, effects = null) {
+  if (muted || !text.trim()) return;
+  const gen = _ttsGen;
+  lastReplyText = lastReplyText ? lastReplyText + ' ' + text : text;
+  try {
+    const body = { text };
+    if (voice   !== null) body.voice   = voice;
+    if (speed   !== null) body.speed   = speed;
+    if (pitch   !== null) body.pitch   = pitch;
+    if (effects !== null) body.effects = effects;
+    const res = await fetch('/tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || gen !== _ttsGen) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = JSON.parse(line.slice(6));
+        if (d.error) { console.warn('TTS chain error:', d.error); return; }
+        if (d.chunk) {
+          if (gen !== _ttsGen) return;
+          await _scheduleChunk(d.chunk, gen);
+          const resayBtn = document.getElementById('resay-btn');
+          if (resayBtn) resayBtn.disabled = false;
+        }
+      }
+    }
+  } catch (e) { if (gen === _ttsGen) console.warn('TTS chain error:', e); }
+}
+
 function disableAll() {
   const e = document.getElementById('ibtn'); if (e) e.disabled = true;
 }
@@ -367,6 +409,7 @@ async function interrupt(reason) {
     console.log('Aborting media generation:', reason);
     imgAbort.abort();
     imgAbort = null;
+    _imgGenId++;  // invalidate any pending isForeground() from the aborted request
   }
   stopProgress();
   enableAll();
@@ -433,12 +476,13 @@ async function triggerMedia(extra = '', auto = false) {
   if (!auto) await interrupt('new media request');  // auto: already interrupted at chat start
   const myAbort = new AbortController();
   imgAbort = myAbort;
+  const myGenId = ++_imgGenId;
+  // isForeground() returns true as long as no newer image request has started or been aborted
+  const isForeground = () => _imgGenId === myGenId;
 
   disableAll();
 
   if (extra && !auto) addMsg('user', 'You', extra);
-
-  const isForeground = () => imgAbort === myAbort;
 
   if (isForeground()) {
     document.getElementById('ih').textContent = 'Generated Scene';
@@ -453,12 +497,11 @@ async function triggerMedia(extra = '', auto = false) {
   }
 
   try {
-    // No abort signal — let Forge run to completion even if user switches away.
-    // Server /interrupt (Stop button / new image request) cancels Forge server-side.
     const res = await fetch('/image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ extra }),
+      signal: myAbort.signal,
     });
     const d = await res.json();
     if (d.url) {
@@ -501,8 +544,56 @@ async function loadModels() {
     const d = await res.json();
     const sel = document.getElementById('model-select');
     sel.innerHTML = `<option value="" disabled selected>Model</option>` +
-      d.models.map(m => `<option value="${m.path}">${m.name}</option>`).join('');
+      d.models.map(m => {
+        const size = m.size_gb ? `${m.size_gb}GB  ` : '';
+        return `<option value="${m.path}">${size}${m.name}</option>`;
+      }).join('');
+    if (d.current) {
+      const match = d.models.find(m => m.path === d.current || m.name === d.current || d.current.includes(m.name));
+      if (match) sel.value = match.path;
+    }
   } catch (e) { console.warn('Could not load models:', e); }
+}
+
+async function loadSDModels() {
+  const sel = document.getElementById('sd-model-select');
+  if (!sel) return;
+  try {
+    const res = await fetch('/sd-models');
+    const d = await res.json();
+    if (d.error || !d.models.length) {
+      sel.innerHTML = `<option value="" disabled selected>SD Model (unavailable)</option>`;
+      return;
+    }
+    sel.innerHTML = `<option value="" disabled>SD Checkpoint</option>` +
+      d.models.map(m =>
+        `<option value="${m.title}" ${m.title === d.current ? 'selected' : ''}>${m.name}</option>`
+      ).join('');
+  } catch (e) {
+    sel.innerHTML = `<option value="" disabled selected>SD Model (error)</option>`;
+    console.warn('Could not load SD models:', e);
+  }
+}
+
+async function switchSDModel(sel) {
+  const title = sel.value;
+  const name = sel.options[sel.selectedIndex].text;
+  sel.disabled = true;
+  const tid = addMsg('alice', charName, `<span class="gen">Loading SD checkpoint: ${name}…</span>`);
+  try {
+    const res = await fetch('/sd-model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title })
+    });
+    const d = await res.json();
+    updMsg(tid, d.error
+      ? `<em style="color:#c08080">SD model error: ${d.error}</em>`
+      : `SD checkpoint: ${name}.`);
+  } catch (e) {
+    updMsg(tid, `<em style="color:#c08080">SD model switch failed: ${e.message}</em>`);
+  }
+  sel.disabled = false;
 }
 
 async function loadPacks() {
@@ -553,6 +644,7 @@ async function switchModel(sel) {
 }
 
 loadModels();
+loadSDModels();
 loadPacks();
 
 const _PERSONA_FONTS = {
@@ -762,6 +854,8 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   chatAbort = new AbortController();
   disableAll();
   let reply = '', autoImage = true;
+  let _earlyTtsText = '';  // text sent to TTS early; '' = not yet started
+  let _ttsBuf = '';        // accumulates deltas for sentence-boundary detection
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -783,24 +877,48 @@ async function _chatWith(msg, { forceImage = false } = {}) {
         const data = JSON.parse(line.slice(6));
         if (data.status) { updMsg(tid, `<em style="color:#888">${data.status}</em>`); }
         if (data.error) { document.getElementById('thinking-bar').style.display='none'; updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
-        if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
+        if (data.delta) {
+          document.getElementById('thinking-bar').style.display='none';
+          reply += data.delta;
+          updMsg(tid, reply);
+          // Start TTS early on first sentence boundary
+          if (!_earlyTtsText && !muted) {
+            _ttsBuf += data.delta;
+            if (/[.!?]["']?\s/.test(_ttsBuf) || _ttsBuf.length > 300) {
+              _earlyTtsText = _ttsBuf.trim();
+              speak(_earlyTtsText);
+            }
+          }
+        }
         if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
       }
     }
   } catch (e) {
     document.getElementById('thinking-bar').style.display = 'none';
-    if (e.name === 'AbortError') { 
-      updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); 
-    } else { 
+    if (e.name === 'AbortError') {
+      updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>');
+    } else {
       console.error('Chat error:', e);
-      updMsg(tid, `<em style="color:#c08080">Chat error: ${e.message || 'Unknown error'}. Check console/terminal.</em>`); 
+      updMsg(tid, `<em style="color:#c08080">Chat error: ${e.message || 'Unknown error'}. Check console/terminal.</em>`);
     }
     chatAbort = null; enableAll(); return;
   }
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
+  if (reply) {
+    if (autoImage || forceImage) triggerMedia('', true);
+    if (!_earlyTtsText) {
+      speak(reply);
+    } else {
+      // TTS started early — chain the remainder to avoid replaying the first sentence
+      const remainder = reply.length > _earlyTtsText.length
+        ? reply.slice(_earlyTtsText.length).trim()
+        : '';
+      if (remainder) speakChain(remainder);
+      lastReplyText = reply;  // ensure resay has the full text
+    }
+  }
   loadInfo();
 }
 
@@ -839,7 +957,7 @@ async function send() {
     _demoSkip = true;
     _stopTts();
     if (chatAbort) { chatAbort.abort(); chatAbort = null; }
-    if (imgAbort)  { imgAbort.abort();  imgAbort  = null; }
+    if (imgAbort)  { imgAbort.abort();  imgAbort  = null; _imgGenId++; }
   }
   await _chatWith(msg);
   if (_demoMode) _demoPaused = false;  // let demo resume after Alice replies

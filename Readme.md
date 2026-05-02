@@ -112,8 +112,10 @@ Key settings:
 | `quick_image` | `true` | QUICK mode toggle (persisted here, also controlled from the UI button) — skips hires fix, ADetailer, and group scene synthesis; uses `quick_steps`/`quick_sampler` |
 | `forge_args` | *(platform default)* | Override Forge launch flags (e.g. `"--api --xformers"`) |
 | `forge_venv_dir` | `""` | Optional path to an existing Forge virtualenv to reuse instead of creating `stable-diffusion-webui-forge/venv` |
-| `llama_server.n_gpu_layers` | `33` | GPU layers offloaded — reduce if you get VRAM OOM |
-| `llama_server.ctx_size` | `4096` | Context window in tokens |
+| `sd_models_dir` | `"~/.cache/stable-diffusion/models"` | Extra directory Forge will search for SD checkpoints (passed as `--ckpt-dir`); mirrors the `~/.cache/lm-studio/models` pattern for LLMs |
+| `llama_server.n_gpu_layers` | `24` | GPU layers offloaded to GPU. Reduce to lower VRAM use at the cost of slightly slower inference. See **VRAM budget** below. |
+| `llama_server.ctx_size` | `2048` | Context window in tokens. 2048 is sufficient for normal conversation and halves KV-cache VRAM vs 4096. |
+| `vram_swap_for_image` | `false` | Kill the LLM before each image gen to free VRAM, then restart it after. Only needed when `n_gpu_layers` is too high for both to coexist. See **VRAM budget** below. |
 | `llama_url` | `"http://127.0.0.1:8080"` | llama-server URL (override with `LLAMA_URL` env var) |
 | `memory.max_history` | `16` | Compress history after this many messages |
 | `memory.keep_recent` | `8` | Messages kept after compression |
@@ -177,6 +179,32 @@ Alice uses a GGUF model served by `llama-server` via the OpenAI-compatible API.
 | `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Alternative 8B |
 
 To use a different model: set `model_path` in `alice.json` and restart.
+
+### VRAM budget
+
+Alice runs the LLM and Forge simultaneously. Both must fit in your GPU's VRAM or image generation will stall.
+
+**Rule of thumb for 8 GB GPUs (e.g. RTX 2070):**
+
+| `n_gpu_layers` | `ctx_size` | LLM VRAM | + Forge | Total | Result |
+|---|---|---|---|---|---|
+| `-1` (all) | 4096 | ~6.5 GB | ~2.2 GB | ~8.7 GB | ✗ OOM |
+| `24` | 2048 | ~4.5 GB | ~2.2 GB | ~6.7 GB | ✓ fits |
+| `20` | 2048 | ~3.8 GB | ~2.2 GB | ~6.0 GB | ✓ safe |
+
+The default `alice.json` uses `n_gpu_layers: 24` and `ctx_size: 2048`. The 8 CPU layers add roughly 10–15% latency per token — imperceptible at normal conversation pace.
+
+**`vram_swap_for_image`** — set to `true` only when your model cannot be made to fit alongside Forge by reducing `n_gpu_layers`. When enabled, Alice kills the LLM before each image gen (freeing VRAM) and restarts it after. This adds 30–90 seconds of overhead per image. Default: `false`.
+
+The **Model** dropdown in the header shows all discovered GGUF files with their size in GB. Selecting a different model hot-reloads the llama-server without restarting Alice.
+
+---
+
+## SD Checkpoint
+
+The **SD Checkpoint** dropdown in the header lists all checkpoints known to Forge. Selecting one loads it immediately (takes 10–30 s depending on the model size). The selection is persisted in `alice.json` (`sd_checkpoint`).
+
+To make extra checkpoint directories visible to Forge, set `sd_models_dir` in `alice.json` (e.g. `"~/.cache/stable-diffusion/models"`). Alice passes this as `--ckpt-dir` when it starts Forge.
 
 ---
 

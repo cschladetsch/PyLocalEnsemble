@@ -1,27 +1,43 @@
-"""Tests for vram.py VRAM orchestrator.
+"""Tests for the ResourceOrchestrator in vram.py.
 
 All tests mock HTTP calls — no Forge server required.
+sample_resources() is mocked to return safe defaults so tests are not
+affected by the real machine state (RAM/VRAM/GPU/CPU).
 """
 import pytest
 from unittest.mock import MagicMock, patch
 import vram
-from vram import Priority
+from vram import Priority, Resources
+
+
+_SAFE_RESOURCES = Resources(cpu_pct=20.0, ram_pct=50.0,
+                             vram_used=2000, vram_free=6000, vram_total=8000,
+                             gpu_pct=0.0)
 
 
 @pytest.fixture(autouse=True)
 def _reset_vram_state():
-    """Restore module-level and orchestrator state after each test."""
+    """Restore module-level and orchestrator state after each test.
+
+    Also mocks sample_resources() so tests are deterministic and never
+    block on nvidia-smi or trigger proactive eviction based on real RAM.
+    """
     saved_url      = vram._forge_url
     saved_loaded   = vram._forge_loaded
     saved_holders  = dict(vram._orch._holders)
     saved_default  = vram._orch._default
     saved_def_pri  = vram._orch._default_priority
-    yield
-    vram._forge_url            = saved_url
-    vram._forge_loaded         = saved_loaded
-    vram._orch._holders        = saved_holders
-    vram._orch._default        = saved_default
+    saved_last_res = vram._orch._last_res
+
+    with patch("vram.sample_resources", return_value=_SAFE_RESOURCES):
+        yield
+
+    vram._forge_url              = saved_url
+    vram._forge_loaded           = saved_loaded
+    vram._orch._holders          = saved_holders
+    vram._orch._default          = saved_default
     vram._orch._default_priority = saved_def_pri
+    vram._orch._last_res         = saved_last_res
 
 
 # ── setup ────────────────────────────────────────────────────────────────────
@@ -223,32 +239,16 @@ def test_acquire_for_image_does_not_evict_interactive_holder():
 
 # ── release_from_image ────────────────────────────────────────────────────────
 
-def test_release_from_image_unloads_forge():
-    """release_from_image must evict the Forge checkpoint from VRAM."""
+def test_release_from_image_keeps_forge_hot():
+    """release_from_image must keep the Forge checkpoint in VRAM for fast subsequent gens."""
     vram.setup("http://localhost:7860")
     vram._forge_loaded = True
     vram._orch._holders["forge"] = Priority.GENERATION
 
-    resp = MagicMock(status_code=200)
-    with patch("vram.req.post", return_value=resp):
-        with patch.object(vram._orch, "_reload_default_async"):
-            vram.release_from_image()
+    with patch.object(vram._orch, "_reload_default_async"):
+        vram.release_from_image()
 
-    assert vram._forge_loaded is False
-
-
-def test_release_from_image_triggers_llm_reload():
-    """After Forge releases, the LLM default must be scheduled for reload."""
-    vram.setup("http://localhost:7860")
-    vram._forge_loaded = True
-    vram._orch._holders["forge"] = Priority.GENERATION
-
-    resp = MagicMock(status_code=200)
-    with patch("vram.req.post", return_value=resp):
-        with patch.object(vram._orch, "_reload_default_async") as mock_reload:
-            vram.release_from_image()
-
-    mock_reload.assert_called_once()
+    assert vram._forge_loaded is True, "Forge checkpoint must stay hot after release"
 
 
 # ── Priority semantics ────────────────────────────────────────────────────────
@@ -301,3 +301,77 @@ def test_double_reload_only_calls_http_once():
             vram.reload_forge()  # first call
             vram.reload_forge()  # second call — already loaded
     assert mock_post.call_count == 1
+
+
+# ── keep-hot / lazy-evict behaviour ──────────────────────────────────────────
+
+def test_release_from_image_triggers_llm_reload():
+    """After Forge releases, the LLM default must be scheduled for reload."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+    vram._orch._holders.clear()
+    vram._orch._holders["forge"] = Priority.GENERATION
+
+    with patch.object(vram._orch, "_reload_default_async") as mock_reload:
+        vram.release_from_image()
+
+    mock_reload.assert_called_once()
+
+
+def test_llm_load_evicts_forge_when_hot():
+    """_llm_load must evict Forge before starting the LLM when checkpoint is still in VRAM."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+
+    unloaded = []
+    resp = MagicMock(status_code=200)
+    with patch("vram.req.post", return_value=resp):
+        # Intercept _forge_unload to track the call
+        original_unload = vram._forge_unload
+        def _track_unload():
+            unloaded.append(True)
+            return original_unload()
+        with patch("vram._forge_unload", side_effect=_track_unload):
+            with patch("llm.LLM_READY", False):
+                with patch("llm.LLM_SUSPENDED", False):
+                    with patch("llm.load_llm"):
+                        vram._llm_load()
+
+    assert unloaded, "_forge_unload must be called before LLM loads when Forge is hot"
+    assert vram._forge_loaded is False
+
+
+def test_llm_load_skips_forge_evict_when_already_unloaded():
+    """_llm_load must NOT call _forge_unload when Forge is already unloaded."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = False
+
+    with patch("vram._forge_unload") as mock_unload:
+        with patch("llm.LLM_READY", False):
+            with patch("llm.LLM_SUSPENDED", False):
+                with patch("llm.load_llm"):
+                    vram._llm_load()
+
+    mock_unload.assert_not_called()
+
+
+def test_acquire_for_image_skips_forge_reload_when_hot():
+    """When Forge checkpoint is already in VRAM, acquire must not POST to reload-checkpoint."""
+    vram.setup("http://localhost:7860")
+    vram._forge_loaded = True
+    vram._orch._holders["llm"] = Priority.BACKGROUND
+
+    reload_calls = []
+
+    def _fake_post(url, **kw):
+        if "reload-checkpoint" in url:
+            reload_calls.append(url)
+        m = MagicMock()
+        m.status_code = 200
+        return m
+
+    with patch("vram.req.post", side_effect=_fake_post):
+        with patch("vram._llm_unload", return_value=True):
+            vram.acquire_for_image()
+
+    assert not reload_calls, "No reload-checkpoint call expected when Forge is already hot"

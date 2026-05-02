@@ -148,6 +148,7 @@ async function triggerMedia(extra = '', auto = false) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ extra }),
+      signal: myAbort.signal,
     });
     const d = await res.json();
     if (d.url) {

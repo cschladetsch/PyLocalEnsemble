@@ -180,7 +180,11 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
                         print(f"{_c('blue', '[forge]')} → {_c('cyan', phase)}")
                         last_phase = phase
                         t_phase    = time.time()
-                    elif pct > 0 and step != last_step and step % max(1, total // 4) == 0:
+                    elif phase and phase.startswith("finishing"):
+                        elapsed = time.time() - t_phase
+                        if int(elapsed) % 5 == 0 and int(elapsed) > 0:
+                            print(f"{_c('blue', '[forge]')}   decode still running… {elapsed:.0f}s")
+                    elif pct > 0 and step != last_step and step % max(1, total // 8) == 0:
                         eta_str = f"  eta {eta:.1f}s" if eta > 0.5 else ""
                         print(f"{_c('blue', '[forge]')}   step {step}/{total}  {pct}%{eta_str}")
                     last_step = step

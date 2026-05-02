@@ -1,17 +1,30 @@
-"""VRAM Orchestrator — priority-based GPU arbitration between llama-server and Forge.
+"""Resource Orchestrator — optional VRAM arbitration for GPU-constrained setups.
 
-Ownership model:
+WHEN THIS MODULE IS ACTIVE
+  Only when `vram_swap_for_image: true` in alice.json. With a 7B model and
+  n_gpu_layers<=24, both the LLM and Forge fit on an 8GB GPU simultaneously and
+  this module's acquire/release paths are never called.
+
+  Enable vram_swap only if your model exceeds ~5GB VRAM and you cannot reduce
+  n_gpu_layers further without unacceptable inference slowdown.
+
+OWNERSHIP MODEL (when vram_swap is enabled)
   - LLM is the *default* GPU tenant: reloaded whenever the GPU is otherwise idle.
   - Image generation acquires Forge at GENERATION priority, evicting the LLM first.
-  - A future INTERACTIVE-priority acquire (e.g. urgent chat) would evict Forge mid-gen
-    via the Forge /interrupt API before loading the LLM back.
+  - INTERACTIVE-priority acquire (e.g. urgent chat) would evict Forge mid-gen.
 
 Priority: lower number wins.
   INTERACTIVE = 1  (user waiting — chat, live STT)
   GENERATION  = 2  (image generation)
-  BACKGROUND  = 3  (warmup, preload)
+  BACKGROUND  = 3  (warmup, preload, idle LLM)
+
+VRAM BUDGET GUIDANCE (RTX 2070 / 8GB)
+  n_gpu_layers=24, ctx_size=2048 → LLM ~4.5GB, Forge ~2.2GB, total ~6.7GB  ✓ fits
+  n_gpu_layers=-1,  ctx_size=4096 → LLM ~6.5GB, Forge ~2.2GB, total ~8.7GB  ✗ needs swap
 """
 
+import dataclasses
+import subprocess
 import threading
 import time
 import requests as req
@@ -27,6 +40,102 @@ class Priority:
     BACKGROUND  = 3
 
 
+# ── Resource snapshot ─────────────────────────────────────────────────────────
+
+@dataclasses.dataclass
+class Resources:
+    cpu_pct:    float = -1.0   # 0–100, -1 = unavailable
+    ram_pct:    float = -1.0   # 0–100, -1 = unavailable
+    vram_used:  int   = 0      # MB
+    vram_free:  int   = 0      # MB
+    vram_total: int   = 0      # MB
+    gpu_pct:    float = -1.0   # 0–100, -1 = unavailable
+
+    @property
+    def vram_pct(self) -> float:
+        return 100.0 * self.vram_used / self.vram_total if self.vram_total else 0.0
+
+    def summary(self) -> str:
+        parts = []
+        if self.ram_pct >= 0:
+            flag = " !! HIGH" if self.ram_pct >= 85 else ""
+            parts.append(f"RAM {self.ram_pct:.0f}%{flag}")
+        if self.vram_total > 0:
+            flag = " !!" if self.vram_pct >= 90 else ""
+            parts.append(f"VRAM {self.vram_used}/{self.vram_total}MB{flag}")
+        if self.gpu_pct >= 0:
+            parts.append(f"GPU {self.gpu_pct:.0f}%")
+        if self.cpu_pct >= 0:
+            parts.append(f"CPU {self.cpu_pct:.0f}%")
+        return "  ".join(parts) if parts else "(no data)"
+
+
+def sample_resources() -> Resources:
+    """Query current CPU, RAM, VRAM, and GPU utilisation."""
+    res = Resources()
+
+    # RAM — Windows ctypes (no dependency)
+    try:
+        import ctypes
+        class _MEM(ctypes.Structure):
+            _fields_ = [
+                ("dwLength",                ctypes.c_ulong),
+                ("dwMemoryLoad",            ctypes.c_ulong),
+                ("ullTotalPhys",            ctypes.c_ulonglong),
+                ("ullAvailPhys",            ctypes.c_ulonglong),
+                ("ullTotalPageFile",        ctypes.c_ulonglong),
+                ("ullAvailPageFile",        ctypes.c_ulonglong),
+                ("ullTotalVirtual",         ctypes.c_ulonglong),
+                ("ullAvailVirtual",         ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+        s = _MEM(); s.dwLength = ctypes.sizeof(s)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s))
+        res.ram_pct = float(s.dwMemoryLoad)
+    except Exception:
+        pass
+
+    # CPU — psutil preferred, fall back to a short GetSystemTimes delta
+    try:
+        import psutil
+        res.cpu_pct = psutil.cpu_percent(interval=None)
+    except ImportError:
+        try:
+            import ctypes
+            class _FT(ctypes.Structure):
+                _fields_ = [("lo", ctypes.c_ulong), ("hi", ctypes.c_ulong)]
+            def _ft(ft): return (ft.hi << 32) | ft.lo
+            i1, k1, u1 = _FT(), _FT(), _FT()
+            ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(i1), ctypes.byref(k1), ctypes.byref(u1))
+            time.sleep(0.15)
+            i2, k2, u2 = _FT(), _FT(), _FT()
+            ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(i2), ctypes.byref(k2), ctypes.byref(u2))
+            total = (_ft(k2) - _ft(k1)) + (_ft(u2) - _ft(u1))
+            idle  = _ft(i2) - _ft(i1)
+            res.cpu_pct = 100.0 * (total - idle) / total if total > 0 else 0.0
+        except Exception:
+            pass
+
+    # VRAM + GPU — nvidia-smi
+    try:
+        r = subprocess.run(
+            ["nvidia-smi",
+             "--query-gpu=memory.used,memory.free,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            parts = [p.strip() for p in r.stdout.strip().split(",")]
+            if len(parts) >= 3:
+                res.vram_used  = int(parts[0])
+                res.vram_free  = int(parts[1])
+                res.vram_total = res.vram_used + res.vram_free
+                res.gpu_pct    = float(parts[2])
+    except Exception:
+        pass
+
+    return res
+
+
 # ── Internal resource descriptor ──────────────────────────────────────────────
 
 class _GPUResource:
@@ -40,14 +149,14 @@ class _GPUResource:
         try:
             return bool(self._load_fn())
         except Exception as e:
-            warn(f"[vram] {self.name}.load() raised: {e}")
+            warn(f"[orch] {self.name}.load() raised: {e}")
             return False
 
     def unload(self) -> bool:
         try:
             return bool(self._unload_fn())
         except Exception as e:
-            warn(f"[vram] {self.name}.unload() raised: {e}")
+            warn(f"[orch] {self.name}.unload() raised: {e}")
             return False
 
     def interrupt(self) -> None:
@@ -55,34 +164,40 @@ class _GPUResource:
             try:
                 self._interrupt_fn()
             except Exception as e:
-                warn(f"[vram] {self.name}.interrupt() raised: {e}")
+                warn(f"[orch] {self.name}.interrupt() raised: {e}")
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
-class VRAMOrchestrator:
+class ResourceOrchestrator:
     """
-    Priority-based VRAM arbiter.
+    Priority-based GPU arbiter with continuous resource monitoring.
 
-    A higher-priority acquire evicts any current holders with a lower priority
-    (higher Priority number).  Eviction calls interrupt() then unload() so
-    in-flight work (e.g. Forge generation) is cancelled cleanly.
-
-    After the last non-default holder releases, the default resource (LLM) is
-    reloaded automatically in a background thread.
+    Monitors CPU, RAM, VRAM, and GPU utilisation in a background thread.
+    Proactively evicts idle BACKGROUND holders when RAM becomes critical so
+    the system never hits 100% RAM before an image generation starts.
 
     Priority semantics (lower number wins):
       INTERACTIVE (1) evicts GENERATION (2) and BACKGROUND (3)
-      GENERATION  (2) evicts BACKGROUND (3) — used for image gen vs LLM
-      BACKGROUND  (3) is the LLM's idle-holding priority; evicted by both
+      GENERATION  (2) evicts BACKGROUND (3) — image gen vs LLM
+      BACKGROUND  (3) is the LLM's idle-holding priority
     """
+
+    # Thresholds
+    RAM_WARN_PCT     = 78   # log a warning
+    RAM_CRITICAL_PCT = 87   # proactively evict idle holders
+    RAM_GATE_PCT     = 82   # wait before loading a new resource
+    MONITOR_INTERVAL = 4.0  # seconds between background samples
 
     def __init__(self):
         self._lock            = threading.Lock()
         self._resources       : dict[str, _GPUResource] = {}
-        self._holders         : dict[str, int]           = {}   # name -> priority
+        self._holders         : dict[str, int]           = {}   # name → priority
         self._default         : str | None               = None
         self._default_priority: int                      = Priority.BACKGROUND
+        self._last_res        : Resources                = Resources()
+        self._monitor_thread  : threading.Thread | None  = None
+        self._stop_monitor    = threading.Event()
 
     # ── Registration ─────────────────────────────────────────────────────────
 
@@ -94,11 +209,66 @@ class VRAMOrchestrator:
             self._default          = name
             self._default_priority = default_priority
 
+    # ── Monitoring ────────────────────────────────────────────────────────────
+
+    def start_monitor(self) -> None:
+        """Start the background resource sampling thread."""
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            return
+        self._stop_monitor.clear()
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop, daemon=True, name="resource-monitor")
+        self._monitor_thread.start()
+
+    def _monitor_loop(self) -> None:
+        while not self._stop_monitor.wait(timeout=self.MONITOR_INTERVAL):
+            res = sample_resources()
+            prev = self._last_res
+            self._last_res = res
+
+            # Log whenever anything crosses a notable threshold
+            ram_crossed_warn = res.ram_pct >= self.RAM_WARN_PCT > prev.ram_pct
+            ram_critical     = res.ram_pct >= self.RAM_CRITICAL_PCT
+            if ram_crossed_warn or ram_critical:
+                print(f"[orch] {res.summary()}")
+
+            # Proactive eviction disabled: the acquire() path handles eviction
+            # on demand and the LLM needs to stay resident between image gens.
+
+    @property
+    def resources(self) -> Resources:
+        return self._last_res
+
+    def log(self, label: str = "") -> None:
+        """Sample and print current resources."""
+        res = sample_resources()
+        self._last_res = res
+        prefix = f"[orch] {label}" if label else "[orch]"
+        print(f"{prefix}  {res.summary()}")
+
+    def wait_for_ram(self, timeout: float = 20.0) -> bool:
+        """Block until RAM drops below RAM_GATE_PCT or timeout expires."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res = sample_resources()
+            self._last_res = res
+            if res.ram_pct < 0 or res.ram_pct <= self.RAM_GATE_PCT:
+                return True
+            remaining = deadline - time.time()
+            print(f"[orch] RAM {res.ram_pct:.0f}% — waiting for ≤{self.RAM_GATE_PCT}%  "
+                  f"({remaining:.0f}s left)  {res.summary()}")
+            time.sleep(2.0)
+        res = sample_resources()
+        self._last_res = res
+        if res.ram_pct > self.RAM_GATE_PCT:
+            warn(f"[orch] RAM still {res.ram_pct:.0f}% after {timeout:.0f}s — proceeding")
+            return False
+        return True
+
     # ── Acquire ───────────────────────────────────────────────────────────────
 
     def acquire(self, name: str, priority: int = Priority.GENERATION) -> None:
-        """Evict lower-priority holders then load *name* onto the GPU."""
-        # Snapshot eviction targets and update _holders atomically.
+        """Evict lower-priority holders, then load *name* onto the GPU."""
         with self._lock:
             to_evict = [(n, p) for n, p in list(self._holders.items())
                         if n != name and p > priority]
@@ -106,21 +276,23 @@ class VRAMOrchestrator:
                 del self._holders[n]
             self._holders[name] = priority
 
-        # Run eviction callbacks outside the lock so they can safely re-enter.
         for n, p in to_evict:
             r = self._resources.get(n)
             if r:
-                print(f"[vram] evicting '{n}' (priority {p}) "
-                      f"for '{name}' (priority {priority})")
+                print(f"[orch] evicting '{n}' (priority {p}) for '{name}' (priority {priority})")
                 r.interrupt()
                 r.unload()
 
+        if to_evict:
+            self.wait_for_ram(timeout=20.0)
+
+        self.log(f"pre  load:{name}")
         r = self._resources.get(name)
         if r:
             r.load()
+        self.log(f"post load:{name}")
 
-        print(f"[vram] '{name}' acquired GPU  priority={priority}  "
-              f"active={self._snapshot()}")
+        print(f"[orch] '{name}' acquired  priority={priority}  active={self._snapshot()}")
 
     # ── Release ───────────────────────────────────────────────────────────────
 
@@ -134,12 +306,11 @@ class VRAMOrchestrator:
         with self._lock:
             self._holders.pop(name, None)
             if self._default and self._default not in self._holders:
-                # Reserve the slot now to prevent a concurrent acquire from
-                # racing with the background reload.
                 self._holders[self._default] = self._default_priority
                 reload_default = True
 
-        print(f"[vram] '{name}' released GPU  active={self._snapshot()}")
+        self.log(f"post release:{name}")
+        print(f"[orch] '{name}' released  active={self._snapshot()}")
 
         if reload_default:
             self._reload_default_async(priority=self._default_priority)
@@ -175,7 +346,7 @@ class VRAMOrchestrator:
             return
 
         def _run():
-            print(f"[vram] GPU idle — reloading default '{self._default}'")
+            print(f"[orch] GPU idle — reloading default '{self._default}'")
             success = r.load()
             if not success:
                 with self._lock:
@@ -186,7 +357,10 @@ class VRAMOrchestrator:
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 
-_orch         = VRAMOrchestrator()
+# Keep the old name as an alias so any code that referenced VRAMOrchestrator still works.
+VRAMOrchestrator = ResourceOrchestrator
+
+_orch         = ResourceOrchestrator()
 _forge_url    = ""
 _forge_loaded = True   # assume loaded at Forge startup; _forge_unload sets False
 
@@ -195,6 +369,7 @@ def setup(forge_url: str) -> None:
     global _forge_url
     _forge_url = forge_url
     _register_resources()
+    _orch.start_monitor()
 
 
 def _register_resources() -> None:
@@ -218,6 +393,12 @@ def _llm_load() -> bool:
     import llm as _llm
     if _llm.LLM_READY:
         return True
+    # Evict Forge checkpoint first so the LLM gets full VRAM.
+    # (Forge is kept hot after image gen; we only free it here when LLM actually needs to load.)
+    if _forge_loaded:
+        print("[orch] evicting Forge before LLM load (lazy evict after keep-hot)")
+        _forge_unload()
+        time.sleep(2.0)   # give the CUDA driver time to reclaim VRAM after Forge eviction
     if _llm.LLM_SUSPENDED:
         _llm.resume_after_image()   # starts server in background thread
     else:
@@ -227,8 +408,10 @@ def _llm_load() -> bool:
 
 def _llm_unload() -> bool:
     import llm as _llm
+    import gc
     _llm.suspend_for_image()
-    time.sleep(2.0)   # give the CUDA driver time to reclaim VRAM
+    gc.collect()
+    time.sleep(2.0)   # give Windows time to reclaim mmap pages after process kill
     return True
 
 
@@ -239,21 +422,21 @@ def _forge_load() -> bool:
     if not _forge_url or _forge_loaded:
         return True
     try:
-        step("[vram] Reloading Forge checkpoint into VRAM...")
+        step("[orch] Reloading Forge checkpoint into VRAM...")
         r = req.post(f"{_forge_url}/sdapi/v1/reload-checkpoint", timeout=60)
         if r.status_code == 200:
             _forge_loaded = True
-            ok("[vram] Forge model in VRAM.")
+            ok("[orch] Forge model in VRAM.")
             from image.forge import _push_forge_settings
             _push_forge_settings(_forge_url)
             return True
         if r.status_code == 404:
-            warn("[vram] reload-checkpoint not supported — skipping.")
+            warn("[orch] reload-checkpoint not supported — skipping.")
         else:
-            warn(f"[vram] reload-checkpoint returned HTTP {r.status_code}.")
+            warn(f"[orch] reload-checkpoint returned HTTP {r.status_code}.")
         return False
     except Exception as e:
-        warn(f"[vram] reload-checkpoint failed: {e}")
+        warn(f"[orch] reload-checkpoint failed: {e}")
         return False
 
 
@@ -265,15 +448,15 @@ def _forge_unload() -> bool:
         r = req.post(f"{_forge_url}/sdapi/v1/unload-checkpoint", timeout=15)
         if r.status_code == 200:
             _forge_loaded = False
-            print("[vram] Forge checkpoint evicted from VRAM.")
+            print("[orch] Forge checkpoint evicted from VRAM.")
             return True
         if r.status_code == 404:
-            warn("[vram] unload-checkpoint not supported.")
+            warn("[orch] unload-checkpoint not supported.")
         else:
-            warn(f"[vram] unload-checkpoint returned HTTP {r.status_code}.")
+            warn(f"[orch] unload-checkpoint returned HTTP {r.status_code}.")
         return False
     except Exception as e:
-        warn(f"[vram] unload-checkpoint failed: {e}")
+        warn(f"[orch] unload-checkpoint failed: {e}")
         return False
 
 
@@ -282,13 +465,16 @@ def _forge_interrupt() -> None:
         return
     try:
         req.post(f"{_forge_url}/sdapi/v1/interrupt", timeout=5)
-        print("[vram] Forge generation interrupted.")
+        print("[orch] Forge generation interrupted.")
     except Exception:
         pass
 
 
-# ── Backward-compatible surface ───────────────────────────────────────────────
-# Called by generate.py and alice.py — keep these working unchanged.
+# ── Public surface ────────────────────────────────────────────────────────────
+
+def log_resources(label: str = "") -> None:
+    _orch.log(label)
+
 
 def unload_forge() -> bool:
     return _forge_unload()
@@ -298,9 +484,28 @@ def reload_forge() -> bool:
     return _forge_load()
 
 
+def notify_llm_ready() -> None:
+    """Call once llama-server finishes loading so the orchestrator knows to evict it before image gen."""
+    with _orch._lock:
+        _orch._holders["llm"] = Priority.BACKGROUND
+
+
 def acquire_for_image() -> None:
     _orch.acquire("forge", Priority.GENERATION)
 
 
 def release_from_image() -> None:
-    _orch.release("forge")
+    # Keep the Forge checkpoint hot in VRAM — LLM and an idle Forge can coexist on 8 GB,
+    # and skipping the unload saves the ~15s reload at the start of the next image gen.
+    # Only the LLM kill + sleep overhead remains (~7s) instead of 7s + 15s reload.
+    with _orch._lock:
+        _orch._holders.pop("forge", None)
+        reload_default = bool(
+            _orch._default and _orch._default not in _orch._holders
+        )
+        if reload_default:
+            _orch._holders[_orch._default] = _orch._default_priority
+    _orch.log("post release:forge")
+    print(f"[orch] 'forge' released (checkpoint kept in VRAM)  active={_orch._snapshot()}")
+    if reload_default:
+        _orch._reload_default_async(priority=_orch._default_priority)

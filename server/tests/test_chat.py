@@ -17,6 +17,7 @@ from alice import app
 
 import llm
 import state
+import routes.chat
 
 client = TestClient(app, raise_server_exceptions=True)
 
@@ -241,7 +242,8 @@ def test_chat_retries_after_context_overflow(_restore_llm_state):
         llm.history.append({"role": "assistant",  "content": f"reply {i}"   * 50})
 
     with patch("routes.chat.req.post", side_effect=_side_effect):
-        res = client.post("/chat", json={"message": "hi"})
+        with patch("llm.compress_history"):  # prevent background req.post from compress
+            res = client.post("/chat", json={"message": "hi"})
 
     assert res.status_code == 200
     assert call_count[0] == 2  # must have retried exactly once
@@ -252,16 +254,12 @@ def test_chat_retries_after_context_overflow(_restore_llm_state):
 def test_chat_emits_status_event_when_llm_not_ready(monkeypatch):
     """When LLM_READY is False, at least one status event must be yielded."""
     monkeypatch.setattr(llm, "LLM_READY", False)
+    # Zero timeout: deadline fires on the first loop iteration without sleeping.
+    # Patching time.monotonic globally breaks anyio's event loop, so we use the
+    # module constant instead.
+    monkeypatch.setattr(routes.chat, "_LLM_WAIT_TIMEOUT", 0)
 
-    # Make time expire immediately so the test completes without real waiting
-    call_n = [0]
-    def _fast_mono():
-        call_n[0] += 1
-        return 100.0 if call_n[0] == 1 else 200.0  # 200 > 100+45 → deadline passed
-
-    with patch("routes.chat.time.monotonic", _fast_mono):
-        with patch("routes.chat.asyncio.sleep", new=AsyncMock()):
-            res = client.post("/chat", json={"message": "hello"})
+    res = client.post("/chat", json={"message": "hello"})
 
     events = _parse_events(res.text)
     status_events = [e for e in events if "status" in e]
@@ -269,17 +267,11 @@ def test_chat_emits_status_event_when_llm_not_ready(monkeypatch):
 
 
 def test_chat_emits_error_when_llm_never_becomes_ready(monkeypatch):
-    """45-second deadline exceeded → SSE error event, no delta/done events."""
+    """Deadline exceeded → SSE error event, no delta/done events."""
     monkeypatch.setattr(llm, "LLM_READY", False)
+    monkeypatch.setattr(routes.chat, "_LLM_WAIT_TIMEOUT", 0)
 
-    call_n = [0]
-    def _fast_mono():
-        call_n[0] += 1
-        return 100.0 if call_n[0] == 1 else 200.0
-
-    with patch("routes.chat.time.monotonic", _fast_mono):
-        with patch("routes.chat.asyncio.sleep", new=AsyncMock()):
-            res = client.post("/chat", json={"message": "hello"})
+    res = client.post("/chat", json={"message": "hello"})
 
     events = _parse_events(res.text)
     assert any("error" in e for e in events)

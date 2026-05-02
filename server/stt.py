@@ -1,4 +1,4 @@
-import os, wave, tempfile, threading, struct
+import os, wave, tempfile, threading
 from utils import ok
 
 _WHISPER      = None
@@ -81,8 +81,9 @@ def _webm_to_wav(src: str, dst: str):
     _drain(resampler.resample(None))
     container.close()
 
-    samples = struct.unpack(f"{len(buf)//2}h", bytes(buf))
-    rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+    import numpy as _np
+    samples = _np.frombuffer(bytes(buf), dtype=_np.int16).astype(_np.float32)
+    rms = float(_np.sqrt(_np.mean(samples ** 2))) if len(samples) else 0.0
     print(f"        PyAV decoded {len(buf)} bytes of PCM, RMS={rms:.1f}")
 
     with wave.open(dst, "wb") as wf:

@@ -73,18 +73,34 @@ async def switch_persona_pack(body: PackSwitchRequest):
 
 @router.get("/models")
 async def list_models():
-    models  = [{"name": n, "path": p} for n, p in llm.list_models()]
+    models  = [{"name": n, "path": p, "size_gb": s} for n, p, s in llm.list_models()]
     current = llm.llm_model()
     return JSONResponse({"models": models, "current": current})
 
 
 @router.post("/model")
 async def switch_model(body: ModelSwitchRequest):
-    config.CFG["llama_model"] = body.path
-    llm._DETECTED_MODEL = None  # force re-detect on next request
+    import asyncio
+    if not os.path.isfile(body.path):
+        return JSONResponse({"error": f"File not found: {body.path}"}, status_code=400)
+    config.CFG["model_path"] = body.path
+    config.CFG["llama_model"] = os.path.basename(body.path)
+    llm._DETECTED_MODEL = None
     llm.clear_history()
-    print(f"\n[{config.NAME}] Switched llama model to: {body.path}")
-    return JSONResponse({"status": "ok", "model": body.path})
+    print(f"\n[{config.NAME}] Switching model to: {body.path}")
+
+    def _restart():
+        llm.suspend_for_image()
+        import time; time.sleep(1)
+        llm.LLM_SUSPENDED = False
+        llm._start_server()
+        llm.wait_until_ready(timeout=180)
+        if llm.LLM_READY:
+            print(f"[{config.NAME}] Model switched — now serving {os.path.basename(body.path)}")
+
+    import threading
+    threading.Thread(target=_restart, daemon=True, name="model-restart").start()
+    return JSONResponse({"status": "ok", "model": os.path.basename(body.path)})
 
 
 @router.delete("/history")
