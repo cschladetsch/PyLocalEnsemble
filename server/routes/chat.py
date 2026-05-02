@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-_LLM_WAIT_TIMEOUT = 60   # seconds; override in tests via monkeypatch
+_LLM_WAIT_TIMEOUT = 120   # seconds; override in tests via monkeypatch
 
 import config
 import llm
@@ -32,7 +32,7 @@ async def chat(body: ChatRequest):
             dots = 0
             while not llm.LLM_READY:
                 if time.monotonic() >= deadline:
-                    yield f"data: {json.dumps({'error': 'LLM not ready — please reload and try again.'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'LLM still starting…', 'retry': True})}\n\n"
                     return
                 await asyncio.sleep(1)
                 dots += 1

@@ -6,7 +6,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'block';
   chatAbort = new AbortController();
   disableAll();
-  let reply = '', autoImage = true;
+  let reply = '', autoImage = true, scheduleRetry = false;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -27,24 +27,33 @@ async function _chatWith(msg, { forceImage = false } = {}) {
         if (!line.startsWith('data: ')) continue;
         const data = JSON.parse(line.slice(6));
         if (data.status) { const bar = document.getElementById('thinking-bar'); bar.style.display = 'block'; bar.textContent = data.status; }
-        if (data.error) { document.getElementById('thinking-bar').style.display='none'; updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>'); }
+        if (data.error) {
+          document.getElementById('thinking-bar').style.display = 'none';
+          if (data.retry) {
+            scheduleRetry = true;
+            updMsg(tid, '<em style="color:#888">LLM still starting — retrying in 5 s…</em>');
+          } else {
+            updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>');
+          }
+        }
         if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
         if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
       }
     }
   } catch (e) {
     document.getElementById('thinking-bar').style.display = 'none';
-    if (e.name === 'AbortError') { 
-      updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>'); 
-    } else { 
+    if (e.name === 'AbortError') {
+      updMsg(tid, reply || '<em style="color:#888">Interrupted.</em>');
+    } else {
       console.error('Chat error:', e);
-      updMsg(tid, `<em style="color:#c08080">Chat error: ${e.message || 'Unknown error'}. Check console/terminal.</em>`); 
+      updMsg(tid, `<em style="color:#c08080">Chat error: ${e.message || 'Unknown error'}. Check console/terminal.</em>`);
     }
     chatAbort = null; enableAll(); return;
   }
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
+  if (scheduleRetry) { setTimeout(() => _chatWith(msg, { forceImage }), 5000); return; }
   if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
   loadInfo();
 }
