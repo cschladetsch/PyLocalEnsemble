@@ -215,26 +215,25 @@ async function loadInfo() {
       setLLMReady(true);
     } else if (!d.llm_ready) {
       setLLMReady(false);
-      setTimeout(loadInfo, 2000); // poll until ready
+      _infoDelay = Math.min((_infoDelay || 2000) * 1.5, 10000);
+      setTimeout(loadInfo, _infoDelay);
+    } else {
+      _infoDelay = 2000;
     }
     _updateContextMeter(d.history_msgs || 0, d.history_max || 20);
-  } catch (e) { console.warn('Could not load info:', e); setTimeout(loadInfo, 2000); }
+  } catch (e) { console.warn('Could not load info:', e); setTimeout(loadInfo, _infoDelay || 2000); }
 }
+
+let _infoDelay = 2000;
 
 function setLLMReady(ready) {
   const inp = document.getElementById('inp');
   const btn = document.getElementById('ibtn');
   const mic = document.getElementById('mic-btn');
-  if (ready) {
-    inp.disabled = false;
-    inp.placeholder = 'Say something... or /image';
-    if (btn) btn.disabled = false;
-  } else {
-    inp.disabled = true;
-    inp.placeholder = 'Waiting for LLM server to start...';
-    if (btn) btn.disabled = true;
-  }
-  // mic is always enabled — STT works independently of the LLM
+  // Input is always enabled — the chat endpoint handles the not-ready case gracefully
+  inp.disabled = false;
+  if (btn) btn.disabled = false;
+  inp.placeholder = ready ? 'Say something... or /image' : 'LLM starting — you can type, reply may be delayed…';
   if (mic) mic.disabled = false;
 }
 
