@@ -13,19 +13,26 @@ Powered by:
 ```mermaid
 graph TD
     User([User]) <--> UI[Web UI / Android App]
-    UI <--> Alice[Alice Python Server]
-    
-    subgraph Engines ["Local Inference Engines"]
-        Alice <--> LLM[llama.cpp]
-        Alice <--> SD[SD Forge]
-        Alice <--> TTS[Kokoro TTS]
-        Alice <--> STT[Faster-Whisper]
+    UI <--> Alice[Alice — FastAPI Server :8000]
+
+    subgraph Engines ["Local Inference Engines (GPU / CPU)"]
+        Alice <-->|OpenAI API :8080| LLM[llama-server — GGUF LLM]
+        Alice <-->|REST :7860| SD[SD Forge — Stable Diffusion]
+        Alice <-->|in-process| TTS[Kokoro ONNX — TTS]
+        Alice <-->|in-process| STT[Faster-Whisper — STT]
     end
-    
-    subgraph Storage ["Local Storage"]
-        Alice <--> Hist[(Chat History)]
-        Alice <--> Packs[(Persona Packs)]
-        Alice <--> Models[(Model Weights)]
+
+    subgraph Arb ["VRAM Arbitration"]
+        Alice <--> Orch[vram.py — ResourceOrchestrator]
+        Orch -->|evict / reload| LLM
+        Orch -->|evict / reload| SD
+    end
+
+    subgraph Storage ["Persistent Data"]
+        Alice <--> Hist[(history.json)]
+        Alice <--> Growth[(group_growth.json)]
+        Alice <--> Cfg[(alice.json)]
+        Alice <--> Packs[(personas/packs/)]
     end
 ```
 
@@ -602,6 +609,7 @@ graph TD
         State["state.py — nudity state · seed · appearance"]
         TTS["tts.py — Kokoro load + synthesis + effects"]
         STT["stt.py — Whisper load + transcription"]
+        VRAM["vram.py — ResourceOrchestrator · VRAM arbitration"]
         Utils["utils.py — step · ok · warn · http_ok · is_wsl"]
     end
 
@@ -631,6 +639,7 @@ graph TD
     Routes --> State
     Routes --> TTS
     Routes --> STT
+    Routes --> VRAM
     Routes --> ImagePkg
     Group --> LLM
     Group --> Config
@@ -641,6 +650,8 @@ graph TD
     ImagePkg --> Utils
     LLM --> Utils
     LLM --> LlamaServer
+    VRAM --> LlamaServer
+    VRAM --> ForgeProc
     Forge --> ForgeProc
     Generate --> ForgeProc
     Steps --> Helpers
@@ -721,6 +732,69 @@ flowchart LR
     J --> K([Open browser — localhost:8000])
 ```
 
+### VRAM arbitration
+
+Active only when `vram_swap_for_image: true`. The `ResourceOrchestrator` in `vram.py` manages GPU ownership via a priority system so the LLM and Forge never race for VRAM.
+
+```mermaid
+flowchart TD
+    subgraph Priorities ["Priority levels — lower wins"]
+        P1["INTERACTIVE (1)\nchat / live STT"]
+        P2["GENERATION (2)\nimage generation"]
+        P3["BACKGROUND (3)\nLLM idle warmup"]
+    end
+
+    ImageReq([Image request]) -->|acquire 'forge' at GENERATION| Orch
+    ChatReq([Chat request]) -->|acquire 'llm' at INTERACTIVE| Orch
+
+    Orch{ResourceOrchestrator} -->|higher priority evicts lower| Evict[Interrupt + unload holder]
+    Evict -->|sleep 2 s — Windows mmap reclaim| PollVRAM[Poll nvidia-smi until VRAM free]
+    PollVRAM -->|≥ 4 GB free or timeout| Load[Load requested resource]
+
+    Load --> LlamaServer["llama-server :8080"]
+    Load --> ForgeProc["SD Forge :7860"]
+
+    ImageDone([Image done]) -->|release 'forge'\nkeep checkpoint hot| KeepHot[Forge stays in VRAM]
+    KeepHot -->|reload default async| LLMReload[LLM reloads in background]
+    LLMReload -->|_forge_unload + poll VRAM| LlamaServer
+```
+
+> **Keep-hot optimisation:** after image generation, the Forge checkpoint stays in VRAM instead of being evicted. This saves ~15 s on the next image request. The LLM is evicted lazily when it actually needs to load, and `_wait_vram_free()` polls `nvidia-smi` instead of sleeping a fixed 2 s.
+
+### Image generation pipeline
+
+```mermaid
+flowchart TD
+    Trigger(["/image or auto_image"]) --> Group{Group session?}
+    Group -->|yes| Scene[LLM synthesises group scene description]
+    Group -->|no| Msg[Use last user message]
+    Scene --> Extract
+    Msg --> Extract[LLM extracts structured SD fields\nACTION / BODY / CAMERA / NUDITY / POSE / EXTRA]
+
+    Extract --> Pattern[_detect_action — pattern-match body+camera hints]
+    Extract --> Acc[_detect_accessories — glasses / heels / choker…]
+
+    Pattern --> Build[_build_tags — weighted SD tag string]
+    Acc --> Build
+    Extract --> Build
+
+    Build --> Rules[apply_exposure_rules — lighting adjustments]
+    Rules --> Suffix[Append image.suffix — hands, quality boosters]
+    Suffix --> Quick{quick_mode?}
+
+    Quick -->|yes| QP["quick_steps + quick_sampler\n(no hires-fix, no ADetailer)"]
+    Quick -->|no| FP["full steps + hires-fix upscale"]
+
+    QP --> Forge["POST /sdapi/v1/txt2img to SD Forge"]
+    FP --> Forge
+
+    Forge --> AD{adetailer_hands?}
+    AD -->|yes| ADetailer["ADetailer inpaint pass\nhand_yolov8n.pt"]
+    AD -->|no| Save
+    ADetailer --> Save["Save PNG to outputs/"]
+    Save --> UI([Return image URL to browser])
+```
+
 ### Memory compression
 
 ```mermaid
@@ -744,7 +818,7 @@ flowchart TD
 From the repo root:
 
 ```
-python -m pytest server/tests -v
+python -m pytest server/tests -v --ignore=server/tests/test_install.py
 ```
 
 ```powershell
@@ -753,7 +827,7 @@ $env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY='1'
 cargo test -p alice-core -p alice-core-python
 ```
 
-Coverage includes config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects, audio markdown cleaning, LLM history operations and memory compression, state utilities, API endpoints, shared logging bootstrap, and Forge-unavailable error handling. No external services are required — heavy dependencies are stubbed in `server/tests/conftest.py`.
+Coverage includes config loading, image tag utilities, SD prompt extraction and accessory detection, installer asset selection, TTS effects, audio markdown cleaning, LLM history operations and memory compression, state utilities, API endpoints, VRAM orchestration, shared logging bootstrap, and Forge-unavailable error handling. No external services are required — heavy dependencies are stubbed in `server/tests/conftest.py`.
 
 ---
 

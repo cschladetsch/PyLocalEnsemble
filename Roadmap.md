@@ -33,20 +33,23 @@ The target user is already running local AI tools. They understand LLMs and Stab
 graph TD
     subgraph App ["alice.py — entry point"]
         Routes["FastAPI :8000 — routes + startup"]
+        Group["group.py — chatter loop + growth"]
     end
 
     subgraph Core ["Core modules"]
         Config["config.py"]
-        LLM["llm.py"]
+        LLM["llm.py — history · memory · compression"]
+        VRAM["vram.py — ResourceOrchestrator"]
         TTS_M["tts.py"]
         STT_M["stt.py"]
+        State["state.py — nudity · seed"]
         Utils["utils.py"]
     end
 
     subgraph ImagePkg ["image/ package"]
-        Prompt["prompt.py"]
-        Forge_["forge.py"]
-        Generate["generate.py"]
+        Prompt["prompt.py — SD tag extraction"]
+        Forge_["forge.py — process lifecycle"]
+        Generate["generate.py — txt2img + ADetailer"]
     end
 
     subgraph InstallPkg ["installer/ package"]
@@ -66,8 +69,13 @@ graph TD
 
     Routes --> Core
     Routes --> ImagePkg
+    Group --> LLM
+    Group --> Config
     ImagePkg --> LLM
+    ImagePkg --> State
     LLM --> LlamaServer
+    VRAM --> LlamaServer
+    VRAM --> Forge
     Forge_ --> Forge
     Generate --> Forge
     TTS_M --> Kokoro
@@ -94,22 +102,23 @@ gantt
     section Phase 1b · Quality
     Cross-platform (macOS, Linux, WSL2) :done, 2026-03, 2026-03
     Refactor image/ + installer/ pkgs   :done, 2026-03, 2026-03
-    Test suite (39 tests)               :done, 2026-03, 2026-03
+    Test suite (394 tests)              :done, 2026-03, 2026-05
     Built-in personas + image fixes     :done, 2026-03, 2026-03
-    Experimental Android App (local)    :active, 2026-03, 2026-05
+    VRAM arbitration + RAM fix          :done, 2026-04, 2026-05
+    Experimental Android App (local)    :active, 2026-03, 2026-06
 
     section Phase 2 · Distribution
-    Packaging / release zip             :active, 2026-03, 2026-04
-    Landing page                        :2026-04, 2026-05
-    Gumroad listing                     :2026-04, 2026-05
+    Packaging / release zip             :active, 2026-03, 2026-05
+    Landing page                        :2026-05, 2026-06
+    Gumroad listing                     :2026-05, 2026-06
 
     section Phase 3 · Performance
-    LCM / Lightning LoRA                :2026-05, 2026-06
-    Streaming image preview             :2026-05, 2026-06
+    LCM / Lightning LoRA                :2026-06, 2026-07
+    Streaming image preview             :2026-06, 2026-07
 
     section Phase 4 · UX
-    Mobile-friendly layout              :2026-06, 2026-07
-    LoRA / style picker                 :2026-06, 2026-08
+    Mobile-friendly layout              :2026-07, 2026-08
+    LoRA / style picker                 :2026-07, 2026-09
 ```
 
 ### Phase 1 — Foundation (complete)
@@ -134,12 +143,15 @@ gantt
 - [x] `image/` package — split into `prompt.py`, `forge.py`, `generate.py`
 - [x] `installer/` package — split into `helpers`, `packages`, `llama`, `model`, `tts_install`, `forge_install`
 - [x] `conf/` directory — example configs out of root
-- [x] Expanded regression suite across config, image utils, installer, API endpoints, logging, and runtime error paths
+- [x] Expanded regression suite across config, image utils, installer, API endpoints, logging, and runtime error paths (394 tests total)
 - [x] 4 built-in personas: Egyptian Goddess, Victorian Lady, Android, Forest Witch
 - [x] Image fix: nude characters no longer render clothed (clothing stripped from appearance when nudity detected)
 - [x] Image fix: `/image` no longer returns 400 after persona switch (history cleared)
 - [x] Delete key removes current image from disk and session history
 - [x] `clean_tags` correctly prefers weighted SD tags over plain duplicates
+- [x] `vram.py` — priority-based `ResourceOrchestrator` (INTERACTIVE > GENERATION > BACKGROUND) with nvidia-smi polling instead of fixed sleeps
+- [x] RAM exhaustion fix: `sd_checkpoints_keep_in_cpu=False` pushed to Forge before checkpoint load; VRAM reclaim polled via nvidia-smi rather than a blind `sleep(2)`
+- [x] UI input never disabled while LLM starts — `/info` poll uses exponential backoff (2 s → 10 s cap) to reduce log noise
 
 ### Phase 2 — Distribution
 
