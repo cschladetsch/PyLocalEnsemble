@@ -186,6 +186,13 @@ def start_forge() -> bool:
         os.makedirs(sd_models_dir, exist_ok=True)
         base_args = f"{base_args} --ckpt-dir \"{sd_models_dir}\""
         ok(f"Forge: using SD models dir {sd_models_dir}")
+    # Inject --port to match forge_url so Forge binds on the expected port
+    import urllib.parse as _up
+    _parsed = _up.urlparse(forge_url)
+    _port = _parsed.port or 7860
+    if "--port" not in base_args:
+        base_args = f"{base_args} --port {_port}"
+
     env["COMMANDLINE_ARGS"] = base_args
 
     default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))

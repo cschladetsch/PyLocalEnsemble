@@ -1,9 +1,9 @@
-let mid = 0, imgAbort = null, chatAbort = null, muted = false;
+let mid = 0, imgAbort = null, chatAbort = null, muted = false, _pendingRetryAbort = null, _retryGen = 0;
 let _imgGenId = 0;  // incremented each time a new image request starts or is aborted
 let mediaRecorder = null, audioChunks = [];
 let lastReplyText = '', lastUserMsg = '';
 let charName = 'Alice';
-let llmReady = false;
+let llmReady = false, forgeReady = false;
 let _activePersona = 'default';
 let imgHistory = [];
 let _demoMode = false, _demoTimer = null, _demoSkip = false, _demoPaused = false;
@@ -221,6 +221,18 @@ async function loadInfo() {
       _infoDelay = 2000;
     }
     _updateContextMeter(d.history_msgs || 0, d.history_max || 20);
+    if (!forgeReady && d.forge_ready) {
+      forgeReady = true;
+      loadSDModels();
+    }
+    const ic = document.getElementById('ic');
+    if (ic && ic.querySelector('.ph') && !ic.querySelector('img')) {
+      ic.querySelector('.ph').textContent = d.forge_ready
+        ? 'Awaiting your conversation...'
+        : 'SD Forge offline — images unavailable';
+    }
+    // Keep polling until both LLM and Forge are ready (LLM-not-ready path already reschedules)
+    if (!d.forge_ready && d.llm_ready) setTimeout(loadInfo, 8000);
   } catch (e) { console.warn('Could not load info:', e); setTimeout(loadInfo, _infoDelay || 2000); }
 }
 

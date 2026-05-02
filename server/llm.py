@@ -98,7 +98,14 @@ def _start_server():
         "--batch-size", str(sc["batch_size"]),
         "--threads",    str(sc["threads"]),
     ]
-    kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sc.get("chat_template"):
+        flags += ["--chat-template", sc["chat_template"]]
+    log_dir = os.path.join(os.path.dirname(__file__), "log")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "llama-server.log")
+    print(f"[llm] logging llama-server output to {log_path}")
+    log_fh = open(log_path, "w", encoding="utf-8", errors="replace")
+    kw = {"stdout": log_fh, "stderr": log_fh}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NO_WINDOW
     global _server_proc
@@ -208,6 +215,11 @@ def resume_after_image() -> None:
         wait_until_ready(timeout=180)
         if LLM_READY:
             print("[llm] server back up.")
+            try:
+                import vram as _vram
+                _vram.notify_llm_ready()
+            except Exception:
+                pass
         else:
             warn("[llm] server did not come back in time — restart Alice if chat is unresponsive.")
 
@@ -246,6 +258,11 @@ def load_llm():
                 return
             time.sleep(2)
             if _try_connect(silent=True):
+                try:
+                    import vram as _vram
+                    _vram.notify_llm_ready()
+                except Exception:
+                    pass
                 return
         warn("Gave up waiting for llama.cpp server. Start it manually and restart alice.py.")
 
@@ -265,6 +282,7 @@ def llm_chat(messages: list) -> str:
         "model":            model,
         "messages":         messages,
         "stream":           False,
+        "cache_prompt":     True,
         **p
     }
     

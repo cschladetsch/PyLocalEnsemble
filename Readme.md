@@ -1,7 +1,5 @@
 # Alice
 
-> **⚠️ NSFW / 18+ — This project generates adult content. You must be 18 or older to use it.**
-
 A local AI companion with streaming chat, voice, mic input, and contextual image generation. Everything runs on your own hardware — no cloud, no API keys, no subscriptions.
 
 Powered by:
@@ -179,11 +177,13 @@ Alice uses a GGUF model served by `llama-server` via the OpenAI-compatible API.
 
 **Recommended models:**
 
-| Model | VRAM | Size | Notes |
-|-------|------|------|-------|
-| `dolphin-2.9.4-mistral-nemo-12b-Q4_K_M` | 8 GB | ~7 GB | Default — good balance |
-| `Mistral-7B-Instruct-v0.3-uncensored-Q4_K_M` | 6 GB | 4.4 GB | Lighter option |
-| `Llama-3-8B-Lexi-Uncensored-Q4_K_M` | 8 GB | 4.9 GB | Alternative 8B |
+| Model | Size | Notes |
+|-------|------|-------|
+| `bartowski/dolphin-2.9-llama3-8b-Q4_K_M` | 4.9 GB | Best quality for 8 GB cards — use with `vram_swap_for_image: true` |
+| `bartowski/Llama-3.2-3B-Instruct-abliterated-Q4_K_M` | 2.2 GB | Smallest viable; fits alongside Forge without swapping |
+| `bartowski/dolphin-2.9.4-gemma2-2b-Q4_K_M` | 1.7 GB | Ultra-small fallback |
+
+> The Dolphin fine-tune series follows the ChatML format and honours system prompts reliably. Instruction-tuned base models (Mistral-Instruct, Llama-3-Instruct) may override system prompt directives due to RLHF alignment training.
 
 To use a different model: set `model_path` in `alice.json` and restart.
 
@@ -193,15 +193,14 @@ Alice runs the LLM and Forge simultaneously. Both must fit in your GPU's VRAM or
 
 **Rule of thumb for 8 GB GPUs (e.g. RTX 2070):**
 
-| `n_gpu_layers` | `ctx_size` | LLM VRAM | + Forge | Total | Result |
+| Model | `n_gpu_layers` | `vram_swap_for_image` | LLM VRAM | + Forge idle | Result |
 |---|---|---|---|---|---|
-| `-1` (all) | 4096 | ~6.5 GB | ~2.2 GB | ~8.7 GB | ✗ OOM |
-| `24` | 2048 | ~4.5 GB | ~2.2 GB | ~6.7 GB | ✓ fits |
-| `20` | 2048 | ~3.8 GB | ~2.2 GB | ~6.0 GB | ✓ safe |
+| 8B Q4_K_M | 99 (all) | **true** | ~5 GB | ~2 GB | ✓ best quality — LLM suspends during image gen |
+| 7B Q4_K_M | 99 (all) | false | ~4.5 GB | ~2 GB | ✓ fits — coexist mode |
+| 3B Q4_K_M | 99 (all) | false | ~2.2 GB | ~2 GB | ✓ safe — lowest quality |
+| 8B Q4_K_M | 99 (all) | false | ~5 GB | ~3.5 GB | ✗ OOM during generation |
 
-The default `alice.json` uses `n_gpu_layers: 24` and `ctx_size: 2048`. The 8 CPU layers add roughly 10–15% latency per token — imperceptible at normal conversation pace.
-
-**`vram_swap_for_image`** — set to `true` only when your model cannot be made to fit alongside Forge by reducing `n_gpu_layers`. When enabled, Alice kills the LLM before each image gen (freeing VRAM) and restarts it after. This adds 30–90 seconds of overhead per image. Default: `false`.
+**`vram_swap_for_image: true`** — Alice suspends llama-server before each image generation (freeing its VRAM), then restarts it afterwards. Required for 8B models on 8 GB GPUs. The LLM reloads in the background; chat becomes available again as soon as it's ready. Adds ~30–60 s per image on the first request after a chat (subsequent images while the LLM is already suspended are instant).
 
 The **Model** dropdown in the header shows all discovered GGUF files with their size in GB. Selecting a different model hot-reloads the llama-server without restarting Alice.
 
@@ -461,7 +460,7 @@ alice/
 │   ├── alice.py              ← backend entry point & startup logic
 │   ├── config.py             ← paths, defaults, persona merging
 │   ├── llm.py                ← llama-server lifecycle, history, memory compression
-│   ├── state.py              ← shared runtime state (nudity, seed, active persona)
+│   ├── state.py              ← shared runtime state (appearance, seed, active persona)
 │   ├── tts.py                ← Kokoro TTS synthesis & sentence streaming
 │   ├── stt.py                ← Faster-Whisper transcription
 │   ├── utils.py              ← shared helpers (logging, path resolution, OS checks)
@@ -557,7 +556,7 @@ History is preserved across persona switches, but each character maintains its o
 The **Reset** option in the UI (or `DELETE /persona/{name}/reset`) performs a deep wipe:
 1. Clears chat history and memory for that persona.
 2. Wipes **Growth Data** — relationship memos and emotional states stored in `group_growth.json`.
-3. Resets nudity decay and character-specific image state.
+3. Resets character-specific appearance and image state.
 
 This effectively "reboots" your relationship with that persona while leaving others untouched.
 
@@ -587,7 +586,7 @@ This ensures you can experiment with new persona sets (like the **Roman Senate**
 | Port | Service |
 |------|---------|
 | `alice.json.port` (default `8000`) | Alice (FastAPI) |
-| 7860 | Stable Diffusion Forge |
+| `alice.json.forge_url` (default `7860`) | Stable Diffusion Forge — Alice automatically injects `--port` from `forge_url` when starting Forge, so changing `forge_url` is all you need |
 | 8080 | llama-server (OpenAI-compatible API) |
 
 ---
@@ -606,7 +605,7 @@ graph TD
     subgraph Core ["Core modules"]
         Config["config.py — paths · defaults · personas"]
         LLM["llm.py — llama-server · chat · history · memory · priority flag"]
-        State["state.py — nudity state · seed · appearance"]
+        State["state.py — appearance state · seed · active persona"]
         TTS["tts.py — Kokoro load + synthesis + effects"]
         STT["stt.py — Whisper load + transcription"]
         VRAM["vram.py — ResourceOrchestrator · VRAM arbitration"]
@@ -616,7 +615,7 @@ graph TD
     subgraph ImagePkg ["image/ package"]
         Prompt["prompt.py — extract_sd_prompt · accessory detection"]
         Forge["forge.py — start_forge · set_forge_model"]
-        Generate["generate.py — generate_image · ADetailer · nudity handling"]
+        Generate["generate.py — generate_image · ADetailer · appearance handling"]
     end
 
     subgraph InstallPkg ["installer/ package"]
@@ -769,7 +768,7 @@ flowchart TD
     Group -->|yes| Scene[LLM synthesises group scene description]
     Group -->|no| Msg[Use last user message]
     Scene --> Extract
-    Msg --> Extract[LLM extracts structured SD fields\nACTION / BODY / CAMERA / NUDITY / POSE / EXTRA]
+    Msg --> Extract[LLM extracts structured SD fields\nACTION / BODY / CAMERA / POSE / LIGHTING / EXTRA]
 
     Extract --> Pattern[_detect_action — pattern-match body+camera hints]
     Extract --> Acc[_detect_accessories — glasses / heels / choker…]
@@ -855,6 +854,12 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 - Forge auto-restarts on the next image request if it died
 - If Alice reports `Forge is unavailable at ...`, verify `forge_url` in `alice.json` and inspect `log/python-server.log`
 - If Forge's local venv is broken but another checkout already works, set `forge_venv_dir` in `alice.json` to reuse that existing virtualenv
+
+### Model ignores system prompt / breaks character
+The LLM is not following the configured `system_prompt`. This typically means a heavily instruction-tuned base model is loaded — RLHF alignment can override custom system prompts. Switch to a model from the Dolphin series, which is specifically fine-tuned to respect system prompt directives. See **Recommended models** above.
+
+### Forge starts but images still fail / dropdown empty
+Check that `forge_url` uses the correct port. Alice starts Forge with `--port` derived from `forge_url`, but if Forge was already running on a different port it won't respond. Kill the stale Forge process and restart Alice, or point `forge_url` at the port Forge is actually listening on.
 
 ### ADetailer error on image generation
 - Ensure the ADetailer extension is present in `stable-diffusion-webui-forge/extensions/adetailer/`

@@ -38,12 +38,20 @@ async def chat(body: ChatRequest):
                 token = word + (' ' if i < len(words) - 1 else '')
                 yield f"data: {json.dumps({'delta': token})}\n\n"
                 await asyncio.sleep(0.04)
-            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': False})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': False, 'retry': True})}\n\n"
             return
 
         # --- Phase 2: normal chat ---
         try:
-            llm.history.append({"role": "user", "content": body.message})
+            # Rewrite "verb your <body>" → "verb your own <body>" so the model
+            # cannot misread self-action commands as acting on the user.
+            effective_msg = re.sub(
+                r'\b(suck|lick|touch|rub|stroke|squeeze|finger|spread|grab|cup|pinch|'
+                r'caress|massage|insert|bite|tease|flick|pull|twist)\b(\s+your\b)(?!\s+own\b)',
+                r'\1\2 own',
+                body.message, flags=re.IGNORECASE
+            )
+            llm.history.append({"role": "user", "content": effective_msg})
             sys_prompt = state.SYSTEM_PROMPT + "\n\nMatch reply length to the message. A casual greeting or one-liner: one sentence only. A question or request: two sentences maximum. Never lecture, philosophize, or ask multiple questions back." + config.banned_phrases_note()
             if llm.memory:
                 sys_prompt += f"\n\nMemory of earlier conversation:\n{llm.memory}"
@@ -64,6 +72,7 @@ async def chat(body: ChatRequest):
                             "model":             llm.llm_model(),
                             "messages":          trimmed,
                             "stream":            True,
+                            "cache_prompt":      True,
                             **p,
                         }, stream=True, timeout=120)
                         if r.status_code == 400:
@@ -135,7 +144,8 @@ async def chat(body: ChatRequest):
             reply = "".join(collected)
             print(f"[chat] raw reply ({len(reply)} chars): {reply!r}")
             reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
-            reply = re.sub(r'^[Aa]lice\s*[:”]\s*', '', reply).strip().strip('"“”')
+            reply = re.sub(r'^[Aa]lice\s*[:”]\s*', '', reply).strip().strip('”””')
+            reply = re.sub(r'\bAs Alice,?\s*', '', reply, flags=re.IGNORECASE).strip()
             reply = re.sub(
                 r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
                 r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'

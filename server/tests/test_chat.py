@@ -252,7 +252,7 @@ def test_chat_retries_after_context_overflow(_restore_llm_state):
 # ── LLM not-ready path ───────────────────────────────────────────────────────
 
 def test_chat_emits_scripted_reply_when_llm_not_ready(monkeypatch):
-    """When LLM_READY is False, an instant scripted reply is streamed."""
+    """When LLM_READY is False, an instant scripted reply is streamed with retry flag."""
     monkeypatch.setattr(llm, "LLM_READY", False)
 
     res = client.post("/chat", json={"message": "hello"})
@@ -262,6 +262,7 @@ def test_chat_emits_scripted_reply_when_llm_not_ready(monkeypatch):
     done_events = [e for e in events if e.get("done")]
     assert len(done_events) == 1
     assert done_events[0]["auto_image"] is False
+    assert done_events[0]["retry"] is True
 
 
 def test_chat_scripted_reply_not_added_to_history(monkeypatch):

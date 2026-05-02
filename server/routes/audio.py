@@ -41,6 +41,7 @@ async def set_voice(body: VoiceRequest):
     if body.voice not in tts.VOICES:
         return JSONResponse({"error": "Unknown voice"}, status_code=400)
     config.CFG.setdefault("tts", {})["voice"] = body.voice
+    config.save_config(config.CFG)
     return JSONResponse({"status": "ok", "voice": body.voice})
 
 
@@ -68,6 +69,9 @@ async def speak_stream(body: TtsRequest):
             yield 'data: {"done":true}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
     if tts.TTS is None:
+        # Background load failed — retry on demand
+        await asyncio.get_running_loop().run_in_executor(None, tts.load_tts)
+    if tts.TTS is None:
         async def _err():
             yield 'data: {"error":"TTS not ready"}\n\n'
         return StreamingResponse(_err(), media_type="text/event-stream", status_code=503)
@@ -78,7 +82,7 @@ async def speak_stream(body: TtsRequest):
 
     def _worker():
         try:
-            for b64, is_last in tts.tts_wav_b64_stream(
+            for b64, is_last in tts.tts_wav_b64_stream_contiguous(
                 clean, voice=body.voice, speed=body.speed, pitch=body.pitch, effects=body.effects
             ):
                 if stop.is_set():

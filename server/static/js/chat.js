@@ -1,12 +1,14 @@
 // ── Chat & History & Personas ────────────────────────────────────────────────
 async function _chatWith(msg, { forceImage = false } = {}) {
+  _retryGen++;
+  if (_pendingRetryAbort) { _pendingRetryAbort.abort(); _pendingRetryAbort = null; }
   _interruptChat();
   const tid = addMsg('alice', charName, '<span class="gen dots">thinking</span>');
   document.getElementById('pd').value = '';
   document.getElementById('thinking-bar').style.display = 'block';
   chatAbort = new AbortController();
   disableAll();
-  let reply = '', autoImage = true;
+  let reply = '', autoImage = true, scheduleRetry = false;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -32,7 +34,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
           updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>');
         }
         if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
-        if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
+        if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; if (data.retry) scheduleRetry = true; }
       }
     }
   } catch (e) {
@@ -48,6 +50,19 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
+  if (scheduleRetry) {
+    _pendingRetryAbort = new AbortController();
+    const sig = _pendingRetryAbort.signal;
+    const myGen = _retryGen;
+    (async () => {
+      for (let i = 0; i < 90 && !sig.aborted && _retryGen === myGen; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (sig.aborted || _retryGen !== myGen) return;
+        try { const d = await (await fetch('/info')).json(); if (d.llm_ready) { _chatWith(msg, { forceImage }); return; } } catch(e) {}
+      }
+    })();
+    return;
+  }
   if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
   loadInfo();
 }

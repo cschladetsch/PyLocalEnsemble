@@ -140,16 +140,36 @@ async def export_history():
     return JSONResponse({"history": llm.history, "memory": llm.memory})
 
 
+_forge_ready_cache: bool = False
+_forge_ready_ts: float = 0.0
+
+
 @router.get("/info")
 async def info():
+    global _forge_ready_cache, _forge_ready_ts
     mem_cfg  = config.CFG.get("memory", config._DEFAULT_CONFIG["memory"])
     demo_cfg = config.CFG.get("demo",   config._DEFAULT_CONFIG["demo"])
     max_hist = mem_cfg["max_history"]
     n_msgs   = len(llm.history)
+    import time as _time
+    now = _time.monotonic()
+    if now - _forge_ready_ts > 10.0:
+        try:
+            forge_url = config.CFG.get("forge_url", "")
+            r = req.get(f"{forge_url}/sdapi/v1/sd-models", timeout=1)
+            _forge_ready_cache = r.status_code == 200
+        except Exception:
+            _forge_ready_cache = False
+        _forge_ready_ts = now
+    # Self-heal: if the retry loop timed out before llama-server finished loading,
+    # periodically re-check so the flag catches up without requiring a restart.
+    if not llm.LLM_READY:
+        llm._try_connect(silent=True)
     return JSONResponse({
         "name":           config.NAME,
         "active_persona": state._active_persona_key,
         "llm_ready":      llm.LLM_READY,
+        "forge_ready":    _forge_ready_cache,
         "stt_silence":    config.CFG.get("stt_silence_seconds", 3),
         "history_msgs":   n_msgs,
         "history_max":    max_hist,

@@ -212,16 +212,10 @@ def _ensure_forge_ready():
         if not image.set_forge_model(sd_checkpoint):
             raise RuntimeError(f"Forge could not select checkpoint '{sd_checkpoint}'.")
 
-    if config.CFG.get("vram_swap_for_image", False):
-        # vram_swap mode: evict Forge so LLM gets full VRAM. Checkpoint reloads on
-        # first image request via acquire_for_image(). Only needed when model is too
-        # large to coexist with Forge (>5GB model on 8GB GPU).
-        vram.unload_forge()
-        print("[vram] Forge evicted at startup — LLM will have full VRAM.")
-    else:
-        # Normal mode: LLM and Forge coexist. Warmup loads the checkpoint into VRAM
-        # now so the first image request doesn't pay the reload cost.
-        image.warmup_forge()
+    # Always warmup: keep the checkpoint hot in VRAM so image gen doesn't pay
+    # the 15-30s reload cost. vram_swap only kills the LLM during generation —
+    # Forge itself never needs to be evicted on an 8GB card with a sub-5GB model.
+    image.warmup_forge()
 
 
 def _startup():

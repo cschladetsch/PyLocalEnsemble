@@ -38,10 +38,11 @@ _DEFAULT_CONFIG = {
         "Keep replies concise — 2 to 4 sentences unless a longer response is genuinely needed."
     ),
     "llama_server": {
-        "n_gpu_layers": 33,
-        "ctx_size":     4096,
-        "batch_size":   512,
-        "threads":      8,
+        "n_gpu_layers":  33,
+        "ctx_size":      4096,
+        "batch_size":    512,
+        "threads":       8,
+        "chat_template": "chatml",
     },
     "tts": {
         "voice":       "af_nicole",
