@@ -6,7 +6,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'block';
   chatAbort = new AbortController();
   disableAll();
-  let reply = '', autoImage = true, scheduleRetry = false;
+  let reply = '', autoImage = true;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
@@ -29,12 +29,7 @@ async function _chatWith(msg, { forceImage = false } = {}) {
         if (data.status) { const bar = document.getElementById('thinking-bar'); bar.style.display = 'block'; bar.textContent = data.status; }
         if (data.error) {
           document.getElementById('thinking-bar').style.display = 'none';
-          if (data.retry) {
-            scheduleRetry = true;
-            updMsg(tid, '<em style="color:#888">Alice is loading — sending your message when ready…</em>');
-          } else {
-            updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>');
-          }
+          updMsg(tid, '<em style="color:#c08080">' + data.error + '</em>');
         }
         if (data.delta) { document.getElementById('thinking-bar').style.display='none'; reply += data.delta; updMsg(tid, reply); }
         if (data.done)  { reply = data.reply; updMsg(tid, reply); autoImage = data.auto_image; }
@@ -53,7 +48,6 @@ async function _chatWith(msg, { forceImage = false } = {}) {
   document.getElementById('thinking-bar').style.display = 'none';
   chatAbort = null;
   enableAll();
-  if (scheduleRetry) { setTimeout(() => _chatWith(msg, { forceImage }), 3000); return; }
   if (reply) { if (autoImage || forceImage) triggerMedia('', true); speak(reply); }
   loadInfo();
 }

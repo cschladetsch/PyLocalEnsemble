@@ -249,52 +249,39 @@ def test_chat_retries_after_context_overflow(_restore_llm_state):
     assert call_count[0] == 2  # must have retried exactly once
 
 
-# ── LLM not-ready wait path ───────────────────────────────────────────────────
+# ── LLM not-ready path ───────────────────────────────────────────────────────
 
-def test_chat_emits_status_event_when_llm_not_ready(monkeypatch):
-    """When LLM_READY is False, at least one status event must be yielded."""
+def test_chat_emits_scripted_reply_when_llm_not_ready(monkeypatch):
+    """When LLM_READY is False, an instant scripted reply is streamed."""
     monkeypatch.setattr(llm, "LLM_READY", False)
-    # Zero timeout: deadline fires on the first loop iteration without sleeping.
-    # Patching time.monotonic globally breaks anyio's event loop, so we use the
-    # module constant instead.
-    monkeypatch.setattr(routes.chat, "_LLM_WAIT_TIMEOUT", 0)
 
     res = client.post("/chat", json={"message": "hello"})
 
     events = _parse_events(res.text)
-    status_events = [e for e in events if "status" in e]
-    assert len(status_events) >= 1
+    assert any("delta" in e for e in events), "should have delta tokens"
+    done_events = [e for e in events if e.get("done")]
+    assert len(done_events) == 1
+    assert done_events[0]["auto_image"] is False
 
 
-def test_chat_emits_error_when_llm_never_becomes_ready(monkeypatch):
-    """Deadline exceeded → SSE error event, no delta/done events."""
+def test_chat_scripted_reply_not_added_to_history(monkeypatch):
+    """Scripted waking-up reply must not pollute history."""
     monkeypatch.setattr(llm, "LLM_READY", False)
-    monkeypatch.setattr(routes.chat, "_LLM_WAIT_TIMEOUT", 0)
+    llm.history.clear()
+
+    res = client.post("/chat", json={"message": "hello"})
+
+    assert res.status_code == 200
+    assert len(llm.history) == 0
+
+
+def test_chat_scripted_reply_text_is_from_waking_list(monkeypatch):
+    """The done event reply must be one of the known waking-up phrases."""
+    monkeypatch.setattr(llm, "LLM_READY", False)
+    import routes.chat as _rc
 
     res = client.post("/chat", json={"message": "hello"})
 
     events = _parse_events(res.text)
-    assert any("error" in e for e in events)
-    assert not any("done" in e for e in events)
-
-
-def test_chat_proceeds_once_llm_becomes_ready(monkeypatch):
-    """If LLM_READY flips True before the deadline, Phase 2 executes normally."""
-    import threading
-
-    monkeypatch.setattr(llm, "LLM_READY", False)
-    fake = _FakeSSEResponse(["I'm back"])
-
-    def _flip_ready():
-        import time as _time
-        _time.sleep(0.05)
-        llm.LLM_READY = True
-
-    threading.Thread(target=_flip_ready, daemon=True).start()
-
-    with patch("routes.chat.req.post", return_value=fake):
-        res = client.post("/chat", json={"message": "are you there?"})
-
-    events = _parse_events(res.text)
-    assert any("status" in e for e in events), "should have had at least one status event"
-    assert any("done" in e for e in events),   "should have completed chat after LLM ready"
+    done_evt = next(e for e in events if e.get("done"))
+    assert done_evt["reply"] in _rc._WAKING_REPLIES

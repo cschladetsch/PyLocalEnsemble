@@ -1,16 +1,22 @@
-import re, json, asyncio, time
+import re, json, asyncio, random
 import queue as _queue
 import requests as req
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-_LLM_WAIT_TIMEOUT = 8   # seconds; fail fast + let client retry rather than long-polling
-
 import config
 import llm
 import state
 import image as image_mod
+
+_WAKING_REPLIES = [
+    "Just a moment… I'm still waking up.",
+    "One second — almost ready.",
+    "Still coming to. Give me just a moment.",
+    "Bear with me — almost there.",
+    "Not quite ready yet. Just a moment.",
+]
 
 router = APIRouter()
 
@@ -24,22 +30,16 @@ async def chat(body: ChatRequest):
     print(f"\n[backend] Received /chat request: {body.message[:50]}...")
 
     async def _stream():
-        # --- Phase 1: wait for LLM if restarting after image generation ---
+        # --- Phase 1: instant scripted reply if LLM not ready yet ---
         if not llm.LLM_READY:
-            msg = 'LLM restarting after image generation' if llm.LLM_SUSPENDED else 'Alice is starting up'
-            yield f"data: {json.dumps({'status': msg + '…'})}\n\n"
-            deadline = time.monotonic() + _LLM_WAIT_TIMEOUT
-            dots = 0
-            while not llm.LLM_READY:
-                if time.monotonic() >= deadline:
-                    yield f"data: {json.dumps({'error': 'LLM still starting…', 'retry': True})}\n\n"
-                    return
-                await asyncio.sleep(1)
-                dots += 1
-                if dots % 5 == 0:
-                    elapsed = int(time.monotonic() - (deadline - _LLM_WAIT_TIMEOUT))
-                    yield f"data: {json.dumps({'status': msg + f' ({elapsed}s)…'})}\n\n"
-            yield f"data: {json.dumps({'status': 'Ready.'})}\n\n"
+            reply = random.choice(_WAKING_REPLIES)
+            words = reply.split()
+            for i, word in enumerate(words):
+                token = word + (' ' if i < len(words) - 1 else '')
+                yield f"data: {json.dumps({'delta': token})}\n\n"
+                await asyncio.sleep(0.04)
+            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': False})}\n\n"
+            return
 
         # --- Phase 2: normal chat ---
         try:
@@ -154,37 +154,10 @@ async def chat(body: ChatRequest):
             # overflows; doing it before `done` caused 30-60 s UI freezes.
             loop.run_in_executor(None, lambda: (llm.compress_history(), llm.save_history()))
 
-            if auto_img:
-                state._pre_sd_prompt   = None
-                state._pre_sd_negative = ""
-                state._pre_sd_nudity   = None
-                recent    = llm.history[-8:]
-                last_user = body.message.strip()
-                msgs_text = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent)
-                nudity_floor = state._nudity_state
-
-                async def _pre_extract():
-                    try:
-                        base_prompt, new_nudity = await loop.run_in_executor(
-                            None,
-                            lambda: image_mod.extract_sd_prompt(
-                                msgs_text,
-                                appearance=state.ALICE_APPEARANCE,
-                                last_user_msg=last_user,
-                                persona=state.SYSTEM_PROMPT,
-                                nudity_floor=nudity_floor,
-                            )
-                        )
-                        prompt = image_mod.clean_tags(base_prompt)
-                        prompt, extra_neg = image_mod.apply_exposure_rules(msgs_text, prompt, "")
-                        state._pre_sd_prompt   = prompt
-                        state._pre_sd_negative = extra_neg
-                        state._pre_sd_nudity   = new_nudity
-                        print(f"[chat] pre-extracted SD prompt ({len(prompt)} chars)")
-                    except Exception as e:
-                        print(f"[chat] SD prompt pre-extraction failed: {e}")
-
-                asyncio.create_task(_pre_extract())
+            # Clear any stale pre-extracted prompt so image gen re-extracts fresh.
+            state._pre_sd_prompt   = None
+            state._pre_sd_negative = ""
+            state._pre_sd_nudity   = None
 
         except Exception as e:
             import traceback

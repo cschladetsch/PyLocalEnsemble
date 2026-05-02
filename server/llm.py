@@ -366,16 +366,17 @@ def clear_history():
 def _summarise(messages: list) -> str:
     text = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
     try:
-        return llm_chat([
+        return llm_chat_deferred([
             {"role": "system", "content": (
                 "Summarise the following conversation into a brief memory paragraph. "
                 "Capture key facts, what happened, preferences, and relationship dynamics. "
                 "Be concise — two to four sentences max."
             )},
             {"role": "user", "content": text},
-        ]).strip()
+        ], label="compress_history").strip()
     except Exception as e:
-        warn(f"Summary failed: {e}")
+        if "chat in progress" not in str(e):
+            warn(f"Summary failed: {e}")
         return ""
 
 
