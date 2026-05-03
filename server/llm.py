@@ -195,12 +195,14 @@ def suspend_for_image() -> None:
     global LLM_READY, LLM_SUSPENDED
     if LLM_SUSPENDED:
         return
+    # Mark unavailable BEFORE killing so the chat route immediately sees
+    # LLM_READY=False and returns a retry response rather than a connection error.
+    LLM_READY     = False
+    LLM_SUSPENDED = True
     print("[llm] suspending server to free VRAM for image generation...")
     killed = _kill_server_proc()
     if not killed:
         _kill_by_port()
-    LLM_READY     = False
-    LLM_SUSPENDED = True
 
 
 def resume_after_image() -> None:

@@ -195,8 +195,14 @@ async def image_from_history(body: ImageRequest):
     if not _llm_history:
         _llm_history = llm.history
 
+    # If history is still empty but a history file exists, load it now.
+    # This handles the race where Image is clicked before startup has finished loading history.
+    if not _llm_history and not state.GROUP_ACTIVE:
+        llm.load_history()
+        _llm_history = llm.history
+
     if not _llm_history and not body.extra.strip():
-        return JSONResponse({"error": "No conversation history yet."}, status_code=400)
+        return JSONResponse({"error": "No conversation yet — chat with Alice first."}, status_code=400)
 
     try:
         def _run():
@@ -207,11 +213,24 @@ async def image_from_history(body: ImageRequest):
                 print(f"{_c('blue', '[image]')} {label}: {_c(color, f'{secs:.2f}s')}")
 
             image._gen_cancel.clear()
-            recent = _llm_history[-10:]
-            last_user_full = (
-                next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
-                if recent else body.extra
-            )
+
+            # Build the context string for SD prompt extraction.
+            # Single-persona mode: use the rolling window (last 3 exchanges + compressed summary).
+            # Group mode: fall back to raw history since group has its own history structure.
+            if not state.GROUP_ACTIVE and state._img_ctx_recent:
+                messages      = state.get_image_context()
+                last_user_full = state._img_ctx_recent[-1][0]
+            else:
+                recent = _llm_history[-10:]
+                last_user_full = (
+                    next((m["content"] for m in reversed(recent) if m["role"] == "user"), "")
+                    if recent else body.extra
+                )
+                messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
+
+            if body.extra.strip():
+                last_user_full = body.extra.strip()
+
             # Reorder clauses so end-state act comes first
             _parts = [p.strip() for p in re.split(r'\b(?:and|then)\b|[;]', last_user_full, flags=re.I) if p.strip()]
             last_user = ", ".join([_parts[-1]] + _parts[:-1]) if len(_parts) > 1 else last_user_full
@@ -223,8 +242,6 @@ async def image_from_history(body: ImageRequest):
                 print("[image] re-clothing detected — nudity state reset")
             else:
                 state.decay_nudity_state(last_user)
-
-            messages = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in recent) if recent else f"User: {body.extra}"
 
             # Determine relevant personas for the scene
             relevant_personas = _get_relevant_personas(_llm_history, last_user)
@@ -284,11 +301,13 @@ async def image_from_history(body: ImageRequest):
             else:
                 t2 = time.time()
                 print(f"{_c('blue', '[image]')} extracting SD prompt via LLM...")
-                _persona_context = state.SYSTEM_PROMPT
+                # Don't pass the full system prompt — it's ~600 tokens that overflow ctx_size=2048.
+                # The appearance hint already carries all the visual identity the extractor needs.
+                _persona_context = ""
                 if len(relevant_personas) > 1:
                     setting_hint = _extract_setting_hint(relevant_personas)
-                    _persona_context += (
-                        f"\n\nIMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. "
+                    _persona_context = (
+                        f"IMPORTANT: This is a scene with ALL of these personas: {', '.join(_names)}. "
                         "You MUST output tags that describe an interaction or pose involving EVERY persona listed. "
                         "Ensure they are distinct individuals and never merged into one person. "
                         "Do not omit any character from the scene description."
@@ -450,9 +469,14 @@ async def interrupt():
 
 @router.get("/progress")
 async def get_progress():
+    forge_url = config.CFG['forge_url']
+    loop = asyncio.get_running_loop()
     try:
-        r = req.get(f"{config.CFG['forge_url']}/sdapi/v1/progress?skip_current_image=false", timeout=3)
-        return JSONResponse(r.json())
+        data = await loop.run_in_executor(
+            None,
+            lambda: req.get(f"{forge_url}/sdapi/v1/progress?skip_current_image=false", timeout=3).json()
+        )
+        return JSONResponse(data)
     except Exception:
         return JSONResponse({"progress": 0, "state": {}})
 

@@ -201,7 +201,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             r = req.post(f"{forge_url}/sdapi/v1/txt2img", json=payload, timeout=300)
         finally:
             _done.set()
-            _poll_thread.join(timeout=2)
+            _poll_thread.join(timeout=0.6)
 
         data = r.json()
         if "images" not in data:

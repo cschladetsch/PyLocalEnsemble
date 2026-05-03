@@ -286,11 +286,9 @@ class ResourceOrchestrator:
         if to_evict:
             self.wait_for_ram(timeout=20.0)
 
-        self.log(f"pre  load:{name}")
         r = self._resources.get(name)
         if r:
             r.load()
-        self.log(f"post load:{name}")
 
         print(f"[orch] '{name}' acquired  priority={priority}  active={self._snapshot()}")
 
@@ -309,7 +307,6 @@ class ResourceOrchestrator:
                 self._holders[self._default] = self._default_priority
                 reload_default = True
 
-        self.log(f"post release:{name}")
         print(f"[orch] '{name}' released  active={self._snapshot()}")
 
         if reload_default:
@@ -518,7 +515,6 @@ def release_from_image() -> None:
         )
         if reload_default:
             _orch._holders[_orch._default] = _orch._default_priority
-    _orch.log("post release:forge")
     print(f"[orch] 'forge' released (checkpoint kept in VRAM)  active={_orch._snapshot()}")
     if reload_default:
         _orch._reload_default_async(priority=_orch._default_priority)

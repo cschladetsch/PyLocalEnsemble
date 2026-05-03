@@ -120,6 +120,7 @@ async def reset_persona(name: str):
     state._pre_sd_prompt              = None
     state._pre_sd_nudity              = None
     state._pre_sd_negative            = ""
+    state.clear_image_context()
     return JSONResponse({"status": "reset", "persona": name})
 
 

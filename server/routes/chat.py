@@ -31,7 +31,7 @@ async def chat(body: ChatRequest):
 
     async def _stream():
         # --- Phase 1: instant scripted reply if LLM not ready yet ---
-        if not llm.LLM_READY:
+        if not llm.LLM_READY or llm.LLM_SUSPENDED:
             reply = random.choice(_WAKING_REPLIES)
             words = reply.split()
             for i, word in enumerate(words):
@@ -135,7 +135,17 @@ async def chat(body: ChatRequest):
                 if isinstance(item, Exception):
                     if llm.history and llm.history[-1].get("role") == "user":
                         llm.history.pop()
-                    yield f"data: {json.dumps({'error': str(item)})}\n\n"
+                    # LLM was killed for image gen mid-stream — treat as waking state
+                    if not llm.LLM_READY or llm.LLM_SUSPENDED:
+                        reply = random.choice(_WAKING_REPLIES)
+                        words = reply.split()
+                        for i, word in enumerate(words):
+                            token = word + (' ' if i < len(words) - 1 else '')
+                            yield f"data: {json.dumps({'delta': token})}\n\n"
+                            await asyncio.sleep(0.04)
+                        yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': False, 'retry': True})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'error': str(item)})}\n\n"
                     return
                 yield f"data: {json.dumps({'delta': item})}\n\n"
 
@@ -167,6 +177,9 @@ async def chat(body: ChatRequest):
             print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
             yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
 
+            # Maintain rolling image context: last 3 exchanges verbatim + compressed summary
+            state.update_image_context(effective_msg, reply)
+
             # Compress history and save in background — don't block stream close.
             # compress_history may trigger a full LLM summarisation call when history
             # overflows; doing it before `done` caused 30-60 s UI freezes.
@@ -176,6 +189,36 @@ async def chat(body: ChatRequest):
             state._pre_sd_prompt   = None
             state._pre_sd_negative = ""
             state._pre_sd_nudity   = None
+
+            # Pre-extract the SD prompt now (while the LLM is still alive) so that
+            # clicking Image skips the extraction step and starts the VRAM swap immediately.
+            if not state.GROUP_ACTIVE:
+                _ctx_snap    = state.get_image_context()
+                _user_snap   = state._img_ctx_recent[-1][0] if state._img_ctx_recent else effective_msg
+                _nudity_snap = state._nudity_state
+                _p_key       = state._active_persona_key or "Alice"
+                _appear_snap = config.PERSONAS.get(_p_key, {}).get("appearance", state.ALICE_APPEARANCE)
+
+                def _pre_extract():
+                    try:
+                        from image.prompt import extract_sd_prompt as _extract
+                        prompt, nudity = _extract(
+                            _ctx_snap,
+                            appearance=_appear_snap,
+                            last_user_msg=_user_snap,
+                            persona="",
+                            nudity_floor=_nudity_snap,
+                        )
+                        if prompt:
+                            state._pre_sd_prompt   = prompt
+                            state._pre_sd_nudity   = nudity
+                            state._pre_sd_negative = ""
+                            print(f"[chat] pre-extracted SD prompt ({len(prompt)} chars)")
+                    except Exception as _e:
+                        if "chat in progress" not in str(_e):
+                            print(f"[chat] pre-extraction skipped: {_e}")
+
+                loop.run_in_executor(None, _pre_extract)
 
         except Exception as e:
             import traceback

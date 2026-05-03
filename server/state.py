@@ -40,6 +40,45 @@ _pre_sd_prompt:    str | None = None   # positive prompt
 _pre_sd_negative:  str        = ""     # extra negative tags
 _pre_sd_nudity:    str | None = None   # nudity state at extraction time
 
+# Rolling image context — sliding window of last 3 exchanges + compressed summary of all older turns.
+# Each entry is (user_msg, alice_reply). On overflow, the oldest entry is folded into the summary.
+_img_ctx_recent:  list  = []   # [(user_msg, alice_reply), ...]  — at most IMG_CTX_WINDOW entries
+_img_ctx_summary: str   = ""   # compressed tail of all rolled-off exchanges
+IMG_CTX_WINDOW        = 3      # number of full exchanges kept verbatim
+IMG_CTX_SUMMARY_CHARS = 800    # max chars for the rolling summary
+
+
+def update_image_context(user_msg: str, alice_reply: str) -> None:
+    """Call after each chat reply to maintain the rolling context window."""
+    global _img_ctx_recent, _img_ctx_summary
+    if len(_img_ctx_recent) >= IMG_CTX_WINDOW:
+        oldest_user, oldest_reply = _img_ctx_recent.pop(0)
+        chunk = f"User: {oldest_user}\nAlice: {oldest_reply}"
+        combined = (_img_ctx_summary + "\n" + chunk).strip() if _img_ctx_summary else chunk
+        if len(combined) > IMG_CTX_SUMMARY_CHARS:
+            combined = combined[-IMG_CTX_SUMMARY_CHARS:]
+            sp = combined.find(' ')           # trim to word boundary
+            if 0 < sp < 80:
+                combined = combined[sp + 1:]
+        _img_ctx_summary = combined
+    _img_ctx_recent.append((user_msg, alice_reply))
+
+
+def get_image_context() -> str:
+    """Return formatted context string for SD prompt extraction."""
+    parts = []
+    if _img_ctx_summary:
+        parts.append(f"[Earlier context]\n{_img_ctx_summary}")
+    for user_msg, alice_reply in _img_ctx_recent:
+        parts.append(f"User: {user_msg}\nAlice: {alice_reply}")
+    return "\n\n".join(parts)
+
+
+def clear_image_context() -> None:
+    global _img_ctx_recent, _img_ctx_summary
+    _img_ctx_recent  = []
+    _img_ctx_summary = ""
+
 # Nudity decay — returns toward "clothed" after N consecutive non-sexual turns
 _NUDITY_ORDER   = ["clothed", "topless", "bottomless", "fully nude"]
 _nudity_turns_since_keyword = 0
