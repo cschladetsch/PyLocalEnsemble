@@ -45,8 +45,9 @@ _DEFAULT_CONFIG = {
         "chat_template": "chatml",
     },
     "tts": {
-        "voice":       "af_nicole",
-        "speed":       0.85,
+        "voice":       "af_bella",
+        "speed":       0.78,
+        "pitch":       0.94,  # framerate multiplier — < 1.0 lowers pitch + slows playback slightly
         "chunk_chars": 600,   # max chars per TTS synthesis chunk; larger = more natural flow
     },
     "image": {
@@ -103,6 +104,13 @@ _DEFAULT_CONFIG = {
         "beneath the stars", "star-filled", "ancient and primal",
         "whispers of", "shadows dance", "the air crackles",
         "primal hunger", "smoldering gaze",
+        # Dolphin boilerplate openers / closers
+        "our bodies yearn", "bodies yearn for one another",
+        "guide me further along this journey",
+        "glow of our connection",
+        "relish in the sight of your desire",
+        "don't hesitate to guide me",
+        "bask in the glow",
     ],
 }
 

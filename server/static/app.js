@@ -140,6 +140,9 @@ async function loadInfo() {
     if (!llmReady && d.llm_ready) {
       llmReady = true;
       setLLMReady(true);
+      // Only fetch greeting if the user hasn't started chatting yet — avoids
+      // updating the entrance line mid-conversation or contending with a live chat.
+      if (!document.querySelector('#msgs .msg.user')) fetchGreeting();
     } else if (!d.llm_ready) {
       setLLMReady(false);
       _infoDelay = Math.min((_infoDelay || 2000) * 1.5, 10000);
@@ -585,6 +588,8 @@ async function switchPersona(name, { reChat = true } = {}) {
   if (rerollBtn) rerollBtn.disabled = true;
   await loadVoices();
   loadNegative();
+  const _gsid = addMsg('alice', charName, entranceLine());
+  fetchGreeting(_gsid);
   if (reChat && lastUserMsg) _chatWith(lastUserMsg);
 }
 
@@ -1012,6 +1017,24 @@ function updMsg(id, t) {
   c.scrollTop = c.scrollHeight;
 }
 
+async function fetchGreeting(targetId) {
+  try {
+    const r = await fetch('/persona/greeting');
+    const d = await r.json();
+    if (!d.greeting) return;
+    if (targetId) {
+      updMsg(targetId, d.greeting);
+    } else {
+      const el = document.querySelector('#msgs .msg.alice');
+      if (el) {
+        const sndr = el.querySelector('.sndr');
+        if (sndr) el.innerHTML = sndr.outerHTML + d.greeting;
+        el.dataset.entranceSet = '1';  // prevent loadInfo() from overwriting with a random line
+      }
+    }
+  } catch (e) {}
+}
+
 function openFullscreen(src) {
   document.getElementById('fullscreen-img').src = src;
   document.getElementById('fullscreen-overlay').classList.add('open');
@@ -1325,7 +1348,9 @@ async function _waitForGroupTts(gen, timeoutMs = 90000) {
 
 async function clearHistory() {
   await fetch('/history', { method: 'DELETE' });
-  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>${entranceLine()}</div>`;
+  document.getElementById('msgs').innerHTML = '';
+  const _gcid = addMsg('alice', charName, entranceLine());
+  fetchGreeting(_gcid);
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';
@@ -1351,7 +1376,9 @@ async function resetPersona(selectEl) {
     await fetch(`/persona/${encodeURIComponent(name)}/reset`, { method: 'DELETE' });
   }
   resetSel.value = '';
-  document.getElementById('msgs').innerHTML = `<div class="msg alice"><div class="sndr">${charName}</div>${entranceLine()}</div>`;
+  document.getElementById('msgs').innerHTML = '';
+  const _grid = addMsg('alice', charName, entranceLine());
+  fetchGreeting(_grid);
   document.getElementById('ic').innerHTML = '<div class="ph">Awaiting your conversation...</div>';
   document.getElementById('pd-wrap').style.display = 'none';
   document.getElementById('pd').value = '';

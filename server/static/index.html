@@ -12,8 +12,7 @@
   <h1>ALICE</h1>
   <button class="cb stop-btn" id="stop-btn" onclick="interrupt('user')" title="Stop (Esc)">Stop</button>
   <div style="display:flex;gap:.6rem;align-items:center">
-    <select id="model-select" class="cb" onchange="switchModel(this)" title="Switch LLM model" style="cursor:pointer;max-width:16rem"></select>
-    <select id="sd-model-select" class="cb" onchange="switchSDModel(this)" title="Switch Stable Diffusion checkpoint" style="cursor:pointer;max-width:16rem"></select>
+    <button class="cb" onclick="window.location='/settings-page'" title="Settings">Settings</button>
     <select id="pack-select" class="cb" onchange="switchPack(this.value)" title="Switch persona pack (senate, default, etc.)" style="cursor:pointer"></select>
     <select id="persona-select" class="cb" onchange="switchPersona(this.value)" title="Switch active persona" style="cursor:pointer"></select>
     <select id="demo-persona-select" class="cb" onchange="switchDemoPersona(this.value)" title="Your character in demo mode" style="cursor:pointer"></select>
@@ -78,7 +77,7 @@
 <div id="fullscreen-overlay" onclick="closeFullscreen()">
   <img id="fullscreen-img" alt="">
 </div>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=17"></script>
 <script src="/static/js/audio.js?v=1"></script>
 </body>
 </html>

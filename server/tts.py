@@ -155,8 +155,9 @@ def tts_wav_b64_stream(text: str, voice: str = None, speed: float = None, pitch:
     import numpy as np
     from concurrent.futures import ThreadPoolExecutor
     tts_cfg = config.CFG.get("tts", {})
-    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_nicole")
-    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_bella")
+    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.78))
+    pitch   = pitch if pitch is not None else tts_cfg.get("pitch", 0.94)
     effects = effects if effects is not None else tts_cfg.get("effects", "")
     chunks  = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))
     total   = len(chunks)
@@ -225,8 +226,9 @@ def tts_wav_b64_stream_contiguous(text: str, voice: str = None, speed: float = N
     """
     import numpy as np
     tts_cfg = config.CFG.get("tts", {})
-    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_nicole")
-    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.85))
+    voice   = voice if voice and voice in VOICES else tts_cfg.get("voice", "af_bella")
+    spd     = speed if speed is not None else _emotion_speed(text, tts_cfg.get("speed", 0.78))
+    pitch   = pitch if pitch is not None else tts_cfg.get("pitch", 0.94)
     effects = effects if effects is not None else tts_cfg.get("effects", "")
 
     chunks = _sentence_chunks(text, max_chars=tts_cfg.get("chunk_chars", 500))

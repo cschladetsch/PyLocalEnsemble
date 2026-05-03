@@ -60,6 +60,7 @@ async def chat(body: ChatRequest):
 
             q = _queue.Queue()
             collected = []
+            finish_reason_holder = [None]
 
             def _run():
                 llm._chat_in_progress.set()
@@ -109,7 +110,11 @@ async def chat(body: ChatRequest):
                         if payload == "[DONE]":
                             break
                         data = json.loads(payload)
-                        delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        choice = data.get("choices", [{}])[0]
+                        delta = choice.get("delta", {}).get("content", "")
+                        fr = choice.get("finish_reason")
+                        if fr:
+                            finish_reason_holder[0] = fr
                         if delta:
                             collected.append(delta)
                             q.put(delta)
@@ -156,12 +161,20 @@ async def chat(body: ChatRequest):
             reply = re.sub(r'\s*\(.*?\)', '', reply).strip()
             reply = re.sub(r'^[Aa]lice\s*[:”]\s*', '', reply).strip().strip('”””')
             reply = re.sub(r'\bAs Alice,?\s*', '', reply, flags=re.IGNORECASE).strip()
+            # Strip Dolphin boilerplate openers ("Oh, how I relish…, my love.")
+            reply = re.sub(
+                r'^Oh,?\s+how\s+I\b[^.!?]{0,120}[,.]?\s*my\s+(?:dear\s+)?love[.!]?\s*',
+                '', reply, flags=re.IGNORECASE
+            ).strip()
             # Strip Dolphin boilerplate closers that survive banned_phrases injection
             reply = re.sub(
                 r'\s*(This intimate act connects us.*|'
                 r'binding us together with.*|'
                 r'It\'?s an act (?:of pure pleasure|that connects).*|'
-                r'a (?:sensual )?dance (?:of passion|between us).*)',
+                r'a (?:sensual )?dance (?:of passion|between us).*|'
+                r'[Aa]s we bask in the glow.*|'
+                r'[Oo]ur bodies yearn.*|'
+                r'[Dd]on\'t hesitate to guide me.*)',
                 '', reply, flags=re.DOTALL | re.IGNORECASE
             ).strip()
             reply = re.sub(
@@ -174,8 +187,9 @@ async def chat(body: ChatRequest):
             llm.history.append({"role": "assistant", "content": reply})
 
             auto_img = state.should_auto_image(body.message)
-            print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}")
-            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img})}\n\n"
+            cut_off  = finish_reason_holder[0] == "length"
+            print(f"[chat] reply sent ({len(reply)} chars), auto_image={auto_img}, cut_off={cut_off}")
+            yield f"data: {json.dumps({'done': True, 'reply': reply, 'auto_image': auto_img, 'cut_off': cut_off})}\n\n"
 
             # Maintain rolling image context: last 3 exchanges verbatim + compressed summary
             state.update_image_context(effective_msg, reply)

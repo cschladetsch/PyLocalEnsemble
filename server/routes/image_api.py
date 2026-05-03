@@ -333,6 +333,13 @@ async def image_from_history(body: ImageRequest):
                 print("[image] cancelled before Forge call")
                 return None, None
 
+            # Single-persona: anchor to one subject so SD doesn't invent a second figure.
+            if len(relevant_personas) <= 1:
+                if not re.search(r'\b(1girl|solo|1woman)\b', prompt, re.I):
+                    prompt = "1girl, solo, " + prompt
+                solo_neg = "2girls, 2women, 3girls, 3women, multiple people, multiple girls, multiple women"
+                extra_negative = (extra_negative + ", " + solo_neg) if extra_negative else solo_neg
+
             state.last_sd_prompt = prompt
             # For group scenes, add over-count tags to the negative to discourage SD
             # from hallucinating extra people beyond the expected number.

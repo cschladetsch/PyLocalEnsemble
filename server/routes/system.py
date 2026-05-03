@@ -15,20 +15,46 @@ class ModelSwitchRequest(BaseModel):
     path: str
 
 class SettingsPatch(BaseModel):
-    quick_image: bool | None = None
+    quick_image:         bool | None = None
+    vram_swap_for_image: bool | None = None
+    llm_params:          dict | None = None
+    image:               dict | None = None
+    tts:                 dict | None = None
+    memory:              dict | None = None
+    llama_server:        dict | None = None
 
 
 @router.get("/settings")
 async def get_settings():
-    return JSONResponse({"quick_image": config.CFG.get("quick_image", True)})
+    return JSONResponse({
+        "quick_image":         config.CFG.get("quick_image", True),
+        "vram_swap_for_image": config.CFG.get("vram_swap_for_image", True),
+        "llm_params":          config.CFG.get("llm_params",    config._DEFAULT_CONFIG["llm_params"]),
+        "image":               config.CFG.get("image",         config._DEFAULT_CONFIG["image"]),
+        "tts":                 config.CFG.get("tts",           config._DEFAULT_CONFIG["tts"]),
+        "memory":              config.CFG.get("memory",        config._DEFAULT_CONFIG["memory"]),
+        "llama_server":        config.CFG.get("llama_server",  config._DEFAULT_CONFIG["llama_server"]),
+    })
 
 
 @router.post("/settings")
 async def patch_settings(body: SettingsPatch):
     if body.quick_image is not None:
         config.CFG["quick_image"] = body.quick_image
-        config.save_config(config.CFG)
-    return JSONResponse({"quick_image": config.CFG.get("quick_image", True)})
+    if body.vram_swap_for_image is not None:
+        config.CFG["vram_swap_for_image"] = body.vram_swap_for_image
+    if body.llm_params is not None:
+        config.CFG.setdefault("llm_params", {}).update(body.llm_params)
+    if body.image is not None:
+        config.CFG.setdefault("image", {}).update(body.image)
+    if body.tts is not None:
+        config.CFG.setdefault("tts", {}).update(body.tts)
+    if body.memory is not None:
+        config.CFG.setdefault("memory", {}).update(body.memory)
+    if body.llama_server is not None:
+        config.CFG.setdefault("llama_server", {}).update(body.llama_server)
+    config.save_config(config.CFG)
+    return JSONResponse({"status": "ok"})
 
 class DemoPersonaRequest(BaseModel):
     name: str
@@ -316,6 +342,77 @@ async def demo_prompt(turn: int = Query(default=0, ge=0)):
         return JSONResponse({"prompt": prompt})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/persona/greeting")
+async def persona_greeting():
+    import random as _rnd
+    _FALLBACKS = [
+        "Hello. I've been waiting for you.",
+        "You came back.",
+        "There you are.",
+        "I've been thinking about you.",
+        "Come in.",
+    ]
+    if not llm.LLM_READY or llm.LLM_SUSPENDED or llm._chat_in_progress.is_set():
+        return JSONResponse({"greeting": _rnd.choice(_FALLBACKS)})
+    persona_name = config.NAME
+    recent = llm.history[-6:] if llm.history else []
+    if recent:
+        ctx_lines = "\n".join(
+            f"{m['role'].capitalize()}: {m['content'][:150]}" for m in recent[-4:]
+        )
+        history_note = (
+            f"You have spoken with this person before. Here are your most recent exchanges:\n"
+            f"{ctx_lines}\n\nReference your shared history naturally in your greeting."
+        )
+    else:
+        history_note = "This is the very first time this person has visited you."
+    system = (
+        f"{state.SYSTEM_PROMPT[:400]}\n\n"
+        f"Write ONE opening sentence that {persona_name} says when the person arrives. "
+        f"{history_note}\n\n"
+        f"One sentence only. No name prefix. No quotes. No stage directions. Pure dialogue."
+    )
+
+    def _call():
+        p = config.CFG.get("llm_params", config._DEFAULT_CONFIG["llm_params"])
+        r = req.post(f"{llm.LLAMA_URL}/v1/chat/completions", json={
+            "model":       llm.llm_model(),
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": f"Write {persona_name}'s opening line:"},
+            ],
+            "stream":      False,
+            "max_tokens":  60,
+            "temperature": p.get("temperature", 0.9),
+            "top_p":       p.get("top_p", 0.92),
+        }, timeout=30)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip().strip('"\'')
+
+    try:
+        loop = asyncio.get_running_loop()
+        greeting = await loop.run_in_executor(None, _call)
+        greeting = re.sub(rf'^{re.escape(persona_name)}\s*[:"]\s*', '', greeting, flags=re.IGNORECASE).strip()
+        greeting = re.sub(r'\(.*?\)', '', greeting).strip()
+        return JSONResponse({"greeting": greeting or _rnd.choice(_FALLBACKS)})
+    except Exception as e:
+        print(f"[greeting] {e}")
+        return JSONResponse({"greeting": _rnd.choice(_FALLBACKS)})
+
+
+@router.get("/settings-page", response_class=HTMLResponse)
+async def settings_page_view():
+    static_dir = config.STATIC_DIR
+    path = os.path.join(static_dir, "settings.html")
+    with open(path, encoding="utf-8") as f:
+        html = f.read()
+    for asset in ("js/settings.js", "style.css"):
+        fpath = os.path.join(static_dir, asset)
+        v = int(os.path.getmtime(fpath)) if os.path.exists(fpath) else 0
+        html = re.sub(rf'(/static/{re.escape(asset)})\?v=\d+', rf'\g<1>?v={v}', html)
+    return html
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings · Alice</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;1,300&family=Montserrat:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body class="settings-body">
+<header>
+  <h1>SETTINGS</h1>
+  <div style="display:flex;gap:.6rem;align-items:center">
+    <span id="save-status" style="font-size:.7rem;letter-spacing:.1em;color:var(--accent);opacity:0;transition:opacity .3s"></span>
+    <a href="/" class="cb" style="text-decoration:none">← Back</a>
+  </div>
+</header>
+
+<div class="settings-page">
+
+  <!-- LLM Model & Server -->
+  <div class="settings-section">
+    <div class="settings-section-header">LLM Model</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Model file</label>
+        <select id="s-model-select" class="settings-select" onchange="switchLLMModel(this)">
+          <option value="" disabled>Loading…</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-section-subheader" style="margin-top:.9rem">Server (restart required)</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>GPU layers <span class="settings-note">(ngl)</span></label>
+        <input type="number" id="s-n_gpu_layers" class="settings-input" min="0" max="200">
+      </div>
+      <div class="settings-row">
+        <label>Context size</label>
+        <select id="s-ctx_size" class="settings-select" style="flex:0 0 auto;width:auto">
+          <option value="2048">2048</option>
+          <option value="4096">4096</option>
+          <option value="8192">8192</option>
+          <option value="16384">16384</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label>Threads</label>
+        <input type="number" id="s-threads" class="settings-input" min="1" max="64">
+      </div>
+      <div class="settings-row">
+        <label>Batch size</label>
+        <input type="number" id="s-batch_size" class="settings-input" min="128" max="2048" step="128">
+      </div>
+    </div>
+  </div>
+
+  <!-- LLM Parameters -->
+  <div class="settings-section">
+    <div class="settings-section-header">LLM Parameters</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Max tokens <span id="max-tokens-val" class="slider-val">150</span></label>
+        <input type="range" id="s-max_tokens" class="settings-slider" min="50" max="600" step="10"
+               oninput="document.getElementById('max-tokens-val').textContent=this.value">
+      </div>
+      <div class="settings-row">
+        <label>Temperature <span id="temp-val" class="slider-val">0.90</span></label>
+        <input type="range" id="s-temperature" class="settings-slider" min="0" max="2" step="0.05"
+               oninput="document.getElementById('temp-val').textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="settings-row">
+        <label>Top P <span id="top-p-val" class="slider-val">0.92</span></label>
+        <input type="range" id="s-top_p" class="settings-slider" min="0" max="1" step="0.01"
+               oninput="document.getElementById('top-p-val').textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="settings-row">
+        <label>Repeat penalty <span id="rep-val" class="slider-val">1.25</span></label>
+        <input type="range" id="s-repeat_penalty" class="settings-slider" min="0.5" max="2" step="0.05"
+               oninput="document.getElementById('rep-val').textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="settings-row">
+        <label>Presence penalty <span id="pres-val" class="slider-val">0.8</span></label>
+        <input type="range" id="s-presence_penalty" class="settings-slider" min="-2" max="2" step="0.1"
+               oninput="document.getElementById('pres-val').textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="settings-row">
+        <label>Frequency penalty <span id="freq-val" class="slider-val">0.5</span></label>
+        <input type="range" id="s-frequency_penalty" class="settings-slider" min="-2" max="2" step="0.1"
+               oninput="document.getElementById('freq-val').textContent=(+this.value).toFixed(1)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Generation -->
+  <div class="settings-section">
+    <div class="settings-section-header">Image Generation</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>SD checkpoint</label>
+        <select id="s-sd-model-select" class="settings-select" onchange="switchSDModelSettings(this)">
+          <option value="" disabled>Loading…</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-section-subheader" style="margin-top:.9rem">Sampling</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Steps <span id="img-steps-val" class="slider-val">25</span></label>
+        <input type="range" id="s-steps" class="settings-slider" min="10" max="80" step="1"
+               oninput="document.getElementById('img-steps-val').textContent=this.value">
+      </div>
+      <div class="settings-row">
+        <label>CFG scale <span id="img-cfg-val" class="slider-val">7.0</span></label>
+        <input type="range" id="s-cfg_scale" class="settings-slider" min="1" max="20" step="0.5"
+               oninput="document.getElementById('img-cfg-val').textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="settings-row">
+        <label>Width</label>
+        <select id="s-width" class="settings-select" style="flex:0 0 auto;width:auto">
+          <option value="512">512</option>
+          <option value="640">640</option>
+          <option value="768">768</option>
+          <option value="832">832</option>
+          <option value="1024">1024</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label>Height</label>
+        <select id="s-height" class="settings-select" style="flex:0 0 auto;width:auto">
+          <option value="512">512</option>
+          <option value="640">640</option>
+          <option value="768">768</option>
+          <option value="832">832</option>
+          <option value="1024">1024</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label>Sampler</label>
+        <input type="text" id="s-sampler_name" class="settings-input" style="width:220px">
+      </div>
+    </div>
+    <div class="settings-section-subheader">Hires fix</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Enable hires fix</label>
+        <input type="checkbox" id="s-hires_fix" class="settings-checkbox">
+      </div>
+      <div class="settings-row">
+        <label>Scale <span id="hires-scale-val" class="slider-val">1.50</span>×</label>
+        <input type="range" id="s-hires_scale" class="settings-slider" min="1" max="3" step="0.25"
+               oninput="document.getElementById('hires-scale-val').textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="settings-row">
+        <label>Hires steps <span id="hires-steps-val" class="slider-val">15</span></label>
+        <input type="range" id="s-hires_steps" class="settings-slider" min="5" max="40" step="1"
+               oninput="document.getElementById('hires-steps-val').textContent=this.value">
+      </div>
+      <div class="settings-row">
+        <label>Denoising <span id="hires-denoise-val" class="slider-val">0.45</span></label>
+        <input type="range" id="s-hires_denoising" class="settings-slider" min="0" max="1" step="0.05"
+               oninput="document.getElementById('hires-denoise-val').textContent=(+this.value).toFixed(2)">
+      </div>
+    </div>
+    <div class="settings-section-subheader">Mode &amp; enhancement</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Quick mode <span class="settings-note">(skip LLM extraction)</span></label>
+        <input type="checkbox" id="s-quick_image" class="settings-checkbox">
+      </div>
+      <div class="settings-row">
+        <label>VRAM swap <span class="settings-note">(suspend LLM during gen)</span></label>
+        <input type="checkbox" id="s-vram_swap" class="settings-checkbox">
+      </div>
+      <div class="settings-row">
+        <label>Auto-pin seed <span class="settings-note">(face consistency)</span></label>
+        <input type="checkbox" id="s-auto_pin_seed" class="settings-checkbox">
+      </div>
+      <div class="settings-row">
+        <label>ADetailer face</label>
+        <input type="checkbox" id="s-adetailer_face" class="settings-checkbox">
+      </div>
+    </div>
+  </div>
+
+  <!-- TTS -->
+  <div class="settings-section">
+    <div class="settings-section-header">TTS Voice</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Voice</label>
+        <select id="s-voice" class="settings-select">
+          <option value="" disabled>Loading…</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label>Speed <span id="tts-speed-val" class="slider-val">0.78</span></label>
+        <input type="range" id="s-speed" class="settings-slider" min="0.4" max="1.5" step="0.01"
+               oninput="document.getElementById('tts-speed-val').textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="settings-row">
+        <label>Pitch <span id="tts-pitch-val" class="slider-val">0.94</span></label>
+        <input type="range" id="s-pitch" class="settings-slider" min="0.75" max="1.25" step="0.01"
+               oninput="document.getElementById('tts-pitch-val').textContent=(+this.value).toFixed(2)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Memory -->
+  <div class="settings-section">
+    <div class="settings-section-header">Conversation Memory</div>
+    <div class="settings-grid">
+      <div class="settings-row">
+        <label>Max history <span id="mem-max-val" class="slider-val">16</span> msgs</label>
+        <input type="range" id="s-max_history" class="settings-slider" min="4" max="64" step="2"
+               oninput="document.getElementById('mem-max-val').textContent=this.value">
+      </div>
+      <div class="settings-row">
+        <label>Keep recent <span id="mem-keep-val" class="slider-val">8</span> msgs</label>
+        <input type="range" id="s-keep_recent" class="settings-slider" min="2" max="20" step="2"
+               oninput="document.getElementById('mem-keep-val').textContent=this.value">
+      </div>
+      <div class="settings-row">
+        <label>Summary chars <span id="mem-chars-val" class="slider-val">1500</span></label>
+        <input type="range" id="s-max_chars" class="settings-slider" min="500" max="4000" step="100"
+               oninput="document.getElementById('mem-chars-val').textContent=this.value">
+      </div>
+    </div>
+  </div>
+
+</div>
+<div id="toast" class="toast"></div>
+<script src="/static/js/settings.js?v=1"></script>
+</body>
+</html>
