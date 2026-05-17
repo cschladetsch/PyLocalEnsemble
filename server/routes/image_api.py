@@ -19,7 +19,7 @@ router = APIRouter()
 _META_INSTRUCTION_RE = re.compile(
     r'\b(?:show|generate|make|draw|render|create|display|get)\b.{0,40}\b(?:image|picture|photo|shot|scene|frame)\b|'
     r'\b(?:group shot|all personas|everyone together|one (?:image|frame)|'
-    r"that is not|doesn't look|does not look|all of them|topless in one)\b",
+    r"that is not|doesn't look|does not look|all of them)\b",
     re.I,
 )
 
@@ -235,14 +235,6 @@ async def image_from_history(body: ImageRequest):
             _parts = [p.strip() for p in re.split(r'\b(?:and|then)\b|[;]', last_user_full, flags=re.I) if p.strip()]
             last_user = ", ".join([_parts[-1]] + _parts[:-1]) if len(_parts) > 1 else last_user_full
 
-            # Re-clothing resets nudity state; otherwise decay if conversation went off-topic
-            if state._RE_CLOTHE.search(last_user):
-                state._nudity_state = "clothed"
-                state._nudity_turns_since_keyword = 0
-                print("[image] re-clothing detected — nudity state reset")
-            else:
-                state.decay_nudity_state(last_user)
-
             # Determine relevant personas for the scene
             relevant_personas = _get_relevant_personas(_llm_history, last_user)
             _names = [p.get("name", k) for k, p in relevant_personas.items()]
@@ -258,7 +250,7 @@ async def image_from_history(body: ImageRequest):
 
             quick = config.CFG.get("quick_image", True)
             mode_tag = _c("cyan", "QUICK") if quick else _c("magenta", "FULL")
-            print(f"{_c('blue', '[image]')} start [{mode_tag}] nudity={_c('yellow', state._nudity_state)} personas={_names}")
+            print(f"{_c('blue', '[image]')} start [{mode_tag}] personas={_names}")
 
             # Scene synthesis is an extra LLM call — skip in quick mode
             scene_desc = ""
@@ -293,8 +285,6 @@ async def image_from_history(body: ImageRequest):
                 print("[image] using pre-extracted SD prompt (skipping LLM call)")
                 prompt         = state._pre_sd_prompt
                 extra_negative = state._pre_sd_negative
-                if state._pre_sd_nudity:
-                    state._nudity_state = state._pre_sd_nudity
                 state._pre_sd_prompt = None
                 if positive_parts:
                     prompt = ", ".join(positive_parts) + ", " + prompt
@@ -315,15 +305,13 @@ async def image_from_history(body: ImageRequest):
                     if setting_hint:
                         _persona_context += f"\n\nSCENE SETTING: {setting_hint} — use this for the SETTING field."
 
-                base_prompt, new_nudity = image.extract_sd_prompt(
+                base_prompt, _ = image.extract_sd_prompt(
                     messages, appearance=combined_appearance,
                     last_user_msg=effective_user, persona=_persona_context,
-                    nudity_floor=state._nudity_state,
                     interaction_priority=(len(relevant_personas) > 1),
                     names=_names,
                 )
                 _elapsed("LLM extraction", t2)
-                state._nudity_state = new_nudity
                 base_prompt    = image.clean_tags(base_prompt)
                 positive_extra = ", ".join(positive_parts)
                 prompt = (positive_extra + ", " + base_prompt) if positive_extra else base_prompt

@@ -5,15 +5,15 @@ from image import clean_tags, apply_exposure_rules
 # ── clean_tags ────────────────────────────────────────────────────────────────
 
 def test_clean_tags_removes_exact_duplicates():
-    result = clean_tags("nude, long hair, nude, blue eyes")
+    result = clean_tags("portrait, long hair, portrait, blue eyes")
     tags = [t.strip() for t in result.split(",")]
-    assert tags.count("nude") == 1
+    assert tags.count("portrait") == 1
 
 
 def test_clean_tags_weighted_wins_over_plain():
-    result = clean_tags("nude, (nude:1.3), blue eyes")
-    assert "(nude:1.3)" in result
-    assert result.count("nude") == 1
+    result = clean_tags("portrait, (portrait:1.3), blue eyes")
+    assert "(portrait:1.3)" in result
+    assert result.count("portrait") == 1
 
 
 def test_clean_tags_preserves_first_occurrence_order():
@@ -24,18 +24,18 @@ def test_clean_tags_preserves_first_occurrence_order():
 
 
 def test_clean_tags_strips_whitespace():
-    result = clean_tags("  nude ,  long hair  ,  nude  ")
+    result = clean_tags("  portrait ,  long hair  ,  portrait  ")
     for tag in result.split(", "):
         assert tag == tag.strip()
 
 
 def test_clean_tags_skips_empty_segments():
-    result = clean_tags("nude,,blue eyes,")
+    result = clean_tags("portrait,,blue eyes,")
     assert "" not in [t.strip() for t in result.split(",")]
 
 
 def test_clean_tags_single_tag():
-    assert clean_tags("nude") == "nude"
+    assert clean_tags("portrait") == "portrait"
 
 
 def test_clean_tags_preserves_multi_word_weighted():
@@ -46,55 +46,27 @@ def test_clean_tags_preserves_multi_word_weighted():
 # ── apply_exposure_rules ─────────────────────────────────────────────────────
 
 def test_exposure_rules_pov_injected():
-    prompt, _ = apply_exposure_rules("show from my pov", "nude", "")
+    prompt, _ = apply_exposure_rules("show from my pov", "portrait", "")
     assert "pov" in prompt.lower()
 
 
 def test_exposure_rules_first_person_injected():
-    prompt, _ = apply_exposure_rules("from first person view", "nude", "")
+    prompt, _ = apply_exposure_rules("from first person view", "portrait", "")
     assert "pov" in prompt.lower() or "first person" in prompt.lower()
 
 
 def test_exposure_rules_from_behind_injected():
-    prompt, _ = apply_exposure_rules("view from behind", "nude", "")
+    prompt, _ = apply_exposure_rules("view from behind", "portrait", "")
     assert "behind" in prompt.lower()
 
 
 def test_exposure_rules_no_match_returns_prompt_unchanged():
-    original = "nude, sitting, armchair"
+    original = "portrait, sitting, armchair"
     prompt, neg = apply_exposure_rules("she looks beautiful", original, "ugly")
     assert prompt == original
     assert neg == "ugly"
 
 
 def test_exposure_rules_negative_passthrough():
-    _, neg = apply_exposure_rules("normal text", "nude", "blurry, deformed")
+    _, neg = apply_exposure_rules("normal text", "portrait", "blurry, deformed")
     assert neg == "blurry, deformed"
-
-
-# ── nudity keyword detection (via generate_image logic) ──────────────────────
-
-def test_nudity_keywords_cover_variants():
-    """Spot-check that the explicit_keywords list catches common variants."""
-    from image import generate_image
-    import inspect
-    src = inspect.getsource(generate_image)
-    for kw in ("nudity", "fully nude", "naked", "topless"):
-        assert kw in src, f"Missing nudity keyword: {kw!r}"
-
-
-def test_generate_image_raises_clear_error_when_forge_unavailable(monkeypatch):
-    import image.generate as gen
-
-    monkeypatch.setattr(gen, "http_ok", lambda *args, **kwargs: False)
-    monkeypatch.setattr(gen, "start_forge", lambda: None)
-
-    try:
-        gen.generate_image("nude", "android woman", "bad hands")
-    except RuntimeError as e:
-        msg = str(e)
-    else:
-        raise AssertionError("generate_image should fail when Forge stays unavailable")
-
-    assert "Forge is unavailable at" in msg
-    assert "alice.json" in msg

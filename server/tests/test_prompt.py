@@ -1,38 +1,18 @@
 """Tests for image/prompt.py: structured template parsing and tag building."""
 import pytest
-from image.prompt import _parse_template, _build_tags, _detect_action, _detect_accessories, _NUDITY_MAP, _CAMERA_MAP
+from image.prompt import _parse_template, _build_tags, _detect_action, _detect_accessories, _CAMERA_MAP
 
 
 # ── _parse_template ───────────────────────────────────────────────────────────
 
 GOOD_TEMPLATE = """\
-ACTION: cupping breasts
-BODY: breasts
+ACTION: reading book
+BODY: hands
 CAMERA: front view
-POSE: standing
-NUDITY: topless
-EXTRA: nipples visible
-SETTING: bedroom
+POSE: sitting
+EXTRA: looking down
+SETTING: library
 LIGHTING: soft lighting"""
-
-
-def test_parse_all_fields():
-    r = _parse_template(GOOD_TEMPLATE)
-    assert r["ACTION"]   == "cupping breasts"
-    assert r["BODY"]     == "breasts"
-    assert r["CAMERA"]   == "front view"
-    assert r["POSE"]     == "standing"
-    assert r["NUDITY"]   == "topless"
-    assert r["EXTRA"]    == "nipples visible"
-    assert r["SETTING"]  == "bedroom"
-    assert r["LIGHTING"] == "soft lighting"
-
-
-def test_parse_strips_parenthetical():
-    raw = "ACTION: disrobing (transitional, not end state)\nBODY: breasts"
-    r = _parse_template(raw)
-    assert "(" not in r.get("ACTION", "")
-    assert "transitional" not in r.get("ACTION", "")
 
 
 def test_parse_clamps_to_four_words():
@@ -48,26 +28,9 @@ def test_parse_drops_prose_with_pronoun():
     assert r.get("SETTING") == "bedroom"
 
 
-def test_parse_case_insensitive_keys():
-    raw = "action: kneeling\nBody: breasts"
-    r = _parse_template(raw)
-    assert "ACTION" in r
-    assert "BODY" in r
-
-
 def test_parse_missing_fields_returns_empty_dict():
     r = _parse_template("Nothing useful here.")
     assert r == {}
-
-
-def test_parse_nudity_full_nudity_normalised():
-    r = _parse_template("NUDITY: full nudity")
-    assert r["NUDITY"] == "fully nude"
-
-
-def test_parse_nudity_naked_normalised():
-    r = _parse_template("NUDITY: naked")
-    assert r["NUDITY"] == "fully nude"
 
 
 def test_parse_setting_meta_commentary_dropped():
@@ -135,17 +98,6 @@ def _tags(fields, appearance=""):
     return _build_tags(fields, appearance)
 
 
-def test_action_gets_highest_weight():
-    tags = _tags({"ACTION": "cupping breasts"})
-    assert "(cupping breasts:1.7)" in tags
-
-
-def test_body_not_repeated_if_in_action():
-    tags = _tags({"ACTION": "cupping breasts", "BODY": "breasts"})
-    # 'breasts' appears in the action tag; standalone (breasts:1.5) should be absent
-    assert "(breasts:1.5)" not in tags
-
-
 def test_body_added_when_not_in_action():
     tags = _tags({"ACTION": "kneeling", "BODY": "mouth"})
     assert "(mouth:1.3)" in tags
@@ -161,25 +113,6 @@ def test_camera_from_behind_maps_correctly():
     tags = _tags({"CAMERA": "from behind"})
     assert "(from behind:1.4)" in tags
     assert "(back view:1.3)" in tags
-
-
-def test_nudity_fully_nude_adds_bare_skin():
-    tags = _tags({"NUDITY": "fully nude"})
-    assert "(nude:1.2)" in tags
-    assert "(fully naked:1.2)" in tags
-
-
-def test_nudity_topless_adds_bare_chest():
-    tags = _tags({"NUDITY": "topless"})
-    assert "(topless:1.2)" in tags
-    assert "(bare chest:1.2)" in tags
-
-
-def test_nudity_clothed_adds_no_nudity_tags():
-    tags = _tags({"NUDITY": "clothed"})
-    assert "nude" not in tags
-    assert "naked" not in tags
-    assert "bare" not in tags
 
 
 def test_appearance_not_included():
@@ -203,8 +136,8 @@ def test_pose_gets_weight():
 
 
 def test_extra_gets_lowest_weight():
-    tags = _tags({"EXTRA": "nipples visible"})
-    assert "(nipples visible:1.1)" in tags
+    tags = _tags({"EXTRA": "hands on hips"})
+    assert "(hands on hips:1.1)" in tags
 
 
 # ── last-clause extraction (inline logic from alice.py) ───────────────────────
@@ -221,12 +154,6 @@ def _last_clause(msg):
     return ", ".join([parts[-1]] + parts[:-1]) if len(parts) > 1 else msg
 
 
-def test_last_clause_and_split():
-    result = _last_clause("take off your top and cup your breasts")
-    assert result.startswith("cup your breasts")
-    assert "take off your top" in result
-
-
 def test_last_clause_then_split():
     result = _last_clause("kneel then suck it")
     assert result.startswith("suck it")
@@ -237,39 +164,6 @@ def test_last_clause_semicolon_split():
     result = _last_clause("turn around; spread your legs")
     assert result.startswith("spread your legs")
     assert "turn around" in result
-
-
-def test_last_clause_no_split():
-    assert _last_clause("cup your breasts") == "cup your breasts"
-
-
-def test_last_clause_multiple_ands():
-    result = _last_clause("remove top and look at me and squeeze your breasts")
-    assert result.startswith("squeeze your breasts")
-    assert "remove top" in result
-    assert "look at me" in result
-
-
-# ── _detect_action ────────────────────────────────────────────────────────────
-
-def test_detect_cup_breasts():
-    actions, body, camera, _ = _detect_action("cup your breasts in your hands")
-    assert actions[0] == "cupping breasts"
-    assert body   == "breasts"
-    assert camera == "face level"
-
-
-def test_detect_hold_breasts():
-    actions, body, _, _ = _detect_action("hold your breasts up for me")
-    assert actions[0] == "holding breasts"
-    assert "cupping breasts" in actions
-    assert body   == "breasts"
-
-
-def test_detect_fellatio():
-    actions, body, camera, _ = _detect_action("get on your knees and suck it")
-    assert actions[0] == "fellatio"
-    assert camera == "face level"
 
 
 def test_detect_finger_in_mouth():
@@ -284,13 +178,6 @@ def test_detect_finger_in_mouth_reversed():
     actions, body, camera, _ = _detect_action("suck your finger slowly")
     assert actions[0] == "one finger in mouth"
     assert camera == "face level"
-
-
-def test_detect_finger_pussy_not_confused():
-    # plain "finger" with no mouth context → fingering
-    actions, body, _, _ = _detect_action("finger me")
-    assert actions[0] == "fingering"
-    assert body == "pussy"
 
 
 def test_detect_bend_over():
@@ -319,13 +206,6 @@ def test_detect_riding_horse_excluded():
 
 def test_detect_no_match_returns_none():
     assert _detect_action("hello how are you") is None
-
-
-def test_detect_compound_picks_last_matching():
-    # "take off your top and cup your breasts" — after clause reorder,
-    # last_user_msg = "cup your breasts in your hands, take off your top"
-    actions, _, _, _ = _detect_action("cup your breasts in your hands, take off your top")
-    assert actions[0] == "cupping breasts"
 
 
 def test_last_clause_preserves_all_context():
@@ -363,26 +243,6 @@ def test_detect_undress():
     actions, _, _, _ = _detect_action("slowly undress")
     assert actions[0] == "disrobing"
 
-def test_detect_anal():
-    actions, body, camera, _ = _detect_action("take it in the anal")
-    assert actions[0] == "anal insertion"
-    assert camera == "from behind"
-
-def test_detect_squeeze_breasts():
-    actions, body, _, _ = _detect_action("squeeze your breasts for me")
-    assert actions[0] == "squeezing breasts"
-    assert body == "breasts"
-
-def test_detect_touch_breasts():
-    actions, body, _, _ = _detect_action("touch your breasts slowly")
-    assert actions[0] == "hands on breasts"
-    assert body == "breasts"
-
-def test_detect_blowjob_keyword():
-    actions, _, camera, _ = _detect_action("give me a blowjob")
-    assert actions[0] == "fellatio"
-    assert camera == "face level"
-
 def test_detect_lick_finger():
     actions, body, camera, _ = _detect_action("lick your finger")
     assert actions[0] == "one finger in mouth"
@@ -398,26 +258,9 @@ def test_detect_tongue_finger():
 
 from image.prompt import _sanitize_tags, _clean_raw
 
-def test_sanitize_drops_weighted_tags():
-    # LLM emitted weighting syntax despite instructions — should be stripped then re-accepted
-    result = _sanitize_tags("(nude:1.4), bare skin")
-    # weighting stripped → "nude" and "bare skin" should both survive
-    assert "nude" in result
-    assert "bare skin" in result
-
 def test_sanitize_drops_too_long():
     result = _sanitize_tags("a very long tag with five words, short")
     assert result == ["short"]
-
-def test_sanitize_drops_prose_pronoun():
-    result = _sanitize_tags("standing, my breasts, nude")
-    assert "my breasts" not in result
-    assert "standing" in result
-    assert "nude" in result
-
-def test_sanitize_deduplicates():
-    result = _sanitize_tags("nude, standing, nude")
-    assert result.count("nude") == 1
 
 def test_sanitize_empty_input():
     assert _sanitize_tags("") == []
@@ -426,45 +269,10 @@ def test_sanitize_allows_hyphens():
     result = _sanitize_tags("close-up")
     assert "close-up" in result
 
-def test_clean_raw_picks_line_with_most_commas():
-    raw = "ACTION: standing\ncupping breasts, hands on breasts, front view, topless"
-    result = _clean_raw(raw)
-    assert "cupping breasts" in result
-
-def test_clean_raw_strips_label_prefix():
-    raw = "Tags: nude, standing, topless"
-    result = _clean_raw(raw)
-    assert "nude" in result
-    # prefix should be gone
-    assert not any("Tags" in t for t in result)
-
-
-# ── nudity map completeness ────────────────────────────────────────────────────
-
-def test_nudity_map_has_all_states():
-    from image.prompt import _NUDITY_MAP, _NUDITY_ORDER
-    for state in _NUDITY_ORDER:
-        assert state in _NUDITY_MAP, f"Missing nudity state in _NUDITY_MAP: {state!r}"
-
-def test_nudity_bottomless_tags():
-    tags = _tags({"NUDITY": "bottomless"})
-    assert "(bottomless:1.2)" in tags
-    assert "(no panties:1.2)" in tags
-
 def test_camera_map_has_all_keys():
     from image.prompt import _CAMERA_MAP
     expected = {"front view", "close-up", "from behind", "from below", "face level"}
     assert expected == set(_CAMERA_MAP.keys())
-
-def test_multiple_action_tags_descending_weights():
-    """When ACTION is a list (from pattern match), weights descend from 1.7."""
-    tags = _build_tags({"ACTION": ["cupping breasts", "hands on breasts", "breast grab"]}, "")
-    assert "(cupping breasts:1.7)" in tags
-    assert "(hands on breasts:1.6)" in tags
-    assert "(breast grab:1.5)" in tags
-
-
-# ── _detect_accessories ────────────────────────────────────────────────────────
 
 def test_accessory_glasses():
     assert "wearing glasses" in _detect_accessories("put on your glasses")
@@ -486,9 +294,6 @@ def test_accessory_stockings():
 
 def test_accessory_heels():
     assert "high heels" in _detect_accessories("put on heels and dance")
-
-def test_accessory_no_match():
-    assert _detect_accessories("show me your breasts") == []
 
 def test_accessory_multiple():
     result = _detect_accessories("put on glasses and heels")

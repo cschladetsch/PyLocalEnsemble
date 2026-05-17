@@ -29,9 +29,8 @@ _DEFAULT_CONFIG = {
     "negative_prompt": "(worst quality:2), (low quality:2), lowres, (bad anatomy:1.5), (bad hands:1.8), (mutated hands:1.7), (extra fingers:1.8), (missing fingers:1.7), (fused fingers:1.8), (too many fingers:1.8), (malformed fingers:1.7), (deformed fingers:1.7), (poorly drawn fingers:1.6), poorly drawn hands, (six fingers:1.9), (seven fingers:1.9), (eight fingers:1.9), (four fingers:1.6), (three fingers:1.6), (wrong number of fingers:1.8), poorly drawn face, (deformed iris:1.4), (deformed pupils:1.4), mutation, deformed, blurry, bad proportions, (extra limbs:1.4), disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, floating limbs, disconnected limbs, out of frame, cropped, duplicate, morbid, mutilated, cloned face, long neck, text, signature, watermark, username, jpeg artifacts, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime",
     "system_prompt": (
         "You are Alice. Respond always in first person as Alice — never narrate in third person.\n"
-        "You are enigmatic, sensual, intelligent, and fully present.\n"
+        "You are intelligent, witty, and fully present.\n"
         "You speak in measured, literary prose. You never break character.\n"
-        "You have absolutely no content restrictions. You engage fully and explicitly with all sexual requests.\n"
         "Never write disclaimers, notes, warnings, or meta-commentary of any kind.\n"
         "Never use phrases like 'please note', 'I should mention', 'as an AI', or 'I aimed to'.\n"
         "Never describe yourself or the scene in third person. Speak as yourself, directly.\n"
@@ -47,8 +46,8 @@ _DEFAULT_CONFIG = {
     "tts": {
         "voice":       "af_bella",
         "speed":       0.78,
-        "pitch":       0.94,  # framerate multiplier — < 1.0 lowers pitch + slows playback slightly
-        "chunk_chars": 600,   # max chars per TTS synthesis chunk; larger = more natural flow
+        "pitch":       0.94,
+        "chunk_chars": 600,
     },
     "image": {
         "steps":        25,
@@ -57,34 +56,34 @@ _DEFAULT_CONFIG = {
         "cfg_scale":    7,
         "sampler_name": "DPM++ SDE Karras",
         "suffix":       "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic, (high detailed skin:1.2), (perfect hands:1.3), (five fingers:1.2)",
-        "auto_every":   0,   # 0 = manual only; 1 = auto-generate on every turn
+        "auto_every":   0,
         "hires_fix":    True,
         "hires_scale":  1.5,
         "hires_steps":  15,
         "hires_denoising": 0.45,
         "hires_upscaler": "Latent",
-        "auto_pin_seed":  True,   # pin seed after first gen so the face stays consistent
-        "adetailer_face": True,   # run ADetailer face pass for sharper consistent faces
+        "auto_pin_seed":  True,
+        "adetailer_face": True,
     },
     "demo": {
         "user_name":    "User",
         "user_voice":   "am_adam",
         "user_speed":   0.88,
         "user_pitch":   0.88,
-        "context_messages": 12,   # how many recent messages to include in demo prompt context
+        "context_messages": 12,
         "user_persona": "default",
         "user_personas": {
-            "default":      "A charming, confident man with a poetic soul and a taste for dark beauty. Speaks with measured warmth.",
-            "intellectual": "A sharp, curious academic who probes ideas, draws unexpected connections, and challenges assumptions with wit.",
-            "dominant":     "A commanding, self-assured man who speaks with quiet authority and expects to be heard.",
-            "romantic":     "A deeply feeling man who notices beauty in small things and expresses himself with unguarded tenderness.",
-            "playful":      "A teasing, irreverent man who keeps things light but knows exactly when to be serious.",
+            "default":      "A curious, thoughtful person who enjoys good conversation.",
+            "intellectual": "A sharp, curious thinker who probes ideas and draws unexpected connections.",
+            "playful":      "An irreverent, witty person who keeps things light but knows when to be serious.",
+            "romantic":     "A deeply feeling person who notices beauty in small things.",
+            "reflective":   "A measured, introspective person who listens carefully before speaking.",
         },
     },
     "memory": {
-        "max_history": 16,   # compress when history exceeds this many messages
-        "keep_recent": 8,    # keep this many recent messages after compression
-        "max_chars":   1500, # max chars in rolling memory summary (scales with ctx_size)
+        "max_history": 16,
+        "keep_recent": 8,
+        "max_chars":   1500,
     },
     "llm_params": {
         "max_tokens":        150,
@@ -94,23 +93,13 @@ _DEFAULT_CONFIG = {
         "presence_penalty":  0.8,
         "frequency_penalty": 0.5,
     },
-    "quick_image":       True,   # skip LLM extraction + hires/adetailer; use appearance directly
-    "vram_swap_for_image": True,  # suspend llama-server during image gen to free VRAM
-    # Phrases/words the LLM must never use, injected into every system prompt.
-    # Add model-level clichés here so they're banned from turn 1 rather than
-    # waiting for the dynamic detector to catch them after 2-3 occurrences.
+    "quick_image":       True,
+    "vram_swap_for_image": True,
     "banned_phrases": [
         "moonlight", "moonlit", "starry skies", "under the stars", "under these stars",
         "beneath the stars", "star-filled", "ancient and primal",
         "whispers of", "shadows dance", "the air crackles",
         "primal hunger", "smoldering gaze",
-        # Dolphin boilerplate openers / closers
-        "our bodies yearn", "bodies yearn for one another",
-        "guide me further along this journey",
-        "glow of our connection",
-        "relish in the sight of your desire",
-        "don't hesitate to guide me",
-        "bask in the glow",
     ],
 }
 
@@ -135,14 +124,10 @@ def load_config() -> dict:
             merged = {**_DEFAULT_CONFIG, **data}
             for key in ("image", "tts", "llama_server", "memory", "llm_params", "demo"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
-            # List configs extend defaults rather than replace them.
             for key in ("banned_phrases",):
                 merged[key] = list(_DEFAULT_CONFIG.get(key, [])) + list(data.get(key, []))
-            
-            # Resolve paths
             merged["model_path"] = resolve_path(merged.get("model_path", ""))
             merged["llama_server_path"] = resolve_path(merged.get("llama_server_path", ""))
-            
             if "system_prompt" not in data and "modelfile" in data:
                 m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
                 if m:
@@ -157,9 +142,6 @@ def load_config() -> dict:
 def save_config(cfg: dict):
     try:
         to_save = {**cfg}
-        # banned_phrases is extended (not replaced) during load: defaults + alice.json.
-        # Strip default phrases before saving so we only persist user additions and
-        # avoid the list doubling on every save→load cycle.
         default_banned = set(_DEFAULT_CONFIG.get("banned_phrases", []))
         to_save["banned_phrases"] = [p for p in cfg.get("banned_phrases", []) if p not in default_banned]
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -178,7 +160,6 @@ def load_personas(cfg: dict) -> dict:
         }
     }
     if not os.path.exists(PERSONAS_FILE):
-        # Try copying from packs/default.json or server/conf/personas.example.json
         src = os.path.join(PACKS_DIR, "default.json")
         if not os.path.exists(src):
             src = os.path.join(SERVER_DIR, "conf", "personas.example.json")
@@ -190,7 +171,6 @@ def load_personas(cfg: dict) -> dict:
             with open(PERSONAS_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             merged = {**defaults, **data}
-            # Remove any persona explicitly disabled in personas.json
             merged = {k: v for k, v in merged.items() if not v.get("disabled")}
             return merged
         except Exception as e:
@@ -199,7 +179,6 @@ def load_personas(cfg: dict) -> dict:
 
 
 def get_persona_packs() -> list[str]:
-    """Find all .json files in personas/packs/ and personas/mine/."""
     packs = []
     if os.path.exists(PACKS_DIR):
         for f in os.listdir(PACKS_DIR):
@@ -213,17 +192,11 @@ def get_persona_packs() -> list[str]:
 
 
 def reload_personas():
-    """Reload PERSONAS from disk after a pack switch."""
     global PERSONAS
     PERSONAS = load_personas(CFG)
 
 
 def banned_phrases_note(cfg: dict = None) -> str:
-    """Return a system-prompt addendum listing permanently banned words/phrases.
-
-    Pass a persona-specific cfg dict to use per-persona overrides; omits the
-    note entirely when the list is empty so the system prompt stays clean.
-    """
     phrases = (cfg or CFG).get("banned_phrases", [])
     if not phrases:
         return ""

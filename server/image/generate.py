@@ -51,9 +51,6 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
             raise RuntimeError(msg)
 
     negative = (extra_negative + ", " + negative_base) if extra_negative else negative_base
-    # Suppress checkpoint-specific makeup artefacts (many NSFW models default to heavy blue eye shadow)
-    if "blue eyeshadow" not in negative.lower():
-        negative = "blue eyeshadow, heavy eye makeup, colorful eyeshadow, " + negative
 
     quick_steps   = img_cfg.get("quick_steps",   max(img_cfg["steps"] // 2, 12))
     quick_sampler = img_cfg.get("quick_sampler", "DPM++ 2M Karras")
@@ -63,28 +60,7 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     _width   = img_cfg["width"]
     _height  = img_cfg["height"]
 
-    explicit_keywords = ["anal", "fingering", "insertion", "blowjob", "fellatio",
-                         "penetration", "nude", "naked", "nudity", "topless", "nsfw",
-                         "no clothes", "fully nude", "fully naked", "bare skin", "exposed skin",
-                         "take off clothes", "removing clothes", "disrobing", "pussy", "vagina",
-                         "vulva", "cunt", "asshole", "clitoris", "breasts bare", "clothed removed"]
-    nudity_keywords   = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
-                         "fully nude", "fully naked", "bare skin", "exposed skin",
-                         "take off clothes", "removing clothes", "disrobing", "undress",
-                         "pussy", "vagina", "vulva", "cunt", "asshole", "breasts bare"]
-
-    is_explicit = any(kw in prompt.lower() for kw in explicit_keywords)
-    nudity_keywords   = ["nude", "naked", "nudity", "topless", "no clothes", "no clothing",
-                         "fully nude", "fully naked", "bare skin", "exposed skin",
-                         "take off clothes", "removing clothes", "disrobing", "undress"]
-    is_nude = any(kw in prompt.lower() for kw in nudity_keywords)
-
-    if is_nude:
-        negative = ("clothed, dressed, clothing, dress, gown, robe, shirt, top, covered, "
-                    "fabric over body, bra, bra straps, bikini top, lingerie top, "
-                    "covered chest, fabric on chest, " + negative)
-
-    full_prompt = ("nsfw, " if is_explicit else "") + prompt + ", " + img_cfg["suffix"]
+    full_prompt = prompt + ", " + img_cfg["suffix"]
 
     print(f"\n[image] prompt ({len(full_prompt)} chars): {full_prompt!r}")
     mode = _c("cyan", "QUICK") if quick else _c("magenta", "FULL")

@@ -428,9 +428,8 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
             "STRICT RULES:\n"
             "1. Speak ONLY as yourself. Do NOT narrate for, speak for, or describe the actions of other personas.\n"
             "2. Focus exclusively on your own words and internal state.\n"
-            "3. Keep your response to 1-2 sentences. Be natural, sexy, and in character.\n"
-            "4. Let the conversation feel flirtatious and intimate rather than neutral.\n"
-            "5. Use correct pronouns for others based on their listed gender."
+            "3. Keep your response to 1-2 sentences. Be natural and in character.\n"
+            "4. Use correct pronouns for others based on their listed gender."
         )
 
     # Inject relationship memo(s) and current mood
@@ -492,17 +491,16 @@ def _build_chatter_messages(sender_key: str, target_key: str) -> list[dict]:
 
     if target_key == "all":
         directive = (
-            "Say something sexy, flirtatious, or sensually provocative to the group. "
-            "Keep it natural and in character. 1-2 sentences only."
+            "Say something natural and in character to the group. "
+            "Keep it spontaneous. 1-2 sentences only."
         )
     else:
         target_name = _personas[target_key].get("name", target_key)
         directive = (
-            f"Say something sexy, teasing, or intimate to {target_name} — "
-            "a spontaneous in-character remark. 1-2 sentences only."
+            f"Say something natural and in character to {target_name} -- "
+            "a spontaneous remark. 1-2 sentences only."
         )
     collapsed.append(["user", directive])
-
     messages = [{"role": "system", "content": sys_prompt}]
     messages.extend({"role": r, "content": c} for r, c in collapsed)
     return messages

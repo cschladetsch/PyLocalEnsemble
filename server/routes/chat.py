@@ -43,14 +43,7 @@ async def chat(body: ChatRequest):
 
         # --- Phase 2: normal chat ---
         try:
-            # Rewrite "verb your <body>" → "verb your own <body>" so the model
-            # cannot misread self-action commands as acting on the user.
-            effective_msg = re.sub(
-                r'\b(suck|lick|touch|rub|stroke|squeeze|finger|spread|grab|cup|pinch|'
-                r'caress|massage|insert|bite|tease|flick|pull|twist)\b(\s+your\b)(?!\s+own\b)',
-                r'\1\2 own',
-                body.message, flags=re.IGNORECASE
-            )
+            effective_msg = body.message
             llm.history.append({"role": "user", "content": effective_msg})
             sys_prompt = state.SYSTEM_PROMPT + "\n\nMatch reply length to the message. A casual greeting or one-liner: one sentence only. A question or request: two sentences maximum. Never lecture, philosophize, or ask multiple questions back." + config.banned_phrases_note()
             if llm.memory:
@@ -166,17 +159,6 @@ async def chat(body: ChatRequest):
                 r'^Oh,?\s+how\s+I\b[^.!?]{0,120}[,.]?\s*my\s+(?:dear\s+)?love[.!]?\s*',
                 '', reply, flags=re.IGNORECASE
             ).strip()
-            # Strip Dolphin boilerplate closers that survive banned_phrases injection
-            reply = re.sub(
-                r'\s*(This intimate act connects us.*|'
-                r'binding us together with.*|'
-                r'It\'?s an act (?:of pure pleasure|that connects).*|'
-                r'a (?:sensual )?dance (?:of passion|between us).*|'
-                r'[Aa]s we bask in the glow.*|'
-                r'[Oo]ur bodies yearn.*|'
-                r'[Dd]on\'t hesitate to guide me.*)',
-                '', reply, flags=re.DOTALL | re.IGNORECASE
-            ).strip()
             reply = re.sub(
                 r'\s*(Please note\b|Note that\b|I should mention\b|I\'ve aimed\b|I have aimed\b|'
                 r'I want to note\b|It\'s worth noting\b|As an AI\b|I\'m an AI\b|'
@@ -202,30 +184,26 @@ async def chat(body: ChatRequest):
             # Clear any stale pre-extracted prompt so image gen re-extracts fresh.
             state._pre_sd_prompt   = None
             state._pre_sd_negative = ""
-            state._pre_sd_nudity   = None
 
             # Pre-extract the SD prompt now (while the LLM is still alive) so that
             # clicking Image skips the extraction step and starts the VRAM swap immediately.
             if not state.GROUP_ACTIVE:
                 _ctx_snap    = state.get_image_context()
                 _user_snap   = state._img_ctx_recent[-1][0] if state._img_ctx_recent else effective_msg
-                _nudity_snap = state._nudity_state
                 _p_key       = state._active_persona_key or "Alice"
                 _appear_snap = config.PERSONAS.get(_p_key, {}).get("appearance", state.ALICE_APPEARANCE)
 
                 def _pre_extract():
                     try:
                         from image.prompt import extract_sd_prompt as _extract
-                        prompt, nudity = _extract(
+                        prompt, _ = _extract(
                             _ctx_snap,
                             appearance=_appear_snap,
                             last_user_msg=_user_snap,
                             persona="",
-                            nudity_floor=_nudity_snap,
                         )
                         if prompt:
                             state._pre_sd_prompt   = prompt
-                            state._pre_sd_nudity   = nudity
                             state._pre_sd_negative = ""
                             print(f"[chat] pre-extracted SD prompt ({len(prompt)} chars)")
                     except Exception as _e:

@@ -137,15 +137,12 @@ async def clear_history():
 
 @router.delete("/persona/{name}/reset")
 async def reset_persona(name: str):
-    """Clear chat history, growth data, and nudity/image state for a persona."""
+    """Clear chat history, growth data, and image state for a persona."""
     from routes import group as _grp
     llm.clear_history()
     _grp.reset_persona_growth(name)
-    state._nudity_state               = "clothed"
-    state._nudity_turns_since_keyword = 0
-    state._pre_sd_prompt              = None
-    state._pre_sd_nudity              = None
-    state._pre_sd_negative            = ""
+    state._pre_sd_prompt   = None
+    state._pre_sd_negative = ""
     state.clear_image_context()
     return JSONResponse({"status": "reset", "persona": name})
 

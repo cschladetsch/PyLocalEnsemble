@@ -408,10 +408,10 @@ def test_build_chatter_all_target_directive(two_personas_loaded):
     assert "group" in msgs[-1]["content"].lower()
 
 
-def test_build_chatter_all_target_is_sexy(two_personas_loaded):
-    msgs = grp._build_chatter_messages(two_personas_loaded[0], "all")
-    assert "sexy" in msgs[-1]["content"].lower() or "flirtatious" in msgs[-1]["content"].lower()
-
+def test_build_chatter_all_target_has_directive(two_personas_loaded):
+    msgs = _build_chatter_messages("alice", "all")
+    last = msgs[-1]["content"].lower()
+    assert "in character" in last or "spontaneous" in last
 
 def test_build_chatter_specific_target_names_persona(two_personas_loaded):
     key1, key2 = two_personas_loaded

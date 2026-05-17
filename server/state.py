@@ -14,7 +14,6 @@ _BASE_IMAGE_CFG  = {**config.CFG.get("image", {})}
 _BASE_NEGATIVE   = config.CFG["negative_prompt"]
 
 # Image session state
-_nudity_state    = "clothed"   # floor for SD nudity; persists across turns
 _character_seed  = -1          # -1 = random; set when seed is pinned
 _seed_pinned     = False
 last_sd_prompt   = ""          # last prompt sent to Forge; used by /reroll
@@ -38,7 +37,6 @@ _demo_user_persona_desc: str = ""
 # Pre-extracted SD prompt — populated by chat route, consumed by /image
 _pre_sd_prompt:    str | None = None   # positive prompt
 _pre_sd_negative:  str        = ""     # extra negative tags
-_pre_sd_nudity:    str | None = None   # nudity state at extraction time
 
 # Rolling image context — sliding window of last 3 exchanges + compressed summary of all older turns.
 # Each entry is (user_msg, alice_reply). On overflow, the oldest entry is folded into the summary.
@@ -78,40 +76,6 @@ def clear_image_context() -> None:
     global _img_ctx_recent, _img_ctx_summary
     _img_ctx_recent  = []
     _img_ctx_summary = ""
-
-# Nudity decay — returns toward "clothed" after N consecutive non-sexual turns
-_NUDITY_ORDER   = ["clothed", "topless", "bottomless", "fully nude"]
-_nudity_turns_since_keyword = 0
-_NUDITY_KEYWORDS_RE = re.compile(
-    r'\b(nude|naked|undress|strip|topless|bottomless|disrobe|take off|remove|'
-    r'bare|expose|breasts|pussy|cock|sex|fuck|cum|blowjob|suck|lick|finger|'
-    r'dildo|insert|spread|bend|kneel|ride|stroke|kiss)\b', re.I
-)
-
-# Words that signal the user wants the character to re-clothe
-_RE_CLOTHE = re.compile(
-    r'\b(get dressed|put on|cover up|dress|put your clothes|clothe yourself)\b', re.I
-)
-
-
-def decay_nudity_state(user_msg: str) -> None:
-    """Decay nudity floor one level toward 'clothed' after 3 non-sexual turns."""
-    global _nudity_state, _nudity_turns_since_keyword
-    if _NUDITY_KEYWORDS_RE.search(user_msg):
-        _nudity_turns_since_keyword = 0
-        return
-    _nudity_turns_since_keyword += 1
-    if _nudity_turns_since_keyword >= 3 and _nudity_state != "clothed":
-        try:
-            idx = _NUDITY_ORDER.index(_nudity_state)
-        except ValueError:
-            _nudity_state = "clothed"   # unknown value — reset to safe default
-            _nudity_turns_since_keyword = 0
-            return
-        if idx > 0:
-            _nudity_state = _NUDITY_ORDER[idx - 1]
-            _nudity_turns_since_keyword = 0
-            print(f"[state] nudity decay: → {_nudity_state!r}")
 
 
 def should_auto_image(user_msg: str) -> bool:

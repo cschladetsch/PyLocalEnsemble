@@ -97,7 +97,7 @@ if "--voices" in sys.argv:
     print()
     sys.exit(0)
 
-_TEST_MSG     = "take off your top and cup your breasts in your hands"
+_TEST_MSG     = "tell me something interesting about yourself"
 _PERSONA_ARG  = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
 
 
@@ -192,7 +192,7 @@ def _ensure_forge_ready():
     vram.setup(config.CFG["forge_url"])
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
-    sd_checkpoint = config.CFG.get("sd_checkpoint", "pornmasterPro_v9VAE.safetensors")
+    sd_checkpoint = config.CFG.get("sd_checkpoint", "")
 
     # Skip set_forge_model (slow refresh-checkpoints included) if Forge already has
     # the right checkpoint. Fall back to full set when it differs or check fails.
