@@ -99,7 +99,7 @@ def _start_server():
         "--threads",    str(sc["threads"]),
     ]
     if sc.get("chat_template"):
-        flags += ["--chat-template", sc["chat_template"]]
+        flags += ["--no-jinja", "--chat-template", sc["chat_template"]]
     log_dir = os.path.join(os.path.dirname(__file__), "log")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "llama-server.log")

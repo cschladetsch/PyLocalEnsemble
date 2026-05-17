@@ -14,6 +14,7 @@ from installer.llama        import install_llama_server
 from installer.model        import setup_model
 from installer.tts_install  import install_tts_models
 from installer.forge_install import install_forge
+from installer.fonts_install import install_fonts
 
 # Re-export for tests: from install import _pick_llama_asset
 from installer.llama import _pick_llama_asset  # noqa: F401
@@ -56,6 +57,7 @@ def main():
 
     install_tts_models()
     install_forge(cfg)
+    install_fonts()
 
     print("\n" + "=" * 50)
     print("  Installation complete!")

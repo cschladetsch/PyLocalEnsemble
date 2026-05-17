@@ -4,7 +4,7 @@ from installer.helpers import MIN_PYTHON, REQ_FILE, Spinner, heading, ok, die
 
 
 def check_python():
-    heading("1/6", "Python version")
+    heading("1/7", "Python version")
     v = sys.version_info[:2]
     if v < MIN_PYTHON:
         die(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ required, found {v[0]}.{v[1]}")
@@ -12,7 +12,7 @@ def check_python():
 
 
 def install_packages():
-    heading("2/6", "Python packages")
+    heading("2/7", "Python packages")
     if os.path.exists(REQ_FILE):
         with Spinner("pip install -r requirements.txt"):
             subprocess.check_call([sys.executable, "-m", "pip", "install",

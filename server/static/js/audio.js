@@ -6,9 +6,14 @@ let _audioCtx = null, _nextStart = 0, _ttsNodes = [], _ttsGen = 0;
 let _lastChunks = [];   // decoded AudioBuffers from last speak() for instant resay
 let _groupSpeeches = [];
 let _groupMomentum = {};
+let _ttsAbort = null;   // AbortController for the active /tts/stream fetch
 
 function _stopTts() {
   _ttsGen++;                    // invalidates any in-flight speak() loops
+  if (_ttsAbort) {              // abort the active fetch so the server stops synthesizing
+    try { _ttsAbort.abort(); } catch {}
+    _ttsAbort = null;
+  }
   _ttsNodes.forEach(n => { try { n.stop(0); } catch {} });
   _ttsNodes = [];
   _nextStart = 0;
@@ -98,6 +103,8 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
   _lastChunks = [];             // discard cached chunks — new speech incoming
   lastReplyText = text;
   const gen = _ttsGen;          // snapshot — if _stopTts() fires, gen !== _ttsGen
+  _ttsAbort = new AbortController();
+  const myAbort = _ttsAbort;    // capture so a later speak() doesn't change which one we use
   try {
     const body = { text };
     if (voice   !== null) body.voice   = voice;
@@ -107,7 +114,8 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
     const res = await fetch('/tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: myAbort.signal
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -133,7 +141,12 @@ async function speak(text, voice = null, speed = null, pitch = null, effects = n
         }
       }
     }
-  } catch (e) { if (gen === _ttsGen) console.warn('TTS stream error:', e); }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (gen === _ttsGen) console.warn('TTS stream error:', e);
+  } finally {
+    if (_ttsAbort === myAbort) _ttsAbort = null;
+  }
 }
 
 // Like speak() but chains audio after current playback without resetting TTS state.
@@ -142,6 +155,9 @@ async function speakChain(text, voice = null, speed = null, pitch = null, effect
   if (muted || !text.trim()) return;
   const gen = _ttsGen;
   lastReplyText = lastReplyText ? lastReplyText + ' ' + text : text;
+  // Reuse the active speak()'s AbortController so Stop cancels chained streams too.
+  if (!_ttsAbort) _ttsAbort = new AbortController();
+  const myAbort = _ttsAbort;
   try {
     const body = { text };
     if (voice   !== null) body.voice   = voice;
@@ -151,7 +167,8 @@ async function speakChain(text, voice = null, speed = null, pitch = null, effect
     const res = await fetch('/tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: myAbort.signal
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -174,7 +191,12 @@ async function speakChain(text, voice = null, speed = null, pitch = null, effect
         }
       }
     }
-  } catch (e) { if (gen === _ttsGen) console.warn('TTS chain error:', e); }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (gen === _ttsGen) console.warn('TTS chain error:', e);
+  } finally {
+    if (_ttsAbort === myAbort) _ttsAbort = null;
+  }
 }
 
 async function loadVoices() {

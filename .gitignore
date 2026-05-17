@@ -13,6 +13,7 @@ history.json
 history_*.json
 history_group_*.json
 group_growth.json
+/.grok
 /.claude
 /backups
 /models
@@ -27,3 +28,6 @@ log/
 /personas/packs/mine.json
 
 /pull_other.sh
+
+# Web fonts — downloaded by installer (see server/installer/fonts_install.py)
+/server/static/fonts/

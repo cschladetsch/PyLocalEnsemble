@@ -14,6 +14,7 @@ async def list_personas():
         font_key = p.get("font_key", name.lower().replace(" ", "-"))
         personas.append({
             "name": name,
+            "label": p.get("name", name),
             "gender": p.get("gender", "female"),
             "font_key": font_key
         })

@@ -170,7 +170,7 @@ async function loadPersonas() {
   const info = await infoRes.json();
   const sel = document.getElementById('persona-select');
   if (sel) {
-    sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+    sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.label || p.name}</option>`).join('');
     d.personas.forEach(p => { _personaFontKeys[p.name] = p.font_key; });
     if (info.active_persona && sel.querySelector(`option[value="${info.active_persona}"]`)) {
       sel.value = info.active_persona;
@@ -182,7 +182,7 @@ async function loadPersonas() {
     resetSel.innerHTML =
       '<option value="" disabled selected>Reset…</option>' +
       '<option value="__all__">All personas</option>' +
-      d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+      d.personas.map(p => `<option value="${p.name}">${p.label || p.name}</option>`).join('');
   }
 }
 

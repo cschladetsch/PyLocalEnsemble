@@ -144,7 +144,6 @@ gantt
 - [x] `installer/` package — split into `helpers`, `packages`, `llama`, `model`, `tts_install`, `forge_install`
 - [x] `conf/` directory — example configs out of root
 - [x] Expanded regression suite across config, image utils, installer, API endpoints, logging, and runtime error paths (394 tests total)
-- [x] 4 built-in personas: Egyptian Goddess, Victorian Lady, Android, Forest Witch
 - [x] Image fix: nude characters no longer render clothed (clothing stripped from appearance when nudity detected)
 - [x] Image fix: `/image` no longer returns 400 after persona switch (history cleared)
 - [x] Delete key removes current image from disk and session history

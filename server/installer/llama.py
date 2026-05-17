@@ -36,7 +36,7 @@ def _pick_llama_asset(assets: list) -> dict | None:
 
 
 def install_llama_server(cfg: dict):
-    heading("3/6", "llama.cpp server")
+    heading("3/7", "llama.cpp server")
 
     exe = _llama_server_exe()
     if exe:

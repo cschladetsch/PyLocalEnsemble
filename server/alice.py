@@ -3,6 +3,15 @@
 import subprocess, sys, os, time, threading, webbrowser
 import requests as req
 
+# On Windows the console defaults to cp1252, which crashes on any non-Latin-1
+# character (e.g. ≤, em-dash, philosophers' symbols) that the LLM may emit.
+if os.name == "nt":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
 from logging_setup import init_logging
 
 # ── Windows CUDA DLL path fix ─────────────────────────────────────────────────
@@ -231,7 +240,7 @@ def _startup():
 
     _ensure_llm_ready()
 
-    if not state._active_persona_key:
+    if not state._active_persona_key or state._active_persona_key not in config.PERSONAS:
         state._active_persona_key = next(iter(config.PERSONAS), config.NAME)
 
     llm.load_history()

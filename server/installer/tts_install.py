@@ -7,7 +7,7 @@ _TTS_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download
 
 
 def install_tts_models():
-    heading("5/6", "TTS models (Kokoro)")
+    heading("5/7", "TTS models (Kokoro)")
     os.makedirs(TTS_DIR, exist_ok=True)
     model_path  = os.path.join(TTS_DIR, "kokoro-v0_19.onnx")
     voices_path = os.path.join(TTS_DIR, "voices.bin")

@@ -151,16 +151,9 @@ def save_config(cfg: dict):
 
 
 def load_personas(cfg: dict) -> dict:
-    defaults = {
-        "Alice": {
-            "system_prompt": cfg["system_prompt"],
-            "appearance":    cfg["appearance"],
-            "gender":        "female",
-            "font_key":      "default",
-        }
-    }
     if not os.path.exists(PERSONAS_FILE):
-        src = os.path.join(PACKS_DIR, "default.json")
+        # First-run seed: philosophers pack. Alice now lives only in mine.json.
+        src = os.path.join(PACKS_DIR, "philosophers.json")
         if not os.path.exists(src):
             src = os.path.join(SERVER_DIR, "conf", "personas.example.json")
         if os.path.exists(src):
@@ -170,12 +163,11 @@ def load_personas(cfg: dict) -> dict:
         try:
             with open(PERSONAS_FILE, encoding="utf-8") as f:
                 data = json.load(f)
-            merged = {**defaults, **data}
-            merged = {k: v for k, v in merged.items() if not v.get("disabled")}
-            return merged
+            data = {k: v for k, v in data.items() if not v.get("disabled")}
+            return data
         except Exception as e:
             print(f"WARNING: could not load personas.json: {e}")
-    return defaults
+    return {}
 
 
 def get_persona_packs() -> list[str]:

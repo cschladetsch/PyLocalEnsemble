@@ -1,6 +1,8 @@
-# Alice
+# PyLocalEnsemble
 
-A local AI companion with streaming chat, voice, mic input, and contextual image generation. Everything runs on your own hardware — no cloud, no API keys, no subscriptions.
+A local AI companion with streaming chat, voice, mic input, and contextual image generation. Everything runs on your own hardware — no cloud, no API keys, no subscriptions. Think of Alice as 'The Orchestrator.
+
+When you may read 'Alice' - that is the original name. Consider it a place holder for the idea of 'The Orchestrator', who also has its own persona.
 
 Powered by:
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) — local LLM inference via OpenAI-compatible server (GGUF, GPU-accelerated)

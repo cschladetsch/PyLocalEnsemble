@@ -88,7 +88,7 @@ def install_adetailer():
 
 
 def install_forge(cfg: dict):
-    heading("6/6", "Stable Diffusion Forge")
+    heading("6/7", "Stable Diffusion Forge")
 
     if not os.path.exists(FORGE_BAT):
         info("cloning Stable Diffusion Forge (large repo, may take several minutes) ...")

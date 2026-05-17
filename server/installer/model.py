@@ -53,7 +53,7 @@ INTERACTIVE = sys.stdin.isatty()
 
 
 def setup_model(cfg: dict):
-    heading("4/6", "Model")
+    heading("4/7", "Model")
 
     model_path = cfg.get("model_path", "")
     if model_path and os.path.exists(model_path):

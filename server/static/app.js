@@ -544,7 +544,7 @@ async function loadPersonas() {
   const d    = await persRes.json();
   const info = await infoRes.json();
   const sel = document.getElementById('persona-select');
-  sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  sel.innerHTML = d.personas.map(p => `<option value="${p.name}">${p.label || p.name}</option>`).join('');
   d.personas.forEach(p => { _personaFontKeys[p.name] = p.font_key; });
   // Sync dropdown to whatever persona the server is currently on
   if (info.active_persona && sel.querySelector(`option[value="${info.active_persona}"]`)) {
@@ -556,7 +556,7 @@ async function loadPersonas() {
     resetSel.innerHTML =
       '<option value="" disabled selected>Reset…</option>' +
       '<option value="__all__">All personas</option>' +
-      d.personas.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+      d.personas.map(p => `<option value="${p.name}">${p.label || p.name}</option>`).join('');
   }
 }
 
@@ -1134,7 +1134,7 @@ async function _startGroupMode() {
   const container = document.getElementById('group-personas');
   container.innerHTML = d.personas.map(p =>
     `<span class="group-persona-chip checked" data-key="${p.name}" onclick="_toggleGroupChip(this)">
-       ${p.name}
+       ${p.label || p.name}
      </span>`
   ).join('');
 
