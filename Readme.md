@@ -490,6 +490,7 @@ alice/
 │
 ├── personas/                 ← persona management
 │   ├── packs/                ← shared persona sets (git-tracked)
+│   │   ├── philosopers.json  ← Philosophers spanning 23 centuries
 │   │   └── senate.json       ← the Roman Senate expansion pack
 │   └── mine/                 ← personal customizations & backups (gitignored)
 │
