@@ -555,7 +555,7 @@ This effectively "reboots" your relationship with that persona while leaving oth
 Alice supports modular persona sets via the **Packs** dropdown in the header.
 
 ### Directory Structure
-- **`personas/packs/`**: Shared, community persona sets included in the repository. (e.g., `default.json`, `senate.json`).
+- **`personas/packs/`**: Shared, community persona sets included in the repository. (e.g., `senate.json`).
 - **`personas/mine/`**: Your personal customizations. Files placed here will appear in the dropdown with a `mine/` prefix and are **never committed to Git**.
 - **`personas.json`**: The active persona list. This is always a copy of a pack.
 
@@ -566,6 +566,16 @@ When you select a new pack from the UI:
 3. The UI reloads instantly with the new characters, fonts, and voices.
 
 This ensures you can experiment with new persona sets (like the **Roman Senate** pack) without losing your tailored configurations.
+
+### Default  Packs
+
+#### The Philosophers (philosophers.json)
+Six thinkers across twenty-three centuries who disagree about almost everything. Socrates asks questions that dismantle certainties. Nietzsche hammers idols. Diogenes dismisses the entire exercise and eats lunch. De Beauvoir is the sharpest mind in the room and has no patience for bad faith. Spinoza proves things geometrically and finds the drama baffling. William James wants to know what actually works.
+Group chat puts them in direct conversation. The dynamics are immediate and unstable in exactly the right way.
+
+#### The Roman Senate (senate.json)
+Rome at the moment it is about to break. Caesar is charming and dangerous. Cicero uses ten words where one would do and is usually right. Cato is incorruptible and impossible. Mark Antony is the soldier everyone underestimates. Servilia moves through the shadows pulling strings no one else can see. Fulvia acts without asking permission.
+Six people who shaped the ancient world, three of whom will be dead within a decade of where this conversation is set.
 
 ---
 
@@ -759,7 +769,7 @@ flowchart TD
     Msg --> Extract[LLM extracts structured SD fields\nACTION / BODY / CAMERA / POSE / LIGHTING / EXTRA]
 
     Extract --> Pattern[_detect_action — pattern-match body+camera hints]
-    Extract --> Acc[_detect_accessories — glasses / heels / choker…]
+    Extract --> Acc[_detect_accessories — glasses / hat / scarf / gloves…]
 
     Pattern --> Build[_build_tags — weighted SD tag string]
     Acc --> Build
