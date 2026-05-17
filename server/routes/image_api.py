@@ -98,7 +98,7 @@ def _short_group_appearance(app_str: str, limit: int = 8) -> str:
 def _build_group_scene_appearance(personas: dict) -> str:
     """Build explicit multi-person scene tags so SD keeps personas separate."""
     count = len(personas)
-    count_tag = f"{count}girls" if count != 1 else "1girl"
+    count_tag = f"{count}people" if count != 1 else "1people"
     base_tags = [
         count_tag,
         "group scene",
