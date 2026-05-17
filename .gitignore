@@ -24,3 +24,5 @@ __pycache__/
 log/
 /core/target/
 /notes.md
+/personas/packs/mine.json
+
