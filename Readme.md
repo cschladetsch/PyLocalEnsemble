@@ -428,7 +428,7 @@ Click **Demo** to start. The button shows the current turn count (`Demo: ON (4)`
 
 The **Type dropdown** (left of the Demo button) controls how the generated user-side messages are written. Five personas are built in (`default`, `intellectual`, `dominant`, `romantic`, `playful`); add your own in `alice.json` under `demo.user_personas`.
 
-The user side is spoken in a separate male voice (`am_adam` by default) with independent speed and pitch settings, both configurable in `alice.json`. Demo pauses for a random 1.5–4s between turns and builds conversational intensity across a five-stage arc (opening → warming up → building → intimate → deeply connected). Typing into the chat input or clicking Stop ends the demo immediately.
+The user side is spoken in a separate male voice (`am_adam` by default) with independent speed and pitch settings, both configurable in `alice.json`. Demo pauses for a random 1.5–4s between turns and builds conversational intensity across a five-stage arc (opening → warming up → building → sustained → deeply connected). Typing into the chat input or clicking Stop ends the demo immediately.
 
 ### Model switcher
 
@@ -490,7 +490,6 @@ alice/
 │
 ├── personas/                 ← persona management
 │   ├── packs/                ← shared persona sets (git-tracked)
-│   │   ├── default.json      ← the standard starting set
 │   │   └── senate.json       ← the Roman Senate expansion pack
 │   └── mine/                 ← personal customizations & backups (gitignored)
 │
