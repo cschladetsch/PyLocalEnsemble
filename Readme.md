@@ -216,26 +216,17 @@ To make extra checkpoint directories visible to Forge, set `sd_models_dir` in `a
 
 ## Personas
 
-Four personas are included out of the box. Switch between them using the dropdown in the header. History is preserved across switches — a styled divider marks the transition. The SD checkpoint, TTS voice, and UI font switch automatically. The last reply is re-spoken with the new persona's voice immediately after switching.
+Switch between different groups of personas using the dropdown in the header. History is preserved across switches — a styled divider marks the transition. The SD checkpoint, TTS voice, and UI font switch automatically. The last reply is re-spoken with the new persona's voice immediately after switching.
 
-| Persona | Character |
-|---------|-----------|
-| Default | Alice — enigmatic, sensual, literary |
-| Egyptian Goddess | Nefertari — ancient, regal, divine |
-| Victorian Lady | Isabelle — aristocratic, wickedly composed |
-| Android | ARIA — synthetic, precise, curious |
-| Forest Witch | Morrigan — wild, primal, ancient |
-| **Expansion Pack** | **Roman Senate** — Caesar, Cicero, Cato, and more |
-
-Alice's opening line is randomly chosen from a pool of 12 variations on each page load and after clearing history.
+Main persona's opening line is randomly chosen from a pool of 12 variations on each page load and after clearing history.
 
 Add your own in `personas.json` (created from `conf/personas.example.json` on first run):
 
 ```json
 {
-    "Noir": {
+    "Dick Tracy": {
         "system_prompt": "You are a hard-boiled detective ...",
-        "appearance": "woman, dark hair, trench coat, film noir lighting"
+        "appearance": "man, dark hair, trench coat, film noir lighting"
     }
 }
 ```
@@ -246,7 +237,7 @@ To remove a persona from the UI (including the Group Chat picker), add `"disable
 
 ```json
 {
-    "Alice": { "disabled": true }
+    "Dick Tracy": { "disabled": true }
 }
 ```
 
@@ -265,7 +256,7 @@ From the UI, select **Group** and choose which personas to include. All selected
 From the API:
 
 ```
-POST /group/start   {"personas": ["Alice", "Morrigan", "Isabelle"]}
+POST /group/start   {"personas": ["Dick Tracy", "Freddy Four Fingers", "Joe the Cop"]}
 POST /group/chat    {"message": "Tell me what you all think of each other."}
 GET  /group/history
 POST /group/stop
@@ -400,9 +391,7 @@ Alice will wear accessories mentioned in your message. Recognised terms:
 | glasses / spectacles | `(wearing glasses:1.3)` |
 | sunglasses | `(wearing sunglasses:1.3)` |
 | hat / cap / beret | `(wearing hat:1.3)` |
-| choker / collar | `(choker necklace:1.3)` |
-| stockings / thigh-highs | `(thigh-high stockings:1.3)` |
-| heels / stilettos | `(high heels:1.3)` |
+| etc... | ... |
 
 ### Seed pinning
 
@@ -414,8 +403,8 @@ Use the **Image** button or type a command:
 
 ```
 /image
-/image candlelight, close up, warm glow
-/image no blur, no shadows
+/image backstreet, raining, neon glow
+/image no blur
 /auto-image
 ```
 
@@ -536,7 +525,7 @@ The `banned_phrases` list in `alice.json` lets you permanently block specific cl
 
 ```json
 "banned_phrases": [
-    "moonlight", "shadows dance", "primal hunger", "as an AI"
+    "moonlight", "as an AI", etc
 ]
 ```
 
@@ -846,7 +835,7 @@ Look for `WARNING: TTS models not found — run install.py` in the terminal. Run
 ### Out of VRAM
 - Reduce `llama_server.n_gpu_layers` in `alice.json` (try 20 or lower)
 - Reduce image `width`/`height` to 512×512
-- Use a smaller quantised model (Q4_K_S instead of Q4_K_M)
+- Use a smaller quantised model (Q4\_K\_S instead of Q4\_K\_M)
 
 ### Images not generating
 - Visit `http://localhost:7860` — Forge should be running
