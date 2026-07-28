@@ -116,16 +116,24 @@ def _try_connect(silent=False) -> bool:
     global LLM_READY
     try:
         r = req.get(f"{LLAMA_URL}/health", timeout=3)
-        if r.json().get("status") == "ok":
+        if r.status_code == 200 and r.json().get("status") == "ok":
             LLM_READY = True
             ok(f"llama.cpp server ready at {LLAMA_URL}")
             return True
-        return False
+    except Exception:
+        pass
+    # Fallback for OpenAI-compatible servers (e.g. Ollama) that don't
+    # expose /health but do expose /v1/models when actually serving.
+    try:
+        r = req.get(f"{LLAMA_URL}/v1/models", timeout=3)
+        if r.status_code == 200:
+            LLM_READY = True
+            ok(f"LLM server ready at {LLAMA_URL} (OpenAI-compatible)")
+            return True
     except Exception as e:
         if not silent:
-            warn(f"llama.cpp server not reachable: {e}")
-        return False
-
+            warn(f"LLM server not reachable: {e}")
+    return False
 
 def wait_until_ready(timeout: int = 120) -> bool:
     if LLM_READY:
