@@ -79,10 +79,10 @@ def _push_forge_settings(forge_url: str) -> None:
         "samples_format":              "png",
     }
     try:
-        known = set(req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json().keys())
+        known = set(req.get(f"{forge_url}/sdapi/v1/options", timeout=10).json().keys())
         settings = {k: v for k, v in desired.items() if k in known}
         if settings:
-            r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+            r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=30)
             if r.status_code != 200:
                 warn(f"Forge settings push returned HTTP {r.status_code}")
         skipped = set(desired) - settings.keys()
@@ -105,7 +105,7 @@ def set_forge_model(name: str, refresh: bool = False) -> bool:
     forge_url = config.CFG["forge_url"]
     try:
         if refresh:
-            req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=30)
+            req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=90)
         r = req.get(f"{forge_url}/sdapi/v1/sd-models", timeout=5)
         models = [m["title"] for m in r.json()]
         match  = next((m for m in models if name in m), None)
@@ -130,7 +130,7 @@ def restart_forge():
     """Ask Forge to restart via its API (picks up newly installed extensions)."""
     forge_url = config.CFG["forge_url"]
     try:
-        req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=10)
+        req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=100)
     except Exception:
         pass  # connection reset is expected on restart
     if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=10):
@@ -151,7 +151,7 @@ def warmup_forge() -> None:
             "cfg_scale": 1,
             "seed": 42,
             "override_settings": {"samples_save": False, "grid_save": False},
-        }, timeout=120)
+        }, timeout=220)
         if r.ok:
             ok("Forge warmup done — model in VRAM.")
         else:
@@ -227,7 +227,7 @@ def start_forge() -> bool:
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
 
     subprocess.Popen(launcher, **kw)
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=4):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=600, delay=8):
         warn("Forge did not start in time - images won't generate.")
         return False
     # Push keep_in_cpu=False as early as possible so the auto-loaded checkpoint
