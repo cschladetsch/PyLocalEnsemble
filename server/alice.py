@@ -3,6 +3,11 @@
 import subprocess, sys, os, time, threading, webbrowser
 import requests as req
 
+# Startup timing — measure how long each phase takes so we can tune caching.
+_START_TIME = time.monotonic()
+def _elapsed(label: str = "") -> str:
+    return f"[{int(time.monotonic() - _START_TIME)}s] {label}"
+
 # On Windows the console defaults to cp1252, which crashes on any non-Latin-1
 # character (e.g. ≤, em-dash, philosophers' symbols) that the LLM may emit.
 if os.name == "nt":
@@ -183,6 +188,7 @@ def _ensure_llm_ready(timeout: int = 120):
     import vram
     vram.notify_llm_ready()
     vram.log_resources("LLM ready")
+    print(_elapsed("LLM ready"))
 
 
 def _ensure_tts_ready():
@@ -201,6 +207,7 @@ def _ensure_forge_ready():
     vram.setup(config.CFG["forge_url"])
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
+    print(_elapsed("Forge started"))
     sd_checkpoint = config.CFG.get("sd_checkpoint", "")
 
     # Skip set_forge_model (slow refresh-checkpoints included) if Forge already has

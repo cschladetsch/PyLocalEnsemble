@@ -1,8 +1,63 @@
 """Forge process lifecycle: start, stop, model selection, Python detection."""
-import os, platform, subprocess
+import os, platform, subprocess, time
 import requests as req
 import config
 from utils import step, ok, warn, http_ok, wait_for
+
+# ── Forge warmup state cache ──────────────────────────────────────────────────
+# Record when the checkpoint was last warmed up so a subsequent startup can
+# skip the redundant 1-step warmup if Forge is already running with the
+# right checkpoint hot in VRAM.
+_FORGE_WARMED_FILE = os.path.join(config.SERVER_DIR, ".forge_warmed")
+
+def _forge_warmed_timestamp() -> float:
+    try:
+        with open(_FORGE_WARMED_FILE, "r", encoding="utf-8") as f:
+            return float(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return 0.0
+
+def _record_forge_warmed() -> None:
+    try:
+        with open(_FORGE_WARMED_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
+def _clear_forge_warmed() -> None:
+    try:
+        os.remove(_FORGE_WARMED_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def _is_checkpoint_fresh() -> bool:
+    """Return True if the configured checkpoint file hasn't been replaced since
+    the last recorded warmup. Uses file mtime as a cheap staleness proxy."""
+    cfg = config.CFG
+    sd_checkpoint = cfg.get("sd_checkpoint", "")
+    if not sd_checkpoint:
+        return False
+    # Walk Forge's checkpoint directory for a file whose name contains the
+    # configured checkpoint string.
+    forge_dir = config.FORGE_DIR
+    if not os.path.isdir(forge_dir):
+        return False
+    for dirpath, _, files in os.walk(forge_dir):
+        for fname in files:
+            if fname.endswith(".safetensors") and sd_checkpoint in fname:
+                mtime = os.path.getmtime(os.path.join(dirpath, fname))
+                return mtime <= _forge_warmed_timestamp()
+    return False
+
+
+def _format_age(ts: float) -> str:
+    age = time.time() - ts
+    if age < 60:
+        return f"{int(age)}s ago"
+    if age < 3600:
+        return f"{int(age // 60)}m ago"
+    return f"{int(age // 3600)}h ago"
 
 # _find_forge_python is defined here (mirrors installer/forge_install.py)
 def _find_forge_python() -> str:
@@ -122,6 +177,7 @@ def set_forge_model(name: str, refresh: bool = False) -> bool:
             warn(f"Available models: {', '.join(models) if models else '(none)'}")
             return False
     except Exception as e:
+        _clear_forge_warmed()
         warn(f"Could not set Forge model: {e}")
         return False
 
@@ -141,6 +197,15 @@ def warmup_forge() -> None:
     """Send a 1-step dummy generation to pre-load the checkpoint into VRAM."""
     forge_url = config.CFG["forge_url"]
     step("Warming up Forge (loading model into VRAM)...")
+
+    # Skip warmup if Forge was already warmed in a previous session and the
+    # checkpoint hasn't changed since. The checkpoint file mtime is a cheap
+    # proxy for "has the checkpoint been replaced / updated".
+    _last_warmed = _forge_warmed_timestamp()
+    if _last_warmed and _is_checkpoint_fresh():
+        print(f"        Forge already warmed ({_format_age(_last_warmed)}) — skipping")
+        return
+
     try:
         r = req.post(f"{forge_url}/sdapi/v1/txt2img", json={
             "prompt": "test",
@@ -154,6 +219,7 @@ def warmup_forge() -> None:
         }, timeout=220)
         if r.ok:
             ok("Forge warmup done — model in VRAM.")
+            _record_forge_warmed()
         else:
             warn(f"Forge warmup returned {r.status_code}")
     except Exception as e:
