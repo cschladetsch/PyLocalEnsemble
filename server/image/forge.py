@@ -1,5 +1,5 @@
 """Forge process lifecycle: start, stop, model selection, Python detection."""
-import os, platform, subprocess, time
+import os, platform, subprocess, time, shlex
 import requests as req
 import config
 from utils import step, ok, warn, http_ok, wait_for
@@ -245,14 +245,10 @@ def start_forge() -> bool:
         base_args = "--api --skip-torch-cuda-test"
     else:
         base_args = "--api --xformers"
-    # Append --ckpt-dir if sd_models_dir is configured
-    sd_models_dir = config.CFG.get("sd_models_dir", "")
-    if sd_models_dir:
-        sd_models_dir = os.path.expanduser(sd_models_dir)
-        os.makedirs(sd_models_dir, exist_ok=True)
-        base_args = f"{base_args} --ckpt-dir \"{sd_models_dir}\""
-        ok(f"Forge: using SD models dir {sd_models_dir}")
-    # Inject --port to match forge_url so Forge binds on the expected port
+    # Append --port to match forge_url so Forge binds on the expected port.
+    # Do NOT set --ckpt-dir here; Forge's launch.py auto-detects the standard
+    # %USERPROFILE%\.models\shared directory, and webui-user.ps1 may also set
+    # it — having both causes confusion and double-passed arguments.
     import urllib.parse as _up
     _parsed = _up.urlparse(forge_url)
     _port = _parsed.port or 7860
@@ -260,6 +256,14 @@ def start_forge() -> bool:
         base_args = f"{base_args} --port {_port}"
 
     env["COMMANDLINE_ARGS"] = base_args
+
+    # Build CLI arguments for webui.ps1 (Windows) / webui.sh (Unix).
+    # The launcher passes arguments to launch.py, so they must be on the
+    # command line — not just in the COMMANDLINE_ARGS env var.
+    if os.name == "nt":
+        cli_args = shlex.split(base_args)
+    else:
+        cli_args = shlex.split(base_args)
 
     default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))
     forge_py = _find_forge_python()
@@ -291,8 +295,15 @@ def start_forge() -> bool:
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        # .ps1 files need to be launched via powershell -File
+        if launcher.lower().endswith(".ps1"):
+            launcher_cmd = ["powershell", "-NoProfile", "-NoExit", "-File", launcher]
+        else:
+            launcher_cmd = [launcher]
+    else:
+        launcher_cmd = [launcher]
 
-    subprocess.Popen(launcher, **kw)
+    subprocess.Popen(launcher_cmd + cli_args, **kw)
     if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=600, delay=8):
         warn("Forge did not start in time - images won't generate.")
         return False

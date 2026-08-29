@@ -3,6 +3,7 @@ import requests as req
 import config
 import state
 from utils import step, ok, warn, http_ok
+from logging_setup import log_file
 
 LLM_READY     = False
 LLM_SUSPENDED = False   # True while VRAM is yielded to image generation
@@ -104,9 +105,7 @@ def _start_server():
     ]
     if sc.get("chat_template"):
         flags += ["--no-jinja", "--chat-template", sc["chat_template"]]
-    log_dir = os.path.join(os.path.dirname(__file__), "log")
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "llama-server.log")
+    log_path = log_file("llama-server")
     print(f"[llm] logging llama-server output to {log_path}")
 
     class _TeeWriter:

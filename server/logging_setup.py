@@ -7,17 +7,33 @@ from datetime import datetime
 
 ALICE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(ALICE_DIR, "log")
-_COMPONENT = "python-server"
 
+# ---------------------------------------------------------------------------
+# Public helpers — used by llm.py and any other module that needs its own log
+# file without re-implementing path logic.
+# ---------------------------------------------------------------------------
 
 def log_dir() -> str:
     os.makedirs(LOG_DIR, exist_ok=True)
     return LOG_DIR
 
 
-def log_file(component: str | None = None) -> str:
-    name = (component or _COMPONENT).replace("/", "-").replace("\\", "-")
-    return os.path.join(log_dir(), f"{name}.log")
+def log_file(component: str | None = None, suffix: str = ".log") -> str:
+    """Return the absolute path for a per-component log file.
+
+    ``component`` is normalised (``/`` and ``\\`` → ``-``) so that e.g.
+    ``llm`` → ``server/log/llm.log`` and ``llama-server`` →
+    ``server/log/llama-server.log``.
+    """
+    name = (component or "python-server").replace("/", "-").replace("\\", "-")
+    return os.path.join(log_dir(), f"{name}{suffix}")
+
+
+# ---------------------------------------------------------------------------
+# Internal init
+# ---------------------------------------------------------------------------
+
+_COMPONENT = "python-server"
 
 
 def _install_print_capture(logger: logging.Logger):
