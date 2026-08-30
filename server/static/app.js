@@ -352,17 +352,16 @@ async function triggerMedia(extra = '', auto = false) {
     document.getElementById('ih').textContent = 'Generated Scene';
     document.getElementById('ic').innerHTML =
       '<div id="img-progress-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center">' +
-        '<div id="img-preview-slot" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden"></div>' +
-        '<div id="img-progress-overlay" style="position:absolute;bottom:0;left:0;right:0;padding:.3rem .5rem;background:rgba(0,0,0,0.55);z-index:2">' +
-          '<div class="ph gen" id="img-status" style="margin:0 0 .25rem">Analyzing scene...</div>' +
-          '<div class="img-progress-track"><div class="img-progress-fill" id="img-pb"></div></div>' +
+        '<div id="img-preview-slot" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none"></div>' +
+        '<div id="img-progress-overlay" style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:.4rem">' +
+          '<div class="ph gen" id="img-status" style="margin:0">Analyzing scene...</div>' +
+          '<div class="img-progress-track" style="width:60%"><div class="img-progress-fill" id="img-pb"></div></div>' +
         '</div>' +
       '</div>';
     document.getElementById('pd-wrap').style.display = 'none';
     document.getElementById('pd').value = '';
     startProgress();
   }
-
   try {
     const res = await fetch('/image', {
       method: 'POST',

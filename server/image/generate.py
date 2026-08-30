@@ -39,7 +39,7 @@ def _resolve_upscaler(forge_url: str, preferred: str) -> str | None:
 
 def generate_image(prompt: str, appearance: str, negative_base: str,
                    extra_negative: str = "", steps: int = None, cfg_scale: float = None,
-                   seed: int = -1, quick: bool = False):
+                   seed: int = -1, quick: bool = False, width: int = None, height: int = None):
     forge_url = config.CFG["forge_url"]
     img_cfg   = config.CFG["image"]
     if not http_ok(f"{forge_url}/sdapi/v1/sd-models"):
@@ -57,8 +57,8 @@ def generate_image(prompt: str, appearance: str, negative_base: str,
     _steps   = (steps if steps is not None else (quick_steps   if quick else img_cfg["steps"]))
     _sampler = quick_sampler                                    if quick else img_cfg["sampler_name"]
     _cfg     = cfg_scale if cfg_scale is not None else img_cfg["cfg_scale"]
-    _width   = img_cfg["width"]
-    _height  = img_cfg["height"]
+    _width   = width if width is not None else img_cfg["width"]
+    _height  = height if height is not None else img_cfg["height"]
 
     full_prompt = prompt + ", " + img_cfg["suffix"]
 

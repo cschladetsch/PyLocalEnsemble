@@ -189,7 +189,7 @@ def restart_forge():
         req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=100)
     except Exception:
         pass  # connection reset is expected on restart
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=10):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=3):
         warn("Forge did not come back after restart.")
 
 
@@ -205,6 +205,21 @@ def warmup_forge() -> None:
     if _last_warmed and _is_checkpoint_fresh():
         print(f"        Forge already warmed ({_format_age(_last_warmed)}) — skipping")
         return
+
+    # If Forge was just started by start_forge() in this session, the checkpoint
+    # is already loaded in VRAM — the /sdapi/v1/sd-models check confirms it.
+    # Only run warmup if Forge was already running when we got here (i.e. it
+    # was started externally or by a previous session).
+    try:
+        opts = req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json()
+        current = opts.get("sd_model_checkpoint", "")
+        desired = config.CFG.get("sd_checkpoint", "")
+        if current and desired and (current in desired or desired in current):
+            # Forge is already running with the right checkpoint hot — skip warmup.
+            print(f"        Forge already running with checkpoint loaded — skipping warmup")
+            return
+    except Exception:
+        pass
 
     try:
         r = req.post(f"{forge_url}/sdapi/v1/txt2img", json={
@@ -257,13 +272,12 @@ def start_forge() -> bool:
 
     env["COMMANDLINE_ARGS"] = base_args
 
-    # Build CLI arguments for webui.ps1 (Windows) / webui.sh (Unix).
-    # The launcher passes arguments to launch.py, so they must be on the
-    # command line — not just in the COMMANDLINE_ARGS env var.
-    if os.name == "nt":
-        cli_args = shlex.split(base_args)
-    else:
-        cli_args = shlex.split(base_args)
+    # The launcher passes CLI args directly to launch.py.  Ensure --api is present
+    # so Forge boots in API-only mode (no Gradio UI) regardless of any
+    # webui-user.ps1 override of the COMMANDLINE_ARGS env var.
+    cli_parts = shlex.split(base_args)
+    if "--api" not in cli_parts:
+        cli_parts.append("--api")
 
     default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))
     forge_py = _find_forge_python()
@@ -303,9 +317,9 @@ def start_forge() -> bool:
     else:
         launcher_cmd = [launcher]
 
-    subprocess.Popen(launcher_cmd + cli_args, **kw)
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=600, delay=8):
-        warn("Forge did not start in time - images won't generate.")
+    subprocess.Popen(launcher_cmd + cli_parts, **kw)
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=2):
+        warn("Forge did not start in time — images may be slow, but generation will still work once Forge is ready.")
         return False
     # Push keep_in_cpu=False as early as possible so the auto-loaded checkpoint
     # (and any subsequent load) doesn't duplicate model weights in CPU RAM.
