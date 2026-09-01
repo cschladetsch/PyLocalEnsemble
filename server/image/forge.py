@@ -286,6 +286,13 @@ def start_forge() -> bool:
         env["PYTHON"] = forge_py
         ok(f"Forge: using Python at {forge_py}")
         python_for_upgrade = forge_py
+        # On Windows, a venv's python.exe doesn't bundle its own pythonXY.dll —
+        # it resolves it via the OS DLL search path (PATH). If forge_py's install
+        # dir isn't already on PATH (common for per-user python.org installs
+        # registered only with the py launcher), the venv python fails to start
+        # with "python3XX.dll not found", and Forge never comes up.
+        if os.name == "nt":
+            env["PATH"] = os.path.dirname(forge_py) + os.pathsep + env.get("PATH", "")
     else:
         warn("Python 3.10/3.11 not found — Forge may fail with the system Python")
         if os.name == "nt":
