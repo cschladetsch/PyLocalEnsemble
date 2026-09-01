@@ -123,7 +123,7 @@ flowchart LR
     Retry --> Hist["Restore history + memory\nllm.load_history()"]
     Hist --> TTS_Load["Load Kokoro ONNX\ntts.load_tts() — background thread"]
     TTS_Load --> ForgeStart{Forge\nalready up?}
-    ForgeStart -->|no| ForgeSpawn["Start webui.bat / webui.sh\nimage.start_forge()"]
+    ForgeStart -->|no| ForgeSpawn["Start webui.ps1 / webui.sh\nimage.start_forge()"]
     ForgeSpawn --> ForgeReady["Push sd_checkpoints_keep_in_cpu=False\nbefore first checkpoint load"]
     ForgeStart -->|yes| ForgeReady
     ForgeReady --> CkPt["Set SD checkpoint\nimage.set_forge_model()"]

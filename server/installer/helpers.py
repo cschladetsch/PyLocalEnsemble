@@ -13,7 +13,7 @@ LLAMA_DIR    = os.path.join(SCRIPT_DIR, "llama-cpp")
 MODELS_DIR   = os.path.join(SCRIPT_DIR, "models")
 TTS_DIR      = os.path.join(SCRIPT_DIR, "models", "tts")
 FORGE_DIR    = os.path.join(SCRIPT_DIR, "stable-diffusion-webui-forge")
-FORGE_BAT    = os.path.join(FORGE_DIR, "webui.bat" if os.name == "nt" else "webui.sh")
+FORGE_BAT    = os.path.join(FORGE_DIR, "webui.ps1" if os.name == "nt" else "webui.sh")
 CONF_DIR     = os.path.join(SCRIPT_DIR, "conf")
 
 MIN_PYTHON = (3, 10)

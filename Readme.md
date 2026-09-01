@@ -726,7 +726,7 @@ flowchart LR
     E --> F[llm.load_history — Restore history + memory]
     F --> G[tts.load_tts — Load Kokoro ONNX]
     G --> H{Forge running?}
-    H -->|no| I[image.start_forge — webui.bat / webui.sh]
+    H -->|no| I[image.start_forge — webui.ps1 / webui.sh]
     H -->|yes| J
     I --> J[image.set_forge_model — Select checkpoint]
     J --> K([Open browser — localhost:8000])
