@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import config
+import args
 import tts
 import stt
 
@@ -47,8 +48,7 @@ async def set_voice(body: VoiceRequest):
 
 @router.post("/tts")
 async def speak(body: TtsRequest):
-    import sys
-    if "--no-speech" in sys.argv:
+    if args.ARGS.no_speech:
         return JSONResponse({"audio": None})
     if tts.TTS is None:
         return JSONResponse({"error": "TTS not ready"}, status_code=503)
@@ -63,8 +63,7 @@ async def speak(body: TtsRequest):
 
 @router.post("/tts/stream")
 async def speak_stream(body: TtsRequest):
-    import sys
-    if "--no-speech" in sys.argv:
+    if args.ARGS.no_speech:
         async def _empty():
             yield 'data: {"done":true}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")

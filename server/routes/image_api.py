@@ -395,6 +395,30 @@ async def reroll():
     return JSONResponse({"error": "Generation failed."}, status_code=500)
 
 
+@router.post("/sd-generate")
+async def sd_generate(body: dict):
+    """Direct SD generation from the standalone SD page — no chat context needed."""
+    loop = asyncio.get_running_loop()
+    prompt = body.get("prompt", "")
+    steps  = int(body.get("steps", 25))
+    width  = int(body.get("width", 512))
+    height = int(body.get("height", 512))
+    seed   = int(body.get("seed", -1))
+    app  = state.last_appearance or state.ALICE_APPEARANCE
+    def _regen():
+        image._gen_cancel.clear()
+        img = image.generate_image(
+            prompt, app, state.BASE_NEGATIVE,
+            steps=steps, cfg_scale=7.0, width=width, height=height, seed=seed,
+            quick=True,
+        )
+        return state.save_generated_image(img) if img else None
+    url = await loop.run_in_executor(None, _regen)
+    if url:
+        return JSONResponse({"url": url, "seed": state.last_seed})
+    return JSONResponse({"error": "No image generated."}, status_code=500)
+
+
 @router.post("/generate")
 async def generate_raw(body: GenerateRequest):
     loop = asyncio.get_running_loop()

@@ -13,7 +13,6 @@ def is_wsl() -> bool:
 
 IS_WSL = is_wsl()
 
-
 _C = {
     "reset":  "\033[0m",
     "bold":   "\033[1m",
@@ -45,6 +44,10 @@ def http_ok(url, timeout=2):
 
 
 def wait_for(url, label, retries=60, delay=2):
+    """Block until `url` responds OK.
+
+    Polls `url` every `delay` seconds, up to `retries` attempts.
+    """
     spin = iter("|/-\\|/-\\".__mul__(999))
     for i in range(retries):
         if http_ok(url, timeout=2):

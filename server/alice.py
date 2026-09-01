@@ -3,6 +3,11 @@
 import subprocess, sys, os, time, threading, webbrowser
 import requests as req
 
+# Startup timing — measure how long each phase takes so we can tune caching.
+_START_TIME = time.monotonic()
+def _elapsed(label: str = "") -> str:
+    return f"[{int(time.monotonic() - _START_TIME)}s] {label}"
+
 # On Windows the console defaults to cp1252, which crashes on any non-Latin-1
 # character (e.g. ≤, em-dash, philosophers' symbols) that the LLM may emit.
 if os.name == "nt":
@@ -34,6 +39,9 @@ if os.name == "nt":
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SERVER_DIR)
 
+import args
+ARGS = args.parse()
+
 
 def _tts_assets_present() -> bool:
     tts_dir = os.path.join(_SERVER_DIR, "models", "tts")
@@ -56,7 +64,7 @@ def _forge_present() -> bool:
 
 
 def _needs_install() -> bool:
-    if any("pytest" in arg for arg in sys.argv):
+    if args.has("pytest"):
         return False
     if not (_tts_assets_present() and _llama_server_present() and _forge_present()):
         return True
@@ -92,13 +100,13 @@ HOST = "127.0.0.1"
 PORT = int(config.CFG.get("port", getattr(config, "PORT", 8000)))
 
 # ── Runtime flags ─────────────────────────────────────────────────────────────
-NO_SPEECH  = "--no-speech"   in sys.argv
-NO_FORGE   = "--no-forge"    in sys.argv
-TEST_MODE  = "--test"        in sys.argv
-AUTO_IMAGE = "--auto-image"  in sys.argv
+NO_SPEECH  = ARGS.no_speech
+NO_FORGE   = ARGS.no_forge
+TEST_MODE  = ARGS.test_mode
+AUTO_IMAGE = ARGS.auto_image
 INTERACTIVE = sys.stdin.isatty() and sys.stdout.isatty()
 
-if "--voices" in sys.argv:
+if ARGS.voices:
     from tts import VOICES
     print("\nAvailable TTS voices:\n")
     for v in VOICES:
@@ -107,7 +115,7 @@ if "--voices" in sys.argv:
     sys.exit(0)
 
 _TEST_MSG     = "tell me something interesting about yourself"
-_PERSONA_ARG  = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--persona=")), None)
+_PERSONA_ARG  = ARGS.persona
 
 
 def _resolve_persona(arg: str) -> str:
@@ -183,6 +191,7 @@ def _ensure_llm_ready(timeout: int = 120):
     import vram
     vram.notify_llm_ready()
     vram.log_resources("LLM ready")
+    print(_elapsed("LLM ready"))
 
 
 def _ensure_tts_ready():
@@ -201,6 +210,7 @@ def _ensure_forge_ready():
     vram.setup(config.CFG["forge_url"])
     if not image.start_forge():
         raise RuntimeError("Failed to launch Stable Diffusion Forge.")
+    print(_elapsed("Forge started"))
     sd_checkpoint = config.CFG.get("sd_checkpoint", "")
 
     # Skip set_forge_model (slow refresh-checkpoints included) if Forge already has

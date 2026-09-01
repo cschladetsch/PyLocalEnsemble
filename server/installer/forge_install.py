@@ -103,13 +103,24 @@ def install_forge(cfg: dict):
     else:
         ok("Forge already present")
 
+    forge_py = _find_forge_python()
+
     # Warn if Forge venv was built with wrong Python version
     venv_python = os.path.join(FORGE_DIR, "venv",
                                "Scripts" if os.name == "nt" else "bin",
                                "python.exe" if os.name == "nt" else "python3")
     if os.path.exists(venv_python):
         try:
-            r = subprocess.run([venv_python, "--version"], capture_output=True, text=True)
+            # A venv's python.exe doesn't bundle its own pythonXY.dll — on Windows
+            # it resolves it via PATH. If forge_py's install dir isn't on PATH
+            # (per-user python.org installs registered only with the py launcher
+            # aren't), the venv python fails to start with "python3XX.dll not
+            # found", which would be misread below as "wrong Python version" and
+            # wrongly trigger a venv rebuild.
+            env = os.environ.copy()
+            if forge_py and os.name == "nt":
+                env["PATH"] = os.path.dirname(forge_py) + os.pathsep + env.get("PATH", "")
+            r = subprocess.run([venv_python, "--version"], capture_output=True, text=True, env=env)
             version = (r.stdout + r.stderr).strip()
             if "3.10" not in version and "3.11" not in version:
                 warn(f"Forge venv is {version}, needs 3.10 or 3.11 — deleting venv for rebuild ...")
@@ -118,7 +129,6 @@ def install_forge(cfg: dict):
         except Exception as e:
             warn(f"Could not check Forge venv: {e}")
 
-    forge_py = _find_forge_python()
     if not forge_py:
         warn("Python 3.10 or 3.11 not found — Forge requires one of these.")
         if os.name == "nt":

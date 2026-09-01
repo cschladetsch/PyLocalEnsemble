@@ -1,8 +1,63 @@
 """Forge process lifecycle: start, stop, model selection, Python detection."""
-import os, platform, subprocess
+import os, platform, subprocess, time, shlex
 import requests as req
 import config
 from utils import step, ok, warn, http_ok, wait_for
+
+# ── Forge warmup state cache ──────────────────────────────────────────────────
+# Record when the checkpoint was last warmed up so a subsequent startup can
+# skip the redundant 1-step warmup if Forge is already running with the
+# right checkpoint hot in VRAM.
+_FORGE_WARMED_FILE = os.path.join(config.SERVER_DIR, ".forge_warmed")
+
+def _forge_warmed_timestamp() -> float:
+    try:
+        with open(_FORGE_WARMED_FILE, "r", encoding="utf-8") as f:
+            return float(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return 0.0
+
+def _record_forge_warmed() -> None:
+    try:
+        with open(_FORGE_WARMED_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
+def _clear_forge_warmed() -> None:
+    try:
+        os.remove(_FORGE_WARMED_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def _is_checkpoint_fresh() -> bool:
+    """Return True if the configured checkpoint file hasn't been replaced since
+    the last recorded warmup. Uses file mtime as a cheap staleness proxy."""
+    cfg = config.CFG
+    sd_checkpoint = cfg.get("sd_checkpoint", "")
+    if not sd_checkpoint:
+        return False
+    # Walk Forge's checkpoint directory for a file whose name contains the
+    # configured checkpoint string.
+    forge_dir = config.FORGE_DIR
+    if not os.path.isdir(forge_dir):
+        return False
+    for dirpath, _, files in os.walk(forge_dir):
+        for fname in files:
+            if fname.endswith(".safetensors") and sd_checkpoint in fname:
+                mtime = os.path.getmtime(os.path.join(dirpath, fname))
+                return mtime <= _forge_warmed_timestamp()
+    return False
+
+
+def _format_age(ts: float) -> str:
+    age = time.time() - ts
+    if age < 60:
+        return f"{int(age)}s ago"
+    if age < 3600:
+        return f"{int(age // 60)}m ago"
+    return f"{int(age // 3600)}h ago"
 
 # _find_forge_python is defined here (mirrors installer/forge_install.py)
 def _find_forge_python() -> str:
@@ -79,10 +134,10 @@ def _push_forge_settings(forge_url: str) -> None:
         "samples_format":              "png",
     }
     try:
-        known = set(req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json().keys())
+        known = set(req.get(f"{forge_url}/sdapi/v1/options", timeout=10).json().keys())
         settings = {k: v for k, v in desired.items() if k in known}
         if settings:
-            r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=10)
+            r = req.post(f"{forge_url}/sdapi/v1/options", json=settings, timeout=30)
             if r.status_code != 200:
                 warn(f"Forge settings push returned HTTP {r.status_code}")
         skipped = set(desired) - settings.keys()
@@ -105,7 +160,7 @@ def set_forge_model(name: str, refresh: bool = False) -> bool:
     forge_url = config.CFG["forge_url"]
     try:
         if refresh:
-            req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=30)
+            req.post(f"{forge_url}/sdapi/v1/refresh-checkpoints", timeout=90)
         r = req.get(f"{forge_url}/sdapi/v1/sd-models", timeout=5)
         models = [m["title"] for m in r.json()]
         match  = next((m for m in models if name in m), None)
@@ -122,6 +177,7 @@ def set_forge_model(name: str, refresh: bool = False) -> bool:
             warn(f"Available models: {', '.join(models) if models else '(none)'}")
             return False
     except Exception as e:
+        _clear_forge_warmed()
         warn(f"Could not set Forge model: {e}")
         return False
 
@@ -130,10 +186,10 @@ def restart_forge():
     """Ask Forge to restart via its API (picks up newly installed extensions)."""
     forge_url = config.CFG["forge_url"]
     try:
-        req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=10)
+        req.post(f"{forge_url}/sdapi/v1/server-restart", timeout=100)
     except Exception:
         pass  # connection reset is expected on restart
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=10):
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge (restart)", retries=30, delay=3):
         warn("Forge did not come back after restart.")
 
 
@@ -141,6 +197,30 @@ def warmup_forge() -> None:
     """Send a 1-step dummy generation to pre-load the checkpoint into VRAM."""
     forge_url = config.CFG["forge_url"]
     step("Warming up Forge (loading model into VRAM)...")
+
+    # Skip warmup if Forge was already warmed in a previous session and the
+    # checkpoint hasn't changed since. The checkpoint file mtime is a cheap
+    # proxy for "has the checkpoint been replaced / updated".
+    _last_warmed = _forge_warmed_timestamp()
+    if _last_warmed and _is_checkpoint_fresh():
+        print(f"        Forge already warmed ({_format_age(_last_warmed)}) — skipping")
+        return
+
+    # If Forge was just started by start_forge() in this session, the checkpoint
+    # is already loaded in VRAM — the /sdapi/v1/sd-models check confirms it.
+    # Only run warmup if Forge was already running when we got here (i.e. it
+    # was started externally or by a previous session).
+    try:
+        opts = req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json()
+        current = opts.get("sd_model_checkpoint", "")
+        desired = config.CFG.get("sd_checkpoint", "")
+        if current and desired and (current in desired or desired in current):
+            # Forge is already running with the right checkpoint hot — skip warmup.
+            print(f"        Forge already running with checkpoint loaded — skipping warmup")
+            return
+    except Exception:
+        pass
+
     try:
         r = req.post(f"{forge_url}/sdapi/v1/txt2img", json={
             "prompt": "test",
@@ -151,9 +231,10 @@ def warmup_forge() -> None:
             "cfg_scale": 1,
             "seed": 42,
             "override_settings": {"samples_save": False, "grid_save": False},
-        }, timeout=120)
+        }, timeout=220)
         if r.ok:
             ok("Forge warmup done — model in VRAM.")
+            _record_forge_warmed()
         else:
             warn(f"Forge warmup returned {r.status_code}")
     except Exception as e:
@@ -179,14 +260,10 @@ def start_forge() -> bool:
         base_args = "--api --skip-torch-cuda-test"
     else:
         base_args = "--api --xformers"
-    # Append --ckpt-dir if sd_models_dir is configured
-    sd_models_dir = config.CFG.get("sd_models_dir", "")
-    if sd_models_dir:
-        sd_models_dir = os.path.expanduser(sd_models_dir)
-        os.makedirs(sd_models_dir, exist_ok=True)
-        base_args = f"{base_args} --ckpt-dir \"{sd_models_dir}\""
-        ok(f"Forge: using SD models dir {sd_models_dir}")
-    # Inject --port to match forge_url so Forge binds on the expected port
+    # Append --port to match forge_url so Forge binds on the expected port.
+    # Do NOT set --ckpt-dir here; Forge's launch.py auto-detects the standard
+    # %USERPROFILE%\.models\shared directory, and webui-user.ps1 may also set
+    # it — having both causes confusion and double-passed arguments.
     import urllib.parse as _up
     _parsed = _up.urlparse(forge_url)
     _port = _parsed.port or 7860
@@ -195,6 +272,13 @@ def start_forge() -> bool:
 
     env["COMMANDLINE_ARGS"] = base_args
 
+    # The launcher passes CLI args directly to launch.py.  Ensure --api is present
+    # so Forge boots in API-only mode (no Gradio UI) regardless of any
+    # webui-user.ps1 override of the COMMANDLINE_ARGS env var.
+    cli_parts = shlex.split(base_args)
+    if "--api" not in cli_parts:
+        cli_parts.append("--api")
+
     default_venv_python = _python_from_venv_dir(os.path.join(config.FORGE_DIR, "venv"))
     forge_py = _find_forge_python()
     python_for_upgrade = default_venv_python
@@ -202,6 +286,13 @@ def start_forge() -> bool:
         env["PYTHON"] = forge_py
         ok(f"Forge: using Python at {forge_py}")
         python_for_upgrade = forge_py
+        # On Windows, a venv's python.exe doesn't bundle its own pythonXY.dll —
+        # it resolves it via the OS DLL search path (PATH). If forge_py's install
+        # dir isn't already on PATH (common for per-user python.org installs
+        # registered only with the py launcher), the venv python fails to start
+        # with "python3XX.dll not found", and Forge never comes up.
+        if os.name == "nt":
+            env["PATH"] = os.path.dirname(forge_py) + os.pathsep + env.get("PATH", "")
     else:
         warn("Python 3.10/3.11 not found — Forge may fail with the system Python")
         if os.name == "nt":
@@ -225,10 +316,17 @@ def start_forge() -> bool:
     kw = {"cwd": config.FORGE_DIR, "env": env}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        # .ps1 files need to be launched via powershell -File
+        if launcher.lower().endswith(".ps1"):
+            launcher_cmd = ["powershell", "-NoProfile", "-NoExit", "-File", launcher]
+        else:
+            launcher_cmd = [launcher]
+    else:
+        launcher_cmd = [launcher]
 
-    subprocess.Popen(launcher, **kw)
-    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=4):
-        warn("Forge did not start in time - images won't generate.")
+    subprocess.Popen(launcher_cmd + cli_parts, **kw)
+    if not wait_for(f"{forge_url}/sdapi/v1/sd-models", "Forge", retries=300, delay=2):
+        warn("Forge did not start in time — images may be slow, but generation will still work once Forge is ready.")
         return False
     # Push keep_in_cpu=False as early as possible so the auto-loaded checkpoint
     # (and any subsequent load) doesn't duplicate model weights in CPU RAM.

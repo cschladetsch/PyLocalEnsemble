@@ -1,8 +1,9 @@
-import os, json, re, time, threading, subprocess, shutil
+import os, json, re, time, threading, subprocess, shutil, signal, sys
 import requests as req
 import config
 import state
 from utils import step, ok, warn, http_ok
+from logging_setup import log_file
 
 LLM_READY     = False
 LLM_SUSPENDED = False   # True while VRAM is yielded to image generation
@@ -16,6 +17,10 @@ LLAMA_URL = os.environ.get("LLAMA_URL", config.CFG.get("llama_url", "http://127.
 if not LLAMA_URL.startswith("http"):
     LLAMA_URL = "http://" + LLAMA_URL
 
+# ── llama-server persistence ──────────────────────────────────────────────────
+# Write the llama-server PID here so a subsequent alice.py invocation can
+# detect a viable running server and skip the model reload.
+_LLAMA_PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".llama_server_pid")
 
 _DETECTED_MODEL = None
 
@@ -100,16 +105,60 @@ def _start_server():
     ]
     if sc.get("chat_template"):
         flags += ["--no-jinja", "--chat-template", sc["chat_template"]]
-    log_dir = os.path.join(os.path.dirname(__file__), "log")
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "llama-server.log")
+    log_path = log_file("llama-server")
     print(f"[llm] logging llama-server output to {log_path}")
-    log_fh = open(log_path, "w", encoding="utf-8", errors="replace")
+
+    class _TeeWriter:
+        """Write to a log file and the console simultaneously.
+
+        Must expose ``fileno()`` because ``subprocess.Popen`` on Windows
+        calls ``msvcrt.get_osfhandle(stdout.fileno())`` to set up the pipe.
+        """
+
+        def __init__(self, path: str) -> None:
+            self._fh = open(path, "w", encoding="utf-8", errors="replace")
+
+        def write(self, data: str) -> None:
+            try:
+                self._fh.write(data)
+            except Exception:
+                pass
+            try:
+                sys.stdout.write(data)
+            except Exception:
+                pass
+
+        def flush(self) -> None:
+            try:
+                self._fh.flush()
+            except Exception:
+                pass
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+        def fileno(self) -> int:
+            return self._fh.fileno()
+
+        def close(self) -> None:
+            try:
+                self._fh.close()
+            except Exception:
+                pass
+
+    log_fh = _TeeWriter(log_path)
     kw = {"stdout": log_fh, "stderr": log_fh}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NO_WINDOW
     global _server_proc
     _server_proc = subprocess.Popen(flags, **kw)
+    # Record the PID so a subsequent alice.py can reuse this server.
+    try:
+        with open(_LLAMA_PID_FILE, "w", encoding="utf-8") as f:
+            f.write(str(_server_proc.pid))
+    except Exception:
+        pass
 
 
 def _try_connect(silent=False) -> bool:
@@ -156,6 +205,7 @@ def _kill_server_proc() -> bool:
         except subprocess.TimeoutExpired:
             pass
         _server_proc = None
+        _clear_llama_pid()
         return True
     _server_proc = None
     return False
@@ -196,6 +246,27 @@ def _kill_by_port() -> None:
                         os.kill(int(pid_str), 15)
     except Exception as e:
         warn(f"[llm] kill-by-port failed: {e}")
+
+
+def _llm_pid_alive() -> bool:
+    """Return True if the recorded llama-server PID is still a live process."""
+    try:
+        with open(_LLAMA_PID_FILE, "r", encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+
+
+def _clear_llama_pid() -> None:
+    try:
+        os.remove(_LLAMA_PID_FILE)
+    except FileNotFoundError:
+        pass
 
 
 def suspend_for_image() -> None:
@@ -252,11 +323,54 @@ def _server_model_matches() -> bool:
 
 def load_llm():
     step(f"Connecting to llama.cpp server at {LLAMA_URL} ...")
+
+    # Kill any stale llama-server that might be holding port 8080 without
+    # being healthy (e.g. crashed mid-load and left a zombie listener).
+    import subprocess as _sp
+    try:
+        _sp.run(["taskkill", "/F", "/IM", "llama-server.exe"], capture_output=True, timeout=5)
+        time.sleep(0.5)
+    except Exception:
+        pass
+    try:
+        _sp.run(["taskkill", "/F", "/IM", "llama-server"], capture_output=True, timeout=5)
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    # Evict Forge from VRAM before launching llama-server so the model
+    # loads with the full GPU available. The fit check reports free VRAM
+    # assuming nothing else is loaded, but a warmed Forge holds ~2-3 GB
+    # that causes single-tensor Vulkan OOMs (e.g. 999 MB allocation fails
+    # even with 2953 MB "free" reported by the fit check).
+    try:
+        import vram as _vram
+        if _vram._forge_loaded:
+            _vram.unload_forge()
+            print("[llm] Forge evicted to make VRAM room for llama-server")
+    except Exception as exc:
+        warn(f"[llm] could not evict Forge before LLM start: {exc}")
+
+    # If a llama-server PID was recorded from a previous session and the
+    # process is still alive, treat it as a viable existing server — skip
+    # the model reload and just wait for it to become healthy.
+    if _llm_pid_alive() and http_ok(LLAMA_URL + "/health", timeout=2):
+        info("reusing existing llama-server from previous session")
+        if not _server_model_matches():
+            warn("llama-server is running a different model — restarting with the configured model...")
+            _kill_server_proc()
+            _kill_by_port()
+            _clear_llama_pid()
+            time.sleep(1)
+            _start_server()
+        return
+
     if http_ok(LLAMA_URL + "/health", timeout=2):
         if not _server_model_matches():
             warn("llama-server is running a different model — restarting with the configured model...")
             _kill_server_proc()
             _kill_by_port()
+            _clear_llama_pid()
             time.sleep(1)
             _start_server()
     else:
