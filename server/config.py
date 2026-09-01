@@ -23,6 +23,7 @@ _DEFAULT_CONFIG = {
     "forge_url":          "http://localhost:7860",
     "llama_url":          "http://127.0.0.1:8080",
     "model_path":         "",
+    "model_dir":          "",
     "llama_model":        "mistral-nemo",
     "stt_silence_seconds": 3,
     "appearance":   "woman, long blonde hair, blue eyes, elegant, poised, expressive eyes, soft lighting",
@@ -128,6 +129,7 @@ def load_config() -> dict:
                 merged[key] = list(_DEFAULT_CONFIG.get(key, [])) + list(data.get(key, []))
             merged["model_path"] = resolve_path(merged.get("model_path", ""))
             merged["llama_server_path"] = resolve_path(merged.get("llama_server_path", ""))
+            merged["model_dir"] = resolve_path(merged.get("model_dir", ""))
             if "system_prompt" not in data and "modelfile" in data:
                 m = re.search(r'SYSTEM\s+"""(.*?)"""', data["modelfile"], re.DOTALL)
                 if m:
