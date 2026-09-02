@@ -8,6 +8,8 @@
 /tmp
 alice.json
 personas.json
+/sd_app/sd_app.json
+/sd_app/static/outputs/
 # Personal customized persona versions
 /personas/mine/
 history.json

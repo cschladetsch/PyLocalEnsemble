@@ -3,7 +3,7 @@ let sdAbort = null;
 
 async function checkForge() {
   try {
-    const r = await fetch('/info');
+    const r = await fetch('/sd-info');
     const d = await r.json();
     const el = document.getElementById('sd-status');
     if (d.forge_ready) {

@@ -424,15 +424,3 @@ async def index():
     return html
 
 
-@router.get("/sd-page", response_class=HTMLResponse)
-async def sd_page():
-    """Dedicated StaticDiffusion page — standalone image generation UI."""
-    static_dir = config.STATIC_DIR
-    path = os.path.join(static_dir, "sd-page.html")
-    with open(path, encoding="utf-8") as f:
-        html = f.read()
-    for asset in ("js/sd-page.js", "style.css"):
-        fpath = os.path.join(static_dir, asset)
-        v = int(os.path.getmtime(fpath)) if os.path.exists(fpath) else 0
-        html = re.sub(rf'(/static/{re.escape(asset)})\?v=\d+', rf'\g<1>?v={v}', html)
-    return html

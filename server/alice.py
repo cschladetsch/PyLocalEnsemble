@@ -435,6 +435,14 @@ if __name__ == "__main__":
     else:
         print("        NOTE: Non-interactive session detected; not opening browser.")
 
+    # Best-effort launch of the standalone SD console (sd_app/) as its own process.
+    # Non-fatal — e.g. it may already be running, or the port may be taken.
+    try:
+        subprocess.Popen([sys.executable, os.path.join(_ROOT_DIR, "sd_app", "app.py")],
+                          cwd=os.path.join(_ROOT_DIR, "sd_app"))
+    except Exception as e:
+        print(f"[{config.NAME}] Could not launch sd_app: {e}")
+
     try:
         uvicorn.run(app, host=HOST, port=PORT, log_config=_LOG_CONFIG)
     except BaseException as e:

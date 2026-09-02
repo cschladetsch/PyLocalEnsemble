@@ -1,0 +1,25 @@
+{
+    "_comment": "Copy this file to sd_app.json (in the sd_app/ directory) and edit to suit.",
+
+    "port": 8010,
+    "forge_url": "http://localhost:7860",
+    "forge_venv_dir": "",
+    "forge_args": "",
+    "sd_checkpoint": "",
+
+    "negative_prompt": "(worst quality:2), (low quality:2), lowres, (bad anatomy:1.5), (bad hands:1.8), (mutated hands:1.7), (extra fingers:1.8), (missing fingers:1.7), poorly drawn hands, poorly drawn face, mutation, deformed, blurry, bad proportions, disfigured, gross proportions, out of frame, cropped, duplicate, morbid, mutilated, cloned face, long neck, text, signature, watermark, username, jpeg artifacts",
+
+    "image": {
+        "steps":           25,
+        "width":           512,
+        "height":          768,
+        "cfg_scale":       7,
+        "sampler_name":    "DPM++ 2M Karras",
+        "suffix":          "RAW photo, 8k uhd, dslr, soft lighting, high quality, film grain, Fujifilm XT3, photorealistic",
+        "hires_fix":       false,
+        "hires_scale":     1.5,
+        "hires_steps":     15,
+        "hires_denoising": 0.45,
+        "hires_upscaler":  "Latent"
+    }
+}
