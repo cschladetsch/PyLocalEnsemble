@@ -242,7 +242,9 @@ def test_chat_retries_after_context_overflow(_restore_llm_state):
         llm.history.append({"role": "assistant",  "content": f"reply {i}"   * 50})
 
     with patch("routes.chat.req.post", side_effect=_side_effect):
-        with patch("llm.compress_history"):  # prevent background req.post from compress
+        with patch("llm.compress_history"), \
+             patch("image.prompt.extract_sd_prompt"):  # prevent background req.post from
+                                                         # compress_history / SD pre-extraction
             res = client.post("/chat", json={"message": "hi"})
 
     assert res.status_code == 200

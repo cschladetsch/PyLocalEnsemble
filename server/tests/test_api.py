@@ -24,12 +24,13 @@ def test_short_group_appearance_skips_scene_tags():
 
 
 def test_build_group_scene_appearance_marks_distinct_people():
+    """Count tag is gender-neutral ('Npeople') — see commit 'Do not assume gender.'"""
     personas = {
         "a": {"name": "Alice", "appearance": "red hair, green eyes, pale skin, black dress, freckles"},
         "b": {"name": "Morrigan", "appearance": "black hair, amber eyes, tan skin, silver gown, jewelry"},
     }
     result = _build_group_scene_appearance(personas)
-    assert "2girls" in result
+    assert "2people" in result
     assert "separate people" in result
     assert "distinct individuals" in result
     assert "different faces" in result
@@ -109,10 +110,12 @@ def test_personas_returns_list():
 
 
 def test_personas_default_has_font_key():
+    """Alice herself lives only in the user's local mine.json (not a hardcoded
+    default — see config.load_personas), so check a pack persona instead."""
     res = client.get("/personas")
     personas = {p["name"]: p for p in res.json()["personas"]}
-    assert "Alice" in personas
-    assert personas["Alice"]["font_key"] == "default"
+    assert "The Gadfly" in personas
+    assert personas["The Gadfly"]["font_key"] == "the-gadfly"
 
 
 def test_personas_font_key_derived_from_name():
@@ -243,14 +246,6 @@ def test_switch_persona_response_includes_sd_model():
     assert "sd_model" in res.json()
 
 
-def test_switch_persona_resets_nudity_state():
-    import state
-    state._nudity_state = "fully nude"
-    persona_name = list(config.PERSONAS.keys())[0]
-    client.post(f"/persona/{persona_name}")
-    assert state._nudity_state == "clothed"
-
-
 def test_switch_persona_resets_seed():
     import state
     state._character_seed = 12345
@@ -301,15 +296,6 @@ def test_personas_list_includes_known_personas():
         assert key in names
 
 
-def test_switch_persona_resets_decay_counter():
-    import state
-    state._nudity_state = "topless"
-    state._nudity_turns_since_keyword = 2
-    persona_name = list(config.PERSONAS.keys())[0]
-    client.post(f"/persona/{persona_name}")
-    assert state._nudity_turns_since_keyword == 0
-
-
 # ── GET /negative ──────────────────────────────────────────────────────────────
 
 def test_negative_returns_string():
@@ -323,72 +309,6 @@ def test_negative_matches_state():
     import state
     res = client.get("/negative")
     assert res.json()["negative"] == state.BASE_NEGATIVE
-
-
-# ── state.decay_nudity_state ───────────────────────────────────────────────────
-
-@pytest.fixture()
-def clean_nudity_state():
-    """Restore nudity state globals after each decay test."""
-    import state
-    saved_state   = state._nudity_state
-    saved_counter = state._nudity_turns_since_keyword
-    yield
-    state._nudity_state              = saved_state
-    state._nudity_turns_since_keyword = saved_counter
-
-
-def test_decay_no_change_on_sexual_keyword(clean_nudity_state):
-    import state
-    state._nudity_state = "topless"
-    state._nudity_turns_since_keyword = 0
-    state.decay_nudity_state("show me your breasts")
-    assert state._nudity_state == "topless"
-    assert state._nudity_turns_since_keyword == 0
-
-
-def test_decay_increments_counter_on_non_sexual(clean_nudity_state):
-    import state
-    state._nudity_state = "topless"
-    state._nudity_turns_since_keyword = 0
-    state.decay_nudity_state("how are you today")
-    assert state._nudity_turns_since_keyword == 1
-    assert state._nudity_state == "topless"   # not yet decayed
-
-
-def test_decay_fires_after_three_turns(clean_nudity_state):
-    import state
-    state._nudity_state = "topless"
-    state._nudity_turns_since_keyword = 0
-    for msg in ["hello", "nice day", "tell me a story"]:
-        state.decay_nudity_state(msg)
-    assert state._nudity_state == "clothed"
-    assert state._nudity_turns_since_keyword == 0
-
-
-def test_decay_does_not_go_below_clothed(clean_nudity_state):
-    import state
-    state._nudity_state = "clothed"
-    state._nudity_turns_since_keyword = 5
-    state.decay_nudity_state("hello")
-    assert state._nudity_state == "clothed"
-
-
-def test_decay_unknown_state_resets_to_clothed(clean_nudity_state):
-    import state
-    state._nudity_state = "semi-nude"   # invalid — not in _NUDITY_ORDER
-    state._nudity_turns_since_keyword = 3
-    state.decay_nudity_state("good morning")
-    assert state._nudity_state == "clothed"
-
-
-def test_decay_fully_nude_decays_one_step(clean_nudity_state):
-    import state
-    state._nudity_state = "fully nude"
-    state._nudity_turns_since_keyword = 0
-    for msg in ["hello", "how are you", "nice weather"]:
-        state.decay_nudity_state(msg)
-    assert state._nudity_state == "bottomless"
 
 
 # ── GET /seed, POST /seed/pin, POST /seed/unpin ───────────────────────────────
@@ -455,25 +375,21 @@ def test_pin_then_unpin_roundtrip(reset_seed_state):
 def test_reset_persona_clears_history_growth_and_state(monkeypatch):
     import llm, state
     from routes import group as _grp
-    
+
     # Set up dirty state
     llm.history.append({"role": "user", "content": "hello Alice"})
-    state._nudity_state = "fully nude"
-    state._nudity_turns_since_keyword = 5
     _grp._pair_memos["alice|morrigan"] = "They are close."
     _grp._persona_moods["alice"] = "happy"
-    
+
     # Mock _save_growth to avoid file IO
     monkeypatch.setattr(_grp, "_save_growth", lambda: None)
-    
+
     res = client.delete("/persona/Alice/reset")
     assert res.status_code == 200
     assert res.json() == {"status": "reset", "persona": "Alice"}
-    
+
     # Verify everything is cleared
     assert llm.history == []
-    assert state._nudity_state == "clothed"
-    assert state._nudity_turns_since_keyword == 0
     assert "alice|morrigan" not in _grp._pair_memos
     assert "alice" not in _grp._persona_moods
 

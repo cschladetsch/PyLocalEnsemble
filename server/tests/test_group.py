@@ -409,7 +409,7 @@ def test_build_chatter_all_target_directive(two_personas_loaded):
 
 
 def test_build_chatter_all_target_has_directive(two_personas_loaded):
-    msgs = _build_chatter_messages("alice", "all")
+    msgs = grp._build_chatter_messages(two_personas_loaded[0], "all")
     last = msgs[-1]["content"].lower()
     assert "in character" in last or "spontaneous" in last
 
@@ -641,6 +641,12 @@ def test_chat_llm_error_streams_error_event(two_keys, monkeypatch, llm_ready):
 # registered on the app rather than consuming it (which would hang the runner).
 
 def test_group_events_route_registered():
-    """Route /group/events must appear in the app's route table."""
-    paths = [getattr(r, "path", None) for r in app.routes]
+    """Route /group/events must appear in the app's route table.
+
+    FastAPI's newer versions store included-router routes behind a lazy
+    _IncludedRouter wrapper rather than flattening them into app.routes, so
+    the OpenAPI schema (a stable public API) is used instead of poking at
+    app.routes directly.
+    """
+    paths = app.openapi()["paths"].keys()
     assert "/group/events" in paths

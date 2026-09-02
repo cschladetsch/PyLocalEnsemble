@@ -1,6 +1,6 @@
 """Shared mutable runtime state — imported by all route modules."""
 from __future__ import annotations
-import re, os, time, base64
+import re, os, time, base64, itertools
 import config
 
 # ── Per-session runtime vars (mutated by routes) ─────────────────────────────
@@ -91,10 +91,15 @@ def image_output_dir() -> str:
     return os.path.join(config.ALICE_DIR, "static", "outputs")
 
 
+_save_image_counter = itertools.count()
+
+
 def save_generated_image(b64_data: str) -> str:
     out_dir = image_output_dir()
     os.makedirs(out_dir, exist_ok=True)
-    fname = f"img_{time.time_ns()}.png"
+    # time_ns() alone can collide under Windows' coarse clock resolution when
+    # called in a tight loop — the counter guarantees uniqueness regardless.
+    fname = f"img_{time.time_ns()}_{next(_save_image_counter)}.png"
     with open(os.path.join(out_dir, fname), "wb") as f:
         f.write(base64.b64decode(b64_data))
     return f"/static/outputs/{fname}"

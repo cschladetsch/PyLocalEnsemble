@@ -187,7 +187,10 @@ def test_warmup_skips_if_forge_already_warmed(tmp_path, monkeypatch):
     warm_file.write_text(str(os.path.getmtime(tmp_path) - 100))  # 100s ago
     monkeypatch.setattr(config, "FORGE_DIR", str(tmp_path))
     monkeypatch.setattr(config, "SERVER_DIR", str(tmp_path))
-    monkeypatch.setattr(config, "CFG", {"forge_url": "http://localhost:7860"})
+    monkeypatch.setattr(config, "CFG", {
+        "forge_url": "http://localhost:7860",
+        "sd_checkpoint": "model_v2",
+    })
 
     with patch("image.forge.req.get") as mock_get, \
          patch("image.forge.req.post") as mock_post:
@@ -315,10 +318,14 @@ def test_start_forge_appends_port_to_args(tmp_path, monkeypatch):
         "forge_url": "http://localhost:7860",
         "forge_args": "--api --xformers",
     })
+    # Prevent _find_forge_python() and _ensure_forge_tooling() from touching
+    # the real, on-disk Forge venv / calling real subprocess.run
+    monkeypatch.setattr(forge, "_find_forge_python", lambda: "")
     with patch("urllib.parse.urlparse") as mock_urlparse:
         mock_urlparse.return_value.port = 7860
         with patch("image.forge.http_ok", return_value=False), \
              patch("image.forge.wait_for", return_value=True), \
+             patch("image.forge._ensure_forge_tooling"), \
              patch("subprocess.Popen") as mock_popen:
             forge.start_forge()
     _, kwargs = mock_popen.call_args
@@ -332,10 +339,14 @@ def test_start_forge_does_not_duplicate_port(tmp_path, monkeypatch):
         "forge_url": "http://localhost:7860",
         "forge_args": "--api --port 8080",
     })
+    # Prevent _find_forge_python() and _ensure_forge_tooling() from touching
+    # the real, on-disk Forge venv / calling real subprocess.run
+    monkeypatch.setattr(forge, "_find_forge_python", lambda: "")
     with patch("urllib.parse.urlparse") as mock_urlparse:
         mock_urlparse.return_value.port = 7860
         with patch("image.forge.http_ok", return_value=False), \
              patch("image.forge.wait_for", return_value=True), \
+             patch("image.forge._ensure_forge_tooling"), \
              patch("subprocess.Popen") as mock_popen:
             forge.start_forge()
     _, kwargs = mock_popen.call_args
@@ -350,10 +361,14 @@ def test_start_forge_ensures_api_flag(tmp_path, monkeypatch):
         "forge_url": "http://localhost:7860",
         "forge_args": "--xformers",
     })
+    # Prevent _find_forge_python() and _ensure_forge_tooling() from touching
+    # the real, on-disk Forge venv / calling real subprocess.run
+    monkeypatch.setattr(forge, "_find_forge_python", lambda: "")
     with patch("urllib.parse.urlparse") as mock_urlparse:
         mock_urlparse.return_value.port = 7860
         with patch("image.forge.http_ok", return_value=False), \
              patch("image.forge.wait_for", return_value=True), \
+             patch("image.forge._ensure_forge_tooling"), \
              patch("subprocess.Popen") as mock_popen:
             forge.start_forge()
     cmd = mock_popen.call_args[0][0]

@@ -1,4 +1,4 @@
-"""Tests for state.py: image saving, RE_CLOTHE, and nudity keyword patterns."""
+"""Tests for state.py: image saving and shared runtime state."""
 import base64
 import pytest
 import config

@@ -113,28 +113,54 @@ _META_RE = re.compile(
     r'n/?a|none given|not mentioned|not stated|not provided|not applicable)\b', re.I
 )
 
+def _is_finger_in_mouth(msg: str) -> bool:
+    return bool(re.search(r'\bfinger\b', msg, re.I)) and \
+           bool(re.search(r'\bmouth\b|\bsuck\w*\b|\blick\w*\b|\btongue\b', msg, re.I))
+
+
+def _is_riding(msg: str) -> bool:
+    # "ride"/"riding" without horse context (excludes literal horseback riding)
+    return bool(re.search(r'\bride\b|\briding\b', msg, re.I)) and \
+           not re.search(r'\bhorse\b', msg, re.I)
+
+
 _ACTION_PATTERNS = [
     (r'\bkiss\w*\b',
         ["kissing", "lips touching"],
-        "lips", "face level"),
+        "lips", "face level", ""),
     (r'\bkneel\b|\bkneeling\b',
         ["kneeling"],
-        "body", "front view"),
+        "body", "front view", "kneeling"),
     (r'\bbend\w*\s+over\b',
         ["bent over"],
-        "body", "from behind"),
+        "body", "from behind", "bent over"),
+    (_is_finger_in_mouth,
+        ["one finger in mouth"],
+        "mouth", "face level", ""),
+    (r'\bspread\w*\s+(?:your\s+)?legs\b',
+        ["spreading legs"],
+        "hips", "from below", "legs spread"),
+    (_is_riding,
+        ["riding"],
+        "hips", "from below", "riding"),
+    (r'\bstrip\w*\b|\bundress\w*\b|\bdisrob\w*\b',
+        ["disrobing"],
+        "body", "front view", ""),
+    (r'\bstroke\w*\b',
+        ["stroking penis"],
+        "hands", "front view", ""),
     (r'\bfrom behind\b',
         ["from behind"],
-        "body", "from behind"),
+        "body", "from behind", ""),
 ]
 
 
 def _detect_action(msg: str):
-    """Return (actions_list, body, camera) from pattern match, or None if no match."""
-    for entry in _ACTION_PATTERNS:
-        pattern, actions, body, camera = entry[0], entry[1], entry[2], entry[3]
-        if re.search(pattern, msg, re.I):
-            return actions, body, camera
+    """Return (actions_list, body, camera, pose) from pattern match, or None if no match."""
+    for pattern, actions, body, camera, pose in _ACTION_PATTERNS:
+        matched = pattern(msg) if callable(pattern) else re.search(pattern, msg, re.I)
+        if matched:
+            return actions, body, camera, pose
     return None
 
 
@@ -154,6 +180,8 @@ _ACCESSORY_RE = [
     (r'\bscarf\b',                                         "wearing scarf"),
     (r'\bgloves?\b',                                       "wearing gloves"),
     (r'\bmask\b',                                          "wearing mask"),
+    (r'\bstockings?\b|\bthigh-highs?\b',                   "thigh-high stockings"),
+    (r'\bheels?\b|\bhigh heels?\b',                        "high heels"),
 ]
 
 
@@ -332,10 +360,12 @@ def extract_sd_prompt(text: str, appearance: str = "", last_user_msg: str = "",
 
         detected = _detect_action(last_user_msg)
         if detected:
-            action, body, camera = detected
+            action, body, camera, pose = detected
             fields["ACTION"] = action
             fields.setdefault("BODY",   body)
             fields.setdefault("CAMERA", camera)
+            if pose:
+                fields.setdefault("POSE", pose)
             print(f"[image] action detected from user msg: {action!r}")
         elif "ACTION" not in fields:
             print("[image] no ACTION field, retrying…")

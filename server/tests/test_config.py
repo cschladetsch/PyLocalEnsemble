@@ -56,16 +56,21 @@ def test_resolve_path_empty_returns_empty():
     assert config.resolve_path("") == ""
 
 
-def test_load_personas_includes_default(tmp_path):
+def test_load_personas_seeds_from_philosophers_pack(tmp_path):
+    """With no personas.json, the philosophers pack is copied in as the
+    first-run seed. Alice herself lives only in the user's local mine.json
+    and is intentionally not a hardcoded default (see config.load_personas)."""
     with patch("config.PERSONAS_FILE", str(tmp_path / "personas.json")):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Alice" in personas
-    assert "system_prompt" in personas["Alice"]
-    assert "appearance" in personas["Alice"]
+    assert "The Gadfly" in personas
+    assert "system_prompt" in personas["The Gadfly"]
+    assert "appearance" in personas["The Gadfly"]
 
 
-def test_load_personas_merges_file(tmp_path):
+def test_load_personas_reads_file_as_is(tmp_path):
+    """load_personas has no default personas to merge in — it returns
+    exactly what's in personas.json (minus any disabled entries)."""
     pf = tmp_path / "personas.json"
     pf.write_text(json.dumps({
         "TestChar": {"system_prompt": "You are test.", "appearance": "test look"}
@@ -73,9 +78,7 @@ def test_load_personas_merges_file(tmp_path):
     with patch("config.PERSONAS_FILE", str(pf)):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Alice" in personas
-    assert "TestChar" in personas
-    assert personas["TestChar"]["system_prompt"] == "You are test."
+    assert personas == {"TestChar": {"system_prompt": "You are test.", "appearance": "test look"}}
 
 
 def test_load_personas_handles_corrupt_file(tmp_path, capsys):
@@ -84,7 +87,9 @@ def test_load_personas_handles_corrupt_file(tmp_path, capsys):
     with patch("config.PERSONAS_FILE", str(pf)):
         import config
         personas = config.load_personas(config.CFG)
-    assert "Alice" in personas                   # falls back gracefully
+    assert personas == {}                         # falls back gracefully, no crash
+    captured = capsys.readouterr()
+    assert "could not load personas.json" in captured.out
 
 
 def test_module_port_and_url_are_consistent():

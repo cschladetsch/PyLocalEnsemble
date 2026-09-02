@@ -8,25 +8,28 @@ from utils import step, ok, warn, http_ok, wait_for
 # Record when the checkpoint was last warmed up so a subsequent startup can
 # skip the redundant 1-step warmup if Forge is already running with the
 # right checkpoint hot in VRAM.
-_FORGE_WARMED_FILE = os.path.join(config.SERVER_DIR, ".forge_warmed")
+def _forge_warmed_file() -> str:
+    # Resolved on each call (not cached at import) so it tracks config.SERVER_DIR
+    # if that's ever monkeypatched, e.g. in tests.
+    return os.path.join(config.SERVER_DIR, ".forge_warmed")
 
 def _forge_warmed_timestamp() -> float:
     try:
-        with open(_FORGE_WARMED_FILE, "r", encoding="utf-8") as f:
+        with open(_forge_warmed_file(), "r", encoding="utf-8") as f:
             return float(f.read().strip())
     except (FileNotFoundError, ValueError):
         return 0.0
 
 def _record_forge_warmed() -> None:
     try:
-        with open(_FORGE_WARMED_FILE, "w", encoding="utf-8") as f:
+        with open(_forge_warmed_file(), "w", encoding="utf-8") as f:
             f.write(str(time.time()))
     except Exception:
         pass
 
 def _clear_forge_warmed() -> None:
     try:
-        os.remove(_FORGE_WARMED_FILE)
+        os.remove(_forge_warmed_file())
     except FileNotFoundError:
         pass
 

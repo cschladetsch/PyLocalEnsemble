@@ -190,7 +190,9 @@ def test_compress_memory_fallback_when_no_period(monkeypatch):
 def test_list_models_returns_size_gb(tmp_path, monkeypatch):
     """list_models must return (name, path, size_gb) triples."""
     fake = tmp_path / "test_model.gguf"
-    fake.write_bytes(b"x" * 4_400_000_000)
+    fake.touch()
+    import os
+    os.truncate(str(fake), 4_400_000_000)  # sparse file — avoids allocating 4.4GB in RAM
     monkeypatch.setitem(config.CFG, "model_path", str(fake))
     monkeypatch.setitem(config.CFG, "model_dir", "")
     result = llm.list_models()
@@ -204,7 +206,9 @@ def test_list_models_returns_size_gb(tmp_path, monkeypatch):
 def test_list_models_triple_format(tmp_path, monkeypatch):
     """Each element returned by list_models must be a 3-tuple (name, path, size_gb)."""
     fake = tmp_path / "x.gguf"
-    fake.write_bytes(b"x" * 1_000_000_000)
+    fake.touch()
+    import os
+    os.truncate(str(fake), 1_000_000_000)  # sparse file — avoids allocating 1GB in RAM
     monkeypatch.setitem(config.CFG, "model_path", str(fake))
     monkeypatch.setitem(config.CFG, "model_dir", "")
     for entry in llm.list_models():
