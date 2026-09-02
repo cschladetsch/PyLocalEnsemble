@@ -1,4 +1,4 @@
-import sys, time
+import sys, time, subprocess
 import requests as req
 
 _C = {
@@ -29,6 +29,19 @@ def http_ok(url, timeout=2):
         return True
     except Exception:
         return False
+
+
+def vram_free_mb() -> int:
+    """Return free VRAM in MB via nvidia-smi, or -1 if unavailable (e.g. no NVIDIA GPU)."""
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            return int(r.stdout.strip().splitlines()[0])
+    except Exception:
+        pass
+    return -1
 
 
 def wait_for(url, label, retries=60, delay=2):

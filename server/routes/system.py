@@ -206,6 +206,25 @@ async def get_negative():
     return JSONResponse({"negative": state.BASE_NEGATIVE})
 
 
+@router.post("/vram/yield-for-image")
+async def yield_for_image():
+    """Called by the standalone sd_app to reclaim VRAM before it generates.
+
+    Alice and sd_app are separate processes now, so sd_app can't call
+    vram.acquire_for_image() directly — it asks over HTTP instead.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, llm.suspend_for_image)
+    return JSONResponse({"status": "suspended"})
+
+
+@router.post("/vram/resume-after-image")
+async def resume_after_image_route():
+    """Called by sd_app once it's done generating, so Alice's LLM reloads."""
+    llm.resume_after_image()
+    return JSONResponse({"status": "resuming"})
+
+
 @router.post("/auto-image")
 async def toggle_auto_image():
     img_cfg = config.CFG.setdefault("image", {})

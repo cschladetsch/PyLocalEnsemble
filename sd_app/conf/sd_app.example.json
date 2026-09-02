@@ -3,6 +3,7 @@
 
     "port": 8010,
     "forge_url": "http://localhost:7860",
+    "alice_url": "http://localhost:8000",
     "forge_venv_dir": "",
     "forge_args": "",
     "sd_checkpoint": "",

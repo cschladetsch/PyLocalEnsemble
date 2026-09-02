@@ -13,6 +13,11 @@ FORGE_BAT = os.path.join(FORGE_DIR, "webui.ps1" if os.name == "nt" else "webui.s
 _DEFAULT_CONFIG = {
     "port":            8010,
     "forge_url":       "http://localhost:7860",
+    # Alice's own server — sd_app asks it to yield VRAM before generating,
+    # since the two now run as independent processes that can't otherwise
+    # coordinate GPU memory on a single 8GB card. Leave blank to disable
+    # (sd_app will still generate, but may fail if Alice's LLM is loaded).
+    "alice_url":       "http://localhost:8000",
     "forge_venv_dir":  "",
     "forge_args":      "",
     "sd_checkpoint":   "",

@@ -9,6 +9,8 @@ import requests as req
 import config
 from utils import step, ok, warn, http_ok, wait_for
 
+_checkpoint_loaded = True   # assume loaded at Forge startup; unload_checkpoint() sets False
+
 
 # _find_forge_python mirrors server/image/forge.py and server/installer/forge_install.py
 def _find_forge_python() -> str:
@@ -116,6 +118,48 @@ def set_forge_model(name: str, refresh: bool = False) -> bool:
     except Exception as e:
         warn(f"Could not set Forge model: {e}")
         return False
+
+
+def unload_checkpoint() -> bool:
+    """Evict Forge's checkpoint from VRAM so the LLM has room to reload.
+
+    Alice's LLM is a separate process now, so unlike the old combined server
+    we can't rely on 'keep Forge hot' — on an 8GB card with a fully-offloaded
+    LLM, LLM + idle Forge still doesn't fit. Trades a reload-checkpoint cost
+    on the next generation for correctness.
+    """
+    global _checkpoint_loaded
+    forge_url = config.CFG["forge_url"]
+    if not _checkpoint_loaded:
+        return True
+    try:
+        r = req.post(f"{forge_url}/sdapi/v1/unload-checkpoint", timeout=15)
+        if r.status_code == 200:
+            _checkpoint_loaded = False
+            ok("Forge checkpoint evicted from VRAM.")
+            return True
+        warn(f"unload-checkpoint returned HTTP {r.status_code}.")
+    except Exception as e:
+        warn(f"unload-checkpoint failed: {e}")
+    return False
+
+
+def reload_checkpoint() -> bool:
+    global _checkpoint_loaded
+    forge_url = config.CFG["forge_url"]
+    if _checkpoint_loaded:
+        return True
+    try:
+        r = req.post(f"{forge_url}/sdapi/v1/reload-checkpoint", timeout=60)
+        if r.status_code == 200:
+            _checkpoint_loaded = True
+            ok("Forge checkpoint reloaded into VRAM.")
+            _push_forge_settings(forge_url)
+            return True
+        warn(f"reload-checkpoint returned HTTP {r.status_code}.")
+    except Exception as e:
+        warn(f"reload-checkpoint failed: {e}")
+    return False
 
 
 def restart_forge():

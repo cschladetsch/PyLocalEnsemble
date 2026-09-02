@@ -1,9 +1,10 @@
-"""Image generation via the Forge/SD API — standalone, no chat/LLM coupling.
+"""Image generation via the Forge/SD API — standalone, decoupled from chat.
 
 Ported from server/image/generate.py. Simplified relative to the original:
   - no `appearance` parameter (it was dead code there — never used in the body)
-  - no VRAM arbitration with an LLM (this runs as its own process; nothing
-    else is competing for GPU memory)
+  - VRAM arbitration with Alice's LLM happens over HTTP instead of in-process
+    (see _yield_alice_llm/_resume_alice_llm) — sd_app and Alice's server are
+    separate processes and both compete for the same 8GB card
   - no ADetailer-not-installed auto-install-retry (Forge installation is
     Alice's installer's job, out of scope here) — surfaces a clear error instead
 """
@@ -11,7 +12,8 @@ from __future__ import annotations
 import base64, itertools, json, os, threading, time
 import requests as req
 import config
-from utils import http_ok, _c
+from utils import http_ok, _c, vram_free_mb
+import forge
 from forge import start_forge
 
 _gen_cancel     = threading.Event()
@@ -42,6 +44,39 @@ def _resolve_upscaler(forge_url: str, preferred: str) -> str | None:
     print("[sd_app] no valid upscaler found — hires fix disabled")
     _upscaler_cache = ""
     return None
+
+
+def _yield_alice_llm() -> None:
+    """Ask Alice's server to free its LLM's VRAM before we generate.
+
+    Best-effort: if Alice isn't running (alice_url unset or unreachable),
+    proceeds anyway — Forge will just fail loudly if VRAM is actually short.
+    """
+    alice_url = config.CFG.get("alice_url", "").strip()
+    if not alice_url:
+        return
+    try:
+        req.post(f"{alice_url}/vram/yield-for-image", timeout=15)
+    except Exception as e:
+        print(f"[sd_app] could not reach Alice at {alice_url} to yield VRAM: {e}")
+        return
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        free = vram_free_mb()
+        if free < 0 or free >= 3000:
+            return
+        time.sleep(0.5)
+    print("[sd_app] VRAM reclaim timeout — proceeding anyway")
+
+
+def _resume_alice_llm() -> None:
+    alice_url = config.CFG.get("alice_url", "").strip()
+    if not alice_url:
+        return
+    try:
+        req.post(f"{alice_url}/vram/resume-after-image", timeout=5)
+    except Exception:
+        pass  # Alice not running — nothing to resume
 
 
 def image_output_dir() -> str:
@@ -75,6 +110,19 @@ def generate_image(prompt: str, negative_base: str, extra_negative: str = "",
                 f"Forge is unavailable at {forge_url}. Start Stable Diffusion Forge or update forge_url in sd_app.json."
             )
 
+    _yield_alice_llm()
+    forge.reload_checkpoint()
+    try:
+        return _do_generate(forge_url, img_cfg, prompt, negative_base, extra_negative,
+                             steps, cfg_scale, seed, width, height)
+    finally:
+        forge.unload_checkpoint()
+        _resume_alice_llm()
+
+
+def _do_generate(forge_url, img_cfg, prompt: str, negative_base: str, extra_negative: str,
+                  steps, cfg_scale, seed, width, height):
+    global last_seed
     negative = (extra_negative + ", " + negative_base) if extra_negative else negative_base
 
     _steps   = steps if steps is not None else img_cfg["steps"]
