@@ -368,6 +368,17 @@ if __name__ == "__main__":
         except RuntimeError as exc:
             print(f"\n[{config.NAME}] Preflight failed: {exc}")
 
+        # Launch the standalone SD console (sd_app/) only after our own Forge
+        # startup has settled — sd_app's start_forge() sees Forge already
+        # running and skips launching its own, avoiding a duplicate Forge
+        # console spawning from both processes racing to start it. Best-effort:
+        # non-fatal if sd_app is already running or its port is taken.
+        try:
+            subprocess.Popen([sys.executable, os.path.join(_ROOT_DIR, "sd_app", "app.py")],
+                              cwd=os.path.join(_ROOT_DIR, "sd_app"))
+        except Exception as e:
+            print(f"[{config.NAME}] Could not launch sd_app: {e}")
+
     threading.Thread(target=_run_startup, daemon=True, name="startup").start()
 
     if _PERSONA_ARG and not TEST_MODE:
@@ -434,14 +445,6 @@ if __name__ == "__main__":
         threading.Thread(target=_open, daemon=True).start()
     else:
         print("        NOTE: Non-interactive session detected; not opening browser.")
-
-    # Best-effort launch of the standalone SD console (sd_app/) as its own process.
-    # Non-fatal — e.g. it may already be running, or the port may be taken.
-    try:
-        subprocess.Popen([sys.executable, os.path.join(_ROOT_DIR, "sd_app", "app.py")],
-                          cwd=os.path.join(_ROOT_DIR, "sd_app"))
-    except Exception as e:
-        print(f"[{config.NAME}] Could not launch sd_app: {e}")
 
     try:
         uvicorn.run(app, host=HOST, port=PORT, log_config=_LOG_CONFIG)
