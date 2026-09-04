@@ -99,9 +99,31 @@ async def switch_persona_pack(body: PackSwitchRequest):
 
 @router.get("/models")
 async def list_models():
-    models  = [{"name": n, "path": p, "size_gb": s} for n, p, s in llm.list_models()]
-    current = llm.llm_model()
-    return JSONResponse({"models": models, "current": current})
+    llm_models  = [{"name": n, "path": p, "size_gb": s} for n, p, s in llm.list_models()]
+    llm_current = llm.llm_model()
+
+    forge_url = config.CFG.get("forge_url", "")
+    try:
+        r = req.get(f"{forge_url}/sdapi/v1/sd-models", timeout=5)
+        sd_models = [{"title": m["title"], "name": m.get("model_name", m["title"])}
+                     for m in r.json()]
+        opts = req.get(f"{forge_url}/sdapi/v1/options", timeout=5).json()
+        sd_current = opts.get("sd_model_checkpoint", "")
+    except Exception:
+        sd_models  = []
+        sd_current = config.CFG.get("sd_checkpoint", "")
+
+    import tts
+    tts_current = config.CFG.get("tts", {}).get("voice", "af_nicole")
+
+    return JSONResponse({
+        "llm": {"models": llm_models, "current": llm_current},
+        "sd":  {"models": sd_models, "current": sd_current},
+        "tts": {"voices": tts.VOICES, "current": tts_current},
+        # legacy top-level fields for existing callers of GET /models
+        "models":  llm_models,
+        "current": llm_current,
+    })
 
 
 @router.post("/model")

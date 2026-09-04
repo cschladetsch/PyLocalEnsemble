@@ -1,0 +1,3 @@
+[submodule "external/CppLocalLlmCodeAssist"]
+	path = external/CppLocalLlmCodeAssist
+	url = https://github.com/cschladetsch/CppLocalLlmCodeAssist
