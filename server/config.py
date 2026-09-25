@@ -66,6 +66,13 @@ _DEFAULT_CONFIG = {
         "auto_pin_seed":  True,
         "adetailer_face": True,
     },
+    "video": {
+        "frames":     24,     # frame count for a default clip
+        "max_frames": 120,    # hard cap so a stray request can't run for hours
+        "fps":        8,
+        "steps":      20,     # per-frame steps; kept lower than stills since it multiplies by frame count
+        "denoise":    0.35,   # img2img denoising strength between chained frames
+    },
     "demo": {
         "user_name":    "User",
         "user_voice":   "am_adam",
@@ -127,7 +134,7 @@ def load_config() -> dict:
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             merged = {**_DEFAULT_CONFIG, **data}
-            for key in ("image", "tts", "llama_server", "memory", "llm_params", "demo"):
+            for key in ("image", "video", "tts", "llama_server", "memory", "llm_params", "demo"):
                 merged[key] = {**_DEFAULT_CONFIG[key], **data.get(key, {})}
             for key in ("banned_phrases",):
                 merged[key] = list(_DEFAULT_CONFIG.get(key, [])) + list(data.get(key, []))

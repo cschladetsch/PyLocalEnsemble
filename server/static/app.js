@@ -60,6 +60,10 @@ function removeImgHistoryItem(index) {
   renderHistory();
 }
 
+function _isVideoUrl(url) {
+  return /\.mp4(\?|$)/i.test(url || '');
+}
+
 function renderHistory() {
   const container = document.getElementById('is');
   if (!container) return;
@@ -67,7 +71,11 @@ function renderHistory() {
     const ts    = item.ts ? new Date(item.ts).toLocaleString() : '';
     const who   = item.group ? item.group.join(', ') : item.persona;
     const tip   = [who, ts, item.prompt].filter(Boolean).join('\n').replace(/"/g, '&quot;');
-    return `<img src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${i===0?'active':''}" onerror="removeImgHistoryItem(${i})">`;
+    const cls   = i === 0 ? 'active' : '';
+    if (_isVideoUrl(item.url)) {
+      return `<video src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${cls}" muted onerror="removeImgHistoryItem(${i})"></video>`;
+    }
+    return `<img src="${item.url}" onclick="showHistImg(${i})" title="${tip}" class="${cls}" onerror="removeImgHistoryItem(${i})">`;
   }).join('');
 }
 
@@ -77,7 +85,9 @@ async function showHistImg(index) {
   document.querySelectorAll('.is img').forEach((img, i) => {
     img.classList.toggle('active', i === index);
   });
-  document.getElementById('ic').innerHTML = `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
+  document.getElementById('ic').innerHTML = _isVideoUrl(item.url)
+    ? `<video src="${item.url}" class="final" controls autoplay loop muted playsinline></video>`
+    : `<img src="${item.url}" class="final" onclick="openFullscreen(this.src)" title="Click to fullscreen">`;
   setPrompt(item.prompt);
   if (item.group) {
     // Group image — enter group mode if not already, then select the saved personas
@@ -251,11 +261,13 @@ async function interrupt(reason) {
     _imgGenId++;  // invalidate any pending isForeground() from the aborted request
   }
   stopProgress();
+  stopVideoProgress();
   enableAll();
   // Only tell the server to cancel Forge if something was actually running.
   // Calling /interrupt unnecessarily sets _gen_cancel and kills the next gen.
   if (hadImgInFlight) {
     await fetch('/interrupt', { method: 'POST' }).catch(() => {});
+    await fetch('/video-interrupt', { method: 'POST' }).catch(() => {});
   }
 }
 
@@ -398,6 +410,88 @@ async function triggerMedia(extra = '', auto = false) {
   }
   if (isForeground()) {
     stopProgress();
+    imgAbort = null;
+    enableAll();
+    document.getElementById('inp').focus();
+  }
+}
+
+let videoProgressTimer = null;
+function stopVideoProgress() {
+  if (videoProgressTimer) { clearInterval(videoProgressTimer); videoProgressTimer = null; }
+}
+
+// Literal text-to-video, triggered by typing "/video <description>". Unlike
+// triggerMedia()/'image', this never touches conversation context — the
+// description you type is exactly the prompt sent to Forge.
+async function triggerVideo(prompt) {
+  prompt = (prompt || '').trim();
+  if (!prompt) return;
+  await interrupt('new media request');
+  const myAbort = new AbortController();
+  imgAbort = myAbort;
+  const myGenId = ++_imgGenId;
+  const isForeground = () => _imgGenId === myGenId;
+
+  disableAll();
+  addMsg('user', 'You', `/video ${prompt}`);
+
+  if (isForeground()) {
+    document.getElementById('ih').textContent = 'Generated Video';
+    document.getElementById('ic').innerHTML =
+      '<div id="img-progress-wrap" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center">' +
+        '<div style="display:flex;flex-direction:column;align-items:center;gap:.4rem">' +
+          '<div class="ph gen" id="video-status" style="margin:0">Rendering frame 0…</div>' +
+          '<div class="img-progress-track" style="width:60%"><div class="img-progress-fill" id="video-pb"></div></div>' +
+        '</div>' +
+      '</div>';
+    document.getElementById('pd-wrap').style.display = 'none';
+    document.getElementById('pd').value = '';
+  }
+
+  videoProgressTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/video-progress');
+      const d = await r.json();
+      const total = d.total || 0;
+      const pct = total > 0 ? Math.round((d.frame / total) * 100) : 0;
+      const fill = document.getElementById('video-pb');
+      const status = document.getElementById('video-status');
+      if (fill) fill.style.width = pct + '%';
+      if (status) status.textContent = `Rendering frame ${d.frame}/${total}…`;
+    } catch {}
+  }, 700);
+
+  try {
+    const res = await fetch('/video-generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+      signal: myAbort.signal,
+    });
+    const d = await res.json();
+    if (d.url) {
+      saveImg(d.url, prompt);
+      if (isForeground()) {
+        stopVideoProgress();
+        document.getElementById('ic').innerHTML =
+          `<video src="${d.url}" class="final" controls autoplay loop muted playsinline></video>`;
+      }
+    } else if (isForeground()) {
+      stopVideoProgress();
+      document.getElementById('ic').innerHTML = d.error
+        ? `<div class="ph">${d.error}</div>`
+        : '<div class="ph">No video generated.</div>';
+    }
+  } catch (e) {
+    if (isForeground()) {
+      stopVideoProgress();
+      console.error('Video error:', e);
+      document.getElementById('ic').innerHTML = `<div class="ph">Video error: ${e.message || 'Unknown error'}. Check console.</div>`;
+    }
+  }
+  if (isForeground()) {
+    stopVideoProgress();
     imgAbort = null;
     enableAll();
     document.getElementById('inp').focus();
@@ -799,6 +893,7 @@ async function send() {
   inp.value = '';
   if (msg === '/export') { exportHistory(); return; }
   if (msg.startsWith('/image')) { await interrupt('new media request'); triggerMedia(msg.slice(6).trim()); return; }
+  if (msg.startsWith('/video')) { triggerVideo(msg.slice(6).trim()); return; }
   if (msg === '/auto-image') {
     const inp2 = document.getElementById('inp');
     if (_groupMode) {

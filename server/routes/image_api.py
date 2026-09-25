@@ -7,10 +7,13 @@ from pydantic import BaseModel
 import config
 import llm
 import image
+from image import video as video_mod
 import state
 from utils import _c
 
 router = APIRouter()
+
+_video_progress = {"frame": 0, "total": 0}
 
 
 # ── Group scene helpers ────────────────────────────────────────────────────────
@@ -410,6 +413,62 @@ async def generate_raw(body: GenerateRequest):
     if url:
         return JSONResponse({"url": url})
     return JSONResponse({"error": "No image generated."}, status_code=500)
+
+
+class VideoRequest(BaseModel):
+    prompt:  str
+    frames:  int   = None
+    fps:     int   = None
+    steps:   int   = None
+    denoise: float = None
+    width:   int   = None
+    height:  int   = None
+    seed:    int   = -1
+
+
+@router.post("/video-generate")
+async def video_generate(body: VideoRequest):
+    """Literal text-to-video — same contract as /generate: the prompt is used
+    verbatim, with no roleplay-context extraction or appearance injection."""
+    if not body.prompt.strip():
+        return JSONResponse({"error": "Describe the video first."}, status_code=400)
+
+    loop = asyncio.get_running_loop()
+    frames = body.frames if body.frames is not None else config.CFG["video"]["frames"]
+    _video_progress["frame"] = 0
+    _video_progress["total"] = frames
+
+    def _on_progress(i, total):
+        _video_progress["frame"] = i
+        _video_progress["total"] = total
+
+    def _regen():
+        video_mod._gen_cancel.clear()
+        return image.generate_video(
+            body.prompt, state.BASE_NEGATIVE,
+            frames=body.frames, fps=body.fps, steps=body.steps,
+            denoise=body.denoise, width=body.width, height=body.height,
+            seed=body.seed, on_progress=_on_progress,
+        )
+
+    try:
+        url = await loop.run_in_executor(None, _regen)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if url:
+        return JSONResponse({"url": url})
+    return JSONResponse({"error": "No video generated."}, status_code=500)
+
+
+@router.get("/video-progress")
+async def video_progress():
+    return JSONResponse(_video_progress)
+
+
+@router.post("/video-interrupt")
+async def video_interrupt():
+    video_mod.interrupt()
+    return {"status": "interrupted"}
 
 
 @router.get("/sd-models")
