@@ -106,3 +106,79 @@ async function generateSD() {
   btn.textContent = 'Generate';
   document.getElementById('sd-progress').style.display = 'none';
 }
+
+// ── Video generation ─────────────────────────────────────────────────────
+let sdVideoAbort = null;
+
+async function generateSDVideo() {
+  const prompt = document.getElementById('sd-video-prompt').value.trim();
+  if (!prompt) return;
+  if (sdVideoAbort) { sdVideoAbort.abort(); }
+  sdVideoAbort = new AbortController();
+
+  const frames  = parseInt(document.getElementById('sd-video-frames').value) || 24;
+  const fps     = parseInt(document.getElementById('sd-video-fps').value) || 8;
+  const steps   = parseInt(document.getElementById('sd-video-steps').value) || 20;
+  const denoise = parseFloat(document.getElementById('sd-video-denoise').value) || 0.35;
+  const width   = parseInt(document.getElementById('sd-width').value) || 512;
+  const height  = parseInt(document.getElementById('sd-height').value) || 512;
+  const seed    = parseInt(document.getElementById('sd-seed').value) || -1;
+
+  const btn = document.getElementById('sd-video-gen-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+
+  document.getElementById('sd-video-progress').style.display = 'block';
+  document.getElementById('sd-video-status-text').textContent = 'Rendering frame 0…';
+  document.getElementById('ic').innerHTML = '<div class="ph">Generating video…</div>';
+
+  let progressTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/sd-video-progress');
+      const d = await r.json();
+      const total = d.total || frames;
+      const pct = total > 0 ? Math.round((d.frame / total) * 100) : 0;
+      const fill = document.getElementById('sd-video-progress-fill');
+      const status = document.getElementById('sd-video-status-text');
+      if (fill) fill.style.width = pct + '%';
+      if (status) status.textContent = `Rendering frame ${d.frame}/${total}…`;
+    } catch {}
+  }, 700);
+
+  try {
+    const res = await fetch('/sd-generate-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, frames, fps, steps, denoise, width, height, seed }),
+      signal: sdVideoAbort.signal,
+    });
+    const d = await res.json();
+
+    if (d.url) {
+      document.getElementById('ic').innerHTML =
+        `<video src="${d.url}" class="final" autoplay loop muted playsinline style="max-width:100%;max-height:100%;object-fit:contain"></video>`;
+      document.getElementById('sd-video-prompt').value = '';
+      const msgs = document.getElementById('msgs');
+      if (msgs) {
+        const d2 = document.createElement('div');
+        d2.className = 'msg alice';
+        d2.innerHTML = `<div class="sndr">Alice</div>Generated video: ${prompt.slice(0, 60)}…`;
+        msgs.appendChild(d2);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+    } else {
+      document.getElementById('ic').innerHTML =
+        `<div class="ph" style="color:#c08080">${d.error || 'Video generation failed'}</div>`;
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      document.getElementById('ic').innerHTML =
+        `<div class="ph" style="color:#c08080">Error: ${e.message}</div>`;
+    }
+  }
+
+  clearInterval(progressTimer);
+  btn.disabled = false;
+  btn.textContent = 'Generate video';
+  document.getElementById('sd-video-progress').style.display = 'none';
+}

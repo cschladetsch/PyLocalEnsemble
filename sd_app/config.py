@@ -39,6 +39,13 @@ _DEFAULT_CONFIG = {
         "hires_denoising": 0.45,
         "hires_upscaler":  "Latent",
     },
+    "video": {
+        "frames":     24,     # frame count for a default clip
+        "max_frames": 120,    # hard cap so a stray request can't run for hours
+        "fps":        8,
+        "steps":      20,     # per-frame steps; kept lower than stills since it multiplies by frame count
+        "denoise":    0.35,   # img2img denoising strength between chained frames
+    },
 }
 
 

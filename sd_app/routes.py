@@ -6,9 +6,12 @@ from pydantic import BaseModel
 
 import config
 import generate
+import video
 from utils import http_ok
 
 router = APIRouter()
+
+_video_progress = {"frame": 0, "total": 0}
 
 
 @router.get("/sd-info")
@@ -42,6 +45,55 @@ async def sd_generate(body: dict):
     if url:
         return JSONResponse({"url": url, "seed": generate.last_seed})
     return JSONResponse({"error": "No image generated."}, status_code=500)
+
+
+@router.post("/sd-generate-video")
+async def sd_generate_video(body: dict):
+    """Text-to-video — describe a clip, get back a stitched mp4."""
+    loop = asyncio.get_running_loop()
+    prompt  = body.get("prompt", "")
+    frames  = int(body.get("frames", config.CFG["video"]["frames"]))
+    fps     = int(body.get("fps", config.CFG["video"]["fps"]))
+    steps   = int(body.get("steps", config.CFG["video"]["steps"]))
+    width   = int(body.get("width", config.CFG["image"]["width"]))
+    height  = int(body.get("height", config.CFG["image"]["height"]))
+    seed    = int(body.get("seed", -1))
+    denoise = float(body.get("denoise", config.CFG["video"]["denoise"]))
+
+    if not prompt.strip():
+        return JSONResponse({"error": "Describe the video first."}, status_code=400)
+
+    _video_progress["frame"] = 0
+    _video_progress["total"] = frames
+
+    def _on_progress(i, total):
+        _video_progress["frame"] = i
+        _video_progress["total"] = total
+
+    def _regen():
+        return video.generate_video(
+            prompt, config.CFG["negative_prompt"],
+            frames=frames, fps=fps, steps=steps, cfg_scale=7.0,
+            width=width, height=height, seed=seed, denoise=denoise,
+            on_progress=_on_progress,
+        )
+
+    try:
+        url = await loop.run_in_executor(None, _regen)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"url": url, "frames": frames, "fps": fps})
+
+
+@router.get("/sd-video-progress")
+async def sd_video_progress():
+    return JSONResponse(_video_progress)
+
+
+@router.post("/sd-video-interrupt")
+async def sd_video_interrupt():
+    video.interrupt()
+    return {"status": "interrupted"}
 
 
 @router.get("/sd-models")
