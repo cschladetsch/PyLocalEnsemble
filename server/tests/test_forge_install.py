@@ -64,6 +64,11 @@ def test_venv_check_skips_path_prepend_when_python_not_found(tmp_path, monkeypat
     monkeypatch.setattr(fi, "_find_forge_python", lambda: "")
     monkeypatch.setattr(fi, "install_adetailer", lambda: None)
     monkeypatch.setattr(fi, "_download", lambda *a, **k: None)
+    # _make_forge_dir() lays out a Windows-style venv (venv/Scripts/python.exe);
+    # install_forge() only looks there when os.name == "nt", so force that here
+    # too (matches test_venv_check_prepends_forge_python_dir_to_path above),
+    # otherwise the venv-version-check block — and subprocess.run — never runs.
+    monkeypatch.setattr(os, "name", "nt", raising=False)
 
     captured = {}
 

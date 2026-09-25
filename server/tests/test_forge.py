@@ -1,6 +1,7 @@
 """Tests for image/forge.py: Forge process lifecycle and model selection."""
 
 import os
+import subprocess
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, call
 
@@ -314,6 +315,12 @@ def test_start_forge_warns_when_launcher_missing(tmp_path, monkeypatch, capsys):
 
 def test_start_forge_appends_port_to_args(tmp_path, monkeypatch):
     """--port is appended to forge_args if not already present."""
+    launchers_dir = tmp_path / "stable-diffusion-webui-forge"
+    launchers_dir.mkdir(parents=True)
+    (launchers_dir / "webui-user.bat").write_text("echo fake launcher")
+
+    monkeypatch.setattr(config, "FORGE_DIR", str(launchers_dir))
+    monkeypatch.setattr(config, "FORGE_BAT", str(launchers_dir / "webui-user.bat"))
     monkeypatch.setattr(config, "CFG", {
         "forge_url": "http://localhost:7860",
         "forge_args": "--api --xformers",
@@ -335,6 +342,12 @@ def test_start_forge_appends_port_to_args(tmp_path, monkeypatch):
 
 def test_start_forge_does_not_duplicate_port(tmp_path, monkeypatch):
     """If --port is already in forge_args, it is not duplicated."""
+    launchers_dir = tmp_path / "stable-diffusion-webui-forge"
+    launchers_dir.mkdir(parents=True)
+    (launchers_dir / "webui-user.bat").write_text("echo fake launcher")
+
+    monkeypatch.setattr(config, "FORGE_DIR", str(launchers_dir))
+    monkeypatch.setattr(config, "FORGE_BAT", str(launchers_dir / "webui-user.bat"))
     monkeypatch.setattr(config, "CFG", {
         "forge_url": "http://localhost:7860",
         "forge_args": "--api --port 8080",
@@ -357,6 +370,12 @@ def test_start_forge_does_not_duplicate_port(tmp_path, monkeypatch):
 
 def test_start_forge_ensures_api_flag(tmp_path, monkeypatch):
     """--api is always present in the final CLI args even if missing from forge_args."""
+    launchers_dir = tmp_path / "stable-diffusion-webui-forge"
+    launchers_dir.mkdir(parents=True)
+    (launchers_dir / "webui-user.bat").write_text("echo fake launcher")
+
+    monkeypatch.setattr(config, "FORGE_DIR", str(launchers_dir))
+    monkeypatch.setattr(config, "FORGE_BAT", str(launchers_dir / "webui-user.bat"))
     monkeypatch.setattr(config, "CFG", {
         "forge_url": "http://localhost:7860",
         "forge_args": "--xformers",
@@ -395,6 +414,10 @@ def test_start_forge_prepends_forge_python_dir_to_path(tmp_path, monkeypatch):
     fake_python = os.path.join(fake_python_dir, "python.exe")
     monkeypatch.setattr(forge, "_find_forge_python", lambda: fake_python)
     monkeypatch.setattr(os, "name", "nt", raising=False)
+    # subprocess.CREATE_NEW_CONSOLE only exists on a real Windows Python build;
+    # patching os.name alone doesn't add it, so start_forge()'s "if os.name ==
+    # 'nt'" branch would otherwise crash with AttributeError on other platforms.
+    monkeypatch.setattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010, raising=False)
 
     with patch("image.forge.http_ok", return_value=False), \
          patch("image.forge.wait_for", return_value=True), \
