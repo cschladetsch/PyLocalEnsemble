@@ -149,14 +149,14 @@ class _GPUResource:
         try:
             return bool(self._load_fn())
         except Exception as e:
-            warn(f"[orch] {self.name}.load() raised: {e}")
+            warn(f"[Torch] {self.name}.load() raised: {e}")
             return False
 
     def unload(self) -> bool:
         try:
             return bool(self._unload_fn())
         except Exception as e:
-            warn(f"[orch] {self.name}.unload() raised: {e}")
+            warn(f"[Torch] {self.name}.unload() raised: {e}")
             return False
 
     def interrupt(self) -> None:
@@ -164,7 +164,7 @@ class _GPUResource:
             try:
                 self._interrupt_fn()
             except Exception as e:
-                warn(f"[orch] {self.name}.interrupt() raised: {e}")
+                warn(f"[Torch] {self.name}.interrupt() raised: {e}")
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ class ResourceOrchestrator:
             ram_crossed_warn = res.ram_pct >= self.RAM_WARN_PCT > prev.ram_pct
             ram_critical     = res.ram_pct >= self.RAM_CRITICAL_PCT
             if ram_crossed_warn or ram_critical:
-                print(f"[orch] {res.summary()}")
+                print(f"[Torch] {res.summary()}")
 
             # Proactive eviction disabled: the acquire() path handles eviction
             # on demand and the LLM needs to stay resident between image gens.
@@ -243,7 +243,7 @@ class ResourceOrchestrator:
         """Sample and print current resources."""
         res = sample_resources()
         self._last_res = res
-        prefix = f"[orch] {label}" if label else "[orch]"
+        prefix = f"[Torch] {label}" if label else "[Torch]"
         print(f"{prefix}  {res.summary()}")
 
     def wait_for_ram(self, timeout: float = 20.0) -> bool:
@@ -255,13 +255,13 @@ class ResourceOrchestrator:
             if res.ram_pct < 0 or res.ram_pct <= self.RAM_GATE_PCT:
                 return True
             remaining = deadline - time.time()
-            print(f"[orch] RAM {res.ram_pct:.0f}% — waiting for ≤{self.RAM_GATE_PCT}%  "
+            print(f"[Torch] RAM {res.ram_pct:.0f}% — waiting for ≤{self.RAM_GATE_PCT}%  "
                   f"({remaining:.0f}s left)  {res.summary()}")
             time.sleep(2.0)
         res = sample_resources()
         self._last_res = res
         if res.ram_pct > self.RAM_GATE_PCT:
-            warn(f"[orch] RAM still {res.ram_pct:.0f}% after {timeout:.0f}s — proceeding")
+            warn(f"[Torch] RAM still {res.ram_pct:.0f}% after {timeout:.0f}s — proceeding")
             return False
         return True
 
@@ -279,7 +279,7 @@ class ResourceOrchestrator:
         for n, p in to_evict:
             r = self._resources.get(n)
             if r:
-                print(f"[orch] evicting '{n}' (priority {p}) for '{name}' (priority {priority})")
+                print(f"[Torch] evicting '{n}' (priority {p}) for '{name}' (priority {priority})")
                 r.interrupt()
                 r.unload()
 
@@ -290,7 +290,7 @@ class ResourceOrchestrator:
         if r:
             r.load()
 
-        print(f"[orch] '{name}' acquired  priority={priority}  active={self._snapshot()}")
+        print(f"[Torch] '{name}' acquired  priority={priority}  active={self._snapshot()}")
 
     # ── Release ───────────────────────────────────────────────────────────────
 
@@ -307,7 +307,7 @@ class ResourceOrchestrator:
                 self._holders[self._default] = self._default_priority
                 reload_default = True
 
-        print(f"[orch] '{name}' released  active={self._snapshot()}")
+        print(f"[Torch] '{name}' released  active={self._snapshot()}")
 
         if reload_default:
             self._reload_default_async(priority=self._default_priority)
@@ -343,7 +343,7 @@ class ResourceOrchestrator:
             return
 
         def _run():
-            print(f"[orch] GPU idle — reloading default '{self._default}'")
+            print(f"[Torch] GPU idle — reloading default '{self._default}'")
             success = r.load()
             if not success:
                 with self._lock:
@@ -394,9 +394,9 @@ def _wait_vram_free(needed_mb: int = 4000, timeout: float = 15.0) -> None:
         if res.vram_total == 0 or res.vram_free >= needed_mb:
             return
         remaining = deadline - time.monotonic()
-        print(f"[orch] waiting for VRAM reclaim: {res.vram_free}MB free, need {needed_mb}MB  ({remaining:.0f}s left)")
+        print(f"[Torch] waiting for VRAM reclaim: {res.vram_free}MB free, need {needed_mb}MB  ({remaining:.0f}s left)")
         time.sleep(0.5)
-    print(f"[orch] VRAM reclaim timeout after {timeout:.0f}s — proceeding anyway")
+    print(f"[Torch] VRAM reclaim timeout after {timeout:.0f}s — proceeding anyway")
 
 
 def _llm_load() -> bool:
@@ -406,7 +406,7 @@ def _llm_load() -> bool:
     # Evict Forge checkpoint first so the LLM gets full VRAM.
     # (Forge is kept hot after image gen; we only free it here when LLM actually needs to load.)
     if _forge_loaded:
-        print("[orch] evicting Forge before LLM load (lazy evict after keep-hot)")
+        print("[Torch] evicting Forge before LLM load (lazy evict after keep-hot)")
         _forge_unload()
         _wait_vram_free()
     if _llm.LLM_SUSPENDED:
@@ -432,21 +432,21 @@ def _forge_load() -> bool:
     if not _forge_url or _forge_loaded:
         return True
     try:
-        step("[orch] Reloading Forge checkpoint into VRAM...")
+        step("[Torch] Reloading Forge checkpoint into VRAM...")
         r = req.post(f"{_forge_url}/sdapi/v1/reload-checkpoint", timeout=60)
         if r.status_code == 200:
             _forge_loaded = True
-            ok("[orch] Forge model in VRAM.")
+            ok("[Torch] Forge model in VRAM.")
             from image.forge import _push_forge_settings
             _push_forge_settings(_forge_url)
             return True
         if r.status_code == 404:
-            warn("[orch] reload-checkpoint not supported — skipping.")
+            warn("[Torch] reload-checkpoint not supported — skipping.")
         else:
-            warn(f"[orch] reload-checkpoint returned HTTP {r.status_code}.")
+            warn(f"[Torch] reload-checkpoint returned HTTP {r.status_code}.")
         return False
     except Exception as e:
-        warn(f"[orch] reload-checkpoint failed: {e}")
+        warn(f"[Torch] reload-checkpoint failed: {e}")
         return False
 
 
@@ -458,15 +458,15 @@ def _forge_unload() -> bool:
         r = req.post(f"{_forge_url}/sdapi/v1/unload-checkpoint", timeout=15)
         if r.status_code == 200:
             _forge_loaded = False
-            print("[orch] Forge checkpoint evicted from VRAM.")
+            print("[Torch] Forge checkpoint evicted from VRAM.")
             return True
         if r.status_code == 404:
-            warn("[orch] unload-checkpoint not supported.")
+            warn("[Torch] unload-checkpoint not supported.")
         else:
-            warn(f"[orch] unload-checkpoint returned HTTP {r.status_code}.")
+            warn(f"[Torch] unload-checkpoint returned HTTP {r.status_code}.")
         return False
     except Exception as e:
-        warn(f"[orch] unload-checkpoint failed: {e}")
+        warn(f"[Torch] unload-checkpoint failed: {e}")
         return False
 
 
@@ -475,7 +475,7 @@ def _forge_interrupt() -> None:
         return
     try:
         req.post(f"{_forge_url}/sdapi/v1/interrupt", timeout=5)
-        print("[orch] Forge generation interrupted.")
+        print("[Torch] Forge generation interrupted.")
     except Exception:
         pass
 
@@ -515,6 +515,6 @@ def release_from_image() -> None:
         )
         if reload_default:
             _orch._holders[_orch._default] = _orch._default_priority
-    print(f"[orch] 'forge' released (checkpoint kept in VRAM)  active={_orch._snapshot()}")
+    print(f"[Torch] 'forge' released (checkpoint kept in VRAM)  active={_orch._snapshot()}")
     if reload_default:
         _orch._reload_default_async(priority=_orch._default_priority)

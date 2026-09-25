@@ -343,11 +343,41 @@ def _kill_listener(host: str, port: int) -> bool:
     return False
 
 
+_ALICE_BANNER_LETTERS = {
+    "A": [" ██  ", "█  █ ", "█████", "█  █ ", "█  █ "],
+    "L": ["█    ", "█    ", "█    ", "█    ", "█████"],
+    "I": ["███", " █ ", " █ ", " █ ", "███"],
+    "C": [" ████", "█    ", "█    ", "█    ", " ████"],
+    "E": ["█████", "█    ", "████ ", "█    ", "█████"],
+}
+_ALICE_BANNER_COLORS = ["\033[96m", "\033[95m", "\033[94m", "\033[92m", "\033[93m"]
+
+
+def _print_banner(name: str) -> None:
+    """Print an ANSI block-letter banner for `name` when it's the default
+    "Alice" persona; any other configured name falls back to the plain
+    boxed banner (the block font only covers A/L/I/C/E)."""
+    letters = name.upper()
+    rows = None
+    if all(ch in _ALICE_BANNER_LETTERS for ch in letters):
+        rows = [_ALICE_BANNER_LETTERS[ch] for ch in letters]
+    if not rows:
+        print("=" * 60)
+        print(f"  {name}")
+        print("=" * 60)
+        return
+    reset = "\033[0m"
+    for row_idx in range(5):
+        line_parts = []
+        for letter_idx, letter_rows in enumerate(rows):
+            color = _ALICE_BANNER_COLORS[letter_idx % len(_ALICE_BANNER_COLORS)]
+            line_parts.append(f"{color}{letter_rows[row_idx]}{reset}")
+        print("  " + "  ".join(line_parts))
+
+
 if __name__ == "__main__":
     print()
-    print("=" * 60)
-    print(f"  {config.NAME}")
-    print("=" * 60)
+    _print_banner(config.NAME)
     print()
     print(f"[{config.NAME}] Starting server at {config.ALICE_URL}")
 

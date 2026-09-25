@@ -93,6 +93,10 @@ _DEFAULT_CONFIG = {
         "repeat_penalty":    1.25,
         "presence_penalty":  0.8,
         "frequency_penalty": 0.5,
+        # Some GGUFs emit these as literal generated text instead of hitting
+        # their real EOS token (e.g. leftover delimiters from fine-tuning
+        # data), which otherwise leaks straight through to the chat UI.
+        "stop": ["<|endoftext|>", "<|im_end|>", "<|im_start|>"],
     },
     "quick_image":       True,
     "vram_swap_for_image": True,
